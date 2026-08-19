@@ -1,0 +1,6 @@
+{
+  "name": "Splav86 — Исследуем Север там, куда не ведут дороги",
+  "description": "Исследуем Север там, куда не ведут дороги. Заброшенные объекты, тайга и маршруты по воде Югры и Ямала.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

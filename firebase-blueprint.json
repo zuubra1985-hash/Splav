@@ -1,0 +1,98 @@
+{
+  "entities": {
+    "Trip": {
+      "title": "Trip",
+      "description": "Shared water tourism trip / expedition with companion search and chat",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "riverName": { "type": "string", "maxLength": 150 },
+        "region": { "type": "string", "maxLength": 50 },
+        "startDate": { "type": "string", "maxLength": 50 },
+        "endDate": { "type": "string", "maxLength": 50 },
+        "durationDays": { "type": "number" },
+        "vesselType": { "type": "string", "maxLength": 50 },
+        "requiredVessels": { "type": "array" },
+        "difficulty": { "type": "string", "maxLength": 50 },
+        "estimatedBudgetPerPerson": { "type": "number" },
+        "totalSeats": { "type": "number" },
+        "takenSeats": { "type": "number" },
+        "creator": { "type": "object" },
+        "description": { "type": "string", "maxLength": 5000 },
+        "routeHighlights": { "type": "array" },
+        "startCoords": { "type": "object" },
+        "endCoords": { "type": "object" },
+        "meetingPoint": { "type": "string", "maxLength": 300 },
+        "chatMessages": { "type": "array" },
+        "participants": { "type": "array" },
+        "isArchived": { "type": "boolean" },
+        "archivedAt": { "type": "string", "maxLength": 100 },
+        "gpxTrack": { "type": "object" },
+        "linkedRouteId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "title", "riverName", "startDate", "durationDays"]
+    },
+    "Route": {
+      "title": "Route",
+      "description": "River passport, waterway description and GPS trace",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 200 },
+        "riverName": { "type": "string", "maxLength": 150 },
+        "riverBasin": { "type": "string", "maxLength": 150 },
+        "region": { "type": "string", "maxLength": 50 },
+        "fstrCategory": { "type": "string", "maxLength": 50 },
+        "intlClass": { "type": "string", "maxLength": 50 },
+        "lengthKm": { "type": "number" },
+        "durationDays": { "type": "number" },
+        "recommendedVessels": { "type": "array" },
+        "startPoint": { "type": "object" },
+        "endPoint": { "type": "object" },
+        "coordinates": { "type": "array" },
+        "description": { "type": "string", "maxLength": 5000 },
+        "shortDesc": { "type": "string", "maxLength": 1000 },
+        "highlights": { "type": "array" },
+        "warnings": { "type": "array" },
+        "pois": { "type": "array" },
+        "coverImage": { "type": "string", "maxLength": 1000 },
+        "mchsRegistrationRequired": { "type": "boolean" },
+        "kmnsPermitNeeded": { "type": "boolean" }
+      },
+      "required": ["id", "name", "riverName", "lengthKm", "coordinates"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Registered tourist / user profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "email": { "type": "string", "maxLength": 150 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "role": { "type": "string", "maxLength": 50 },
+        "city": { "type": "string", "maxLength": 150 },
+        "avatar": { "type": "string", "maxLength": 1000 },
+        "experienceLevel": { "type": "string", "maxLength": 100 },
+        "registeredAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "name", "email"]
+    }
+  },
+  "firestore": {
+    "/trips/{tripId}": {
+      "schema": { "$ref": "#/entities/Trip" },
+      "description": "Public water tourism trips and expeditions"
+    },
+    "/routes/{routeId}": {
+      "schema": { "$ref": "#/entities/Route" },
+      "description": "Community river passports and GPS tracks"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Tourist and admin user accounts"
+    }
+  }
+}
