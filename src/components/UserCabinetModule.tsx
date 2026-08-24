@@ -896,7 +896,16 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
       confirmVariant: 'danger',
       onConfirm: () => {
         recordRouteDeletion(id);
-        setRoutes((prev) => prev.filter((r) => r.id !== id));
+        setRoutes((prev) => {
+          const updated = prev.filter((r) => r.id !== id);
+          try {
+            localStorage.setItem('splav86_custom_routes_v5', JSON.stringify(updated));
+          } catch (e) {
+            console.error(e);
+          }
+          CloudSqlDbService.deleteRoute(id).catch(console.warn);
+          return updated;
+        });
         RoutesSyncService.removeRoute(id).catch((err) => {
           console.warn('Failed to remove route from Firestore:', err);
         });

@@ -334,7 +334,10 @@ export default function App() {
       const stored = localStorage.getItem('splav86_custom_routes_v5');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) {
+          const deleted = getDeletedRouteIds();
+          return parsed.filter((r) => !deleted.has(r.id));
+        }
       }
     } catch {}
     return [];
@@ -345,7 +348,10 @@ export default function App() {
       const stored = localStorage.getItem('splav86_custom_articles');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) {
+          const deleted = getDeletedArticleIds();
+          return parsed.filter((a) => !deleted.has(a.id));
+        }
       }
     } catch {}
     return [];
@@ -356,7 +362,10 @@ export default function App() {
       const stored = localStorage.getItem('splav86_custom_trips_v5');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) {
+          const deleted = getDeletedTripIds();
+          return parsed.filter((t) => !deleted.has(t.id));
+        }
       }
     } catch {}
     return [];
@@ -531,12 +540,26 @@ export default function App() {
     // 1. Initial SQL fetch and Subscribe to Trips (Real-time expeditions)
     CloudSqlDbService.fetchTrips().then((sqlTrips) => {
       if (sqlTrips && sqlTrips.length > 0) {
-        setTrips(sqlTrips);
+        const deleted = getDeletedTripIds();
+        const activeTrips = sqlTrips.filter((t) => !deleted.has(t.id));
+        sqlTrips.forEach((t) => {
+          if (deleted.has(t.id)) {
+            CloudSqlDbService.deleteTrip(t.id).catch(console.warn);
+          }
+        });
+        setTrips(activeTrips);
       }
     }).catch(console.warn);
 
     const unsubTrips = TripsSyncService.subscribeToTrips((cloudTrips) => {
-      const tripsToSet = cloudTrips || [];
+      const deleted = getDeletedTripIds();
+      const tripsToSet = (cloudTrips || []).filter((t) => !deleted.has(t.id));
+      (cloudTrips || []).forEach((t) => {
+        if (deleted.has(t.id)) {
+          TripsSyncService.removeTrip(t.id).catch(console.warn);
+          CloudSqlDbService.deleteTrip(t.id).catch(console.warn);
+        }
+      });
       setTrips(tripsToSet);
       try {
         localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(tripsToSet));
@@ -548,12 +571,26 @@ export default function App() {
     // 2. Initial SQL fetch and Subscribe to Routes (River passports and catalog)
     CloudSqlDbService.fetchRoutes().then((sqlRoutes) => {
       if (sqlRoutes && sqlRoutes.length > 0) {
-        setRoutes(sqlRoutes);
+        const deleted = getDeletedRouteIds();
+        const activeRoutes = sqlRoutes.filter((r) => !deleted.has(r.id));
+        sqlRoutes.forEach((r) => {
+          if (deleted.has(r.id)) {
+            CloudSqlDbService.deleteRoute(r.id).catch(console.warn);
+          }
+        });
+        setRoutes(activeRoutes);
       }
     }).catch(console.warn);
 
     const unsubRoutes = RoutesSyncService.subscribeToRoutes((cloudRoutes) => {
-      const routesToSet = cloudRoutes || [];
+      const deleted = getDeletedRouteIds();
+      const routesToSet = (cloudRoutes || []).filter((r) => !deleted.has(r.id));
+      (cloudRoutes || []).forEach((r) => {
+        if (deleted.has(r.id)) {
+          RoutesSyncService.removeRoute(r.id).catch(console.warn);
+          CloudSqlDbService.deleteRoute(r.id).catch(console.warn);
+        }
+      });
       setRoutes(routesToSet);
       try {
         localStorage.setItem('splav86_custom_routes_v5', JSON.stringify(routesToSet));
@@ -695,12 +732,26 @@ export default function App() {
     // 4. Initial SQL fetch and Subscribe to Articles & Reports
     CloudSqlDbService.fetchArticles().then((sqlArticles) => {
       if (sqlArticles && sqlArticles.length > 0) {
-        setArticles(sqlArticles);
+        const deleted = getDeletedArticleIds();
+        const activeArticles = sqlArticles.filter((a) => !deleted.has(a.id));
+        sqlArticles.forEach((a) => {
+          if (deleted.has(a.id)) {
+            CloudSqlDbService.deleteArticle(a.id).catch(console.warn);
+          }
+        });
+        setArticles(activeArticles);
       }
     }).catch(console.warn);
 
     const unsubArticles = ArticlesSyncService.subscribeToArticles((cloudArticles) => {
-      const articlesToSet = cloudArticles || [];
+      const deleted = getDeletedArticleIds();
+      const articlesToSet = (cloudArticles || []).filter((a) => !deleted.has(a.id));
+      (cloudArticles || []).forEach((a) => {
+        if (deleted.has(a.id)) {
+          ArticlesSyncService.removeArticle(a.id).catch(console.warn);
+          CloudSqlDbService.deleteArticle(a.id).catch(console.warn);
+        }
+      });
       setArticles(articlesToSet);
       try {
         localStorage.setItem('splav86_custom_articles', JSON.stringify(articlesToSet));
@@ -1153,6 +1204,7 @@ export default function App() {
 
     // Wipe routes from cloud
     routes.forEach((r) => {
+      recordRouteDeletion(r.id);
       RoutesSyncService.removeRoute(r.id).catch(console.warn);
       CloudSqlDbService.deleteRoute(r.id).catch(console.warn);
     });
@@ -1161,6 +1213,7 @@ export default function App() {
 
     // Wipe articles from cloud
     articles.forEach((a) => {
+      recordArticleDeletion(a.id);
       ArticlesSyncService.removeArticle(a.id).catch(console.warn);
       CloudSqlDbService.deleteArticle(a.id).catch(console.warn);
     });
@@ -1169,6 +1222,7 @@ export default function App() {
 
     // Wipe trips from cloud
     trips.forEach((t) => {
+      recordTripDeletion(t.id);
       TripsSyncService.removeTrip(t.id).catch(console.warn);
       CloudSqlDbService.deleteTrip(t.id).catch(console.warn);
     });
