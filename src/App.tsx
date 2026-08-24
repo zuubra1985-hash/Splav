@@ -486,26 +486,30 @@ export default function App() {
   // ----------------------------------------------------
   useEffect(() => {
     const tgTourist = initTelegramWebApp();
-    if (tgTourist) {
-      // Auto-authenticate tourist seamlessly if inside Telegram
+    if (tgTourist && tgTourist.id) {
+      // Auto-authenticate tourist seamlessly by Telegram ID
       setCurrentUser((prevUser) => {
-        if (prevUser) {
-          if (!prevUser.telegram && tgTourist.username) {
-            return {
-              ...prevUser,
-              telegram: `@${tgTourist.username}`,
-              avatar: prevUser.avatar || tgTourist.photo_url || prevUser.avatar
-            };
-          }
-          return prevUser;
+        // If already logged in with this exact Telegram account, update profile data if needed
+        if (prevUser && (prevUser.id === `tg-${tgTourist.id}` || prevUser.telegramId === tgTourist.id)) {
+          const updated: AppUser = {
+            ...prevUser,
+            telegramId: tgTourist.id,
+            telegram: tgTourist.username ? `@${tgTourist.username}` : prevUser.telegram,
+            avatar: tgTourist.photo_url || prevUser.avatar
+          };
+          UsersSyncService.saveUser(updated).catch(console.warn);
+          CloudSqlDbService.saveUser(updated).catch(console.warn);
+          return updated;
         }
 
-        const tgUsernameClean = tgTourist.username?.toLowerCase().replace('@', '');
-        const isSuper = Boolean(tgUsernameClean && ['zuubra1985', 'novichek2'].includes(tgUsernameClean));
+        const tgUsernameClean = (tgTourist.username || '').toLowerCase().replace('@', '');
+        // Only explicit master superadmin username gets superadmin; everyone else is standard 'user'
+        const isSuper = tgUsernameClean === 'zuubra1985';
         
         const autoUser: AppUser = {
           id: `tg-${tgTourist.id}`,
-          name: [tgTourist.first_name, tgTourist.last_name].filter(Boolean).join(' ') || (tgTourist.username ? `@${tgTourist.username}` : 'Турист Telegram'),
+          telegramId: tgTourist.id,
+          name: [tgTourist.first_name, tgTourist.last_name].filter(Boolean).join(' ') || (tgTourist.username ? `@${tgTourist.username}` : `Турист TG #${tgTourist.id}`),
           email: tgTourist.username ? `${tgTourist.username.toLowerCase()}@telegram.org` : `tg_${tgTourist.id}@splav86.ru`,
           phone: '',
           telegram: tgTourist.username ? `@${tgTourist.username}` : '',
@@ -522,6 +526,12 @@ export default function App() {
         UsersSyncService.saveUser(autoUser).catch(console.warn);
         CloudSqlDbService.saveUser(autoUser).catch(console.warn);
         setRegisteredUsers((prev) => [...prev.filter((u) => u.id !== autoUser.id), autoUser]);
+
+        try {
+          localStorage.setItem('splav86_current_user', JSON.stringify(autoUser));
+        } catch (e) {
+          console.error(e);
+        }
 
         return autoUser;
       });

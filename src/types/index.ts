@@ -24,6 +24,7 @@ export interface AppUser {
   gearInventory?: string[]; // Снаряжение (спутниковый трекер, палатка 4-сезонная, бензопила, рация, костровое)
   badges?: string[]; // Походные бейджи и знаки отличия
   telegram?: string; // @username в Telegram
+  telegramId?: number | string; // Уникальный числовой Telegram ID пользователя
   vk?: string; // Ссылка или id VK
   isReadyForExpeditions?: boolean; // Статус "Готов к экспедициям / Ищу команду"
   showContactsPublicly?: boolean; // Показывать ли телефон всем авторизованным туристам

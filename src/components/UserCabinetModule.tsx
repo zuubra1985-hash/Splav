@@ -115,7 +115,8 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
   initialEditingArticle,
   onClearInitialArticle
 }) => {
-  const isSuperAdmin = currentUser?.email.toLowerCase() === 'zuubra1985@gmail.com' || currentUser?.email.toLowerCase() === 'novichek2@narod.ru' || currentUser?.role === 'superadmin';
+  const isMasterAdmin = currentUser?.email.toLowerCase() === 'zuubra1985@gmail.com';
+  const isSuperAdmin = isMasterAdmin || currentUser?.email.toLowerCase() === 'novichek2@narod.ru' || currentUser?.role === 'superadmin';
   const isAdmin = isSuperAdmin || currentUser?.role === 'admin';
 
   const [activeCabinetTab, setActiveCabinetTabState] = useState<'profile' | 'applications' | 'sync_history' | 'routes' | 'articles' | 'trips' | 'faq' | 'travel_notes' | 'users' | 'backup' | 'telegram'>(() => {
@@ -2439,7 +2440,10 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
           <div className="bg-white border border-[#E5E0D8] rounded-[28px] overflow-hidden shadow-sm">
             <div className="divide-y divide-[#E5E0D8]">
               {uniqueUsers.map((user) => {
-                const isThisSuper = user.email.toLowerCase() === 'zuubra1985@gmail.com' || user.email.toLowerCase() === 'novichek2@narod.ru' || user.role === 'superadmin';
+                const isTargetMaster = (user.email || '').toLowerCase() === 'zuubra1985@gmail.com';
+                const isThisSuper = isTargetMaster || (user.email || '').toLowerCase() === 'novichek2@narod.ru' || user.role === 'superadmin';
+                const isMe = user.id === currentUser.id || (user.email || '').toLowerCase() === (currentUser.email || '').toLowerCase();
+                const canManageThisUser = !isMe && (isMasterAdmin ? !isTargetMaster : !isThisSuper);
 
                 return (
                   <div key={user.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-[#F9F7F4]">
@@ -2463,41 +2467,48 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
                       <div>
                         <div className="flex items-center gap-2">
                           <strong className="text-sm text-[#1A1F1A]">{user.name}</strong>
-                          {isThisSuper && (
+                          {isTargetMaster ? (
+                            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-[#FDE8E8] text-[#E54B4B] border border-[#F8B4B4]">
+                              Владелец / Главный админ
+                            </span>
+                          ) : isThisSuper ? (
                             <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-[#FDE8E8] text-[#E54B4B] border border-[#F8B4B4]">
                               Главный админ
                             </span>
-                          )}
-                          {!isThisSuper && user.role === 'admin' && (
+                          ) : user.role === 'admin' ? (
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#E8F1E7] text-[#2D5A27]">
                               Администратор
                             </span>
-                          )}
+                          ) : null}
                         </div>
-                        <p className="text-xs text-[#6B665F]">{user.email} • {user.phone} • {user.city}</p>
+                        <p className="text-xs text-[#6B665F]">
+                          {user.email} {user.telegram ? `• ${user.telegram}` : ''} {user.telegramId ? `(ID: ${user.telegramId})` : ''} • {user.phone || 'без тел.'} • {user.city || 'Югра'}
+                        </p>
                       </div>
                     </div>
 
-                    {!isThisSuper && (
+                    {canManageThisUser && (
                       <div className="flex items-center gap-2">
-                        {user.role === 'admin' ? (
+                        {(user.role === 'admin' || isThisSuper) ? (
                           <button
+                            type="button"
                             onClick={() => {
                               onUpdateUserRole(user.id, 'user');
                               showNotification(`Пользователь ${user.name} переведен в статус обычного туриста.`);
                             }}
-                            className="px-3 py-1.5 bg-[#F9F7F4] hover:bg-[#FDE8E8] text-[#E54B4B] font-bold text-xs rounded-xl border border-[#E5E0D8] flex items-center gap-1"
+                            className="px-3 py-1.5 bg-[#F9F7F4] hover:bg-[#FDE8E8] text-[#E54B4B] font-bold text-xs rounded-xl border border-[#E5E0D8] flex items-center gap-1 cursor-pointer transition-all"
                           >
                             <UserX className="w-3.5 h-3.5" />
                             Снять права админа
                           </button>
                         ) : (
                           <button
+                            type="button"
                             onClick={() => {
                               onUpdateUserRole(user.id, 'admin');
                               showNotification(`Пользователю ${user.name} назначены права администратора!`);
                             }}
-                            className="px-3 py-1.5 bg-[#E8F1E7] hover:bg-[#D4E8D2] text-[#2D5A27] font-bold text-xs rounded-xl border border-[#CDE0CC] flex items-center gap-1"
+                            className="px-3 py-1.5 bg-[#E8F1E7] hover:bg-[#D4E8D2] text-[#2D5A27] font-bold text-xs rounded-xl border border-[#CDE0CC] flex items-center gap-1 cursor-pointer transition-all"
                           >
                             <UserCheck className="w-3.5 h-3.5" />
                             Назначить админом
@@ -2505,11 +2516,12 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
                         )}
 
                         <button
+                          type="button"
                           onClick={() => {
                             askConfirmation({
                               title: 'Удалить аккаунт?',
-                              message: `Удалить аккаунт ${user.name} (${user.email})?`,
-                              confirmText: 'Да, удалить',
+                              message: `Удалить аккаунт ${user.name} (${user.email})? Это действие навсегда сотрет пользователя из базы.`,
+                              confirmText: 'Да, удалить аккаунт',
                               confirmVariant: 'danger',
                               onConfirm: () => {
                                 onDeleteUser(user.id);
@@ -2517,7 +2529,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
                               }
                             });
                           }}
-                          className="p-1.5 text-[#8B7E6D] hover:text-[#E54B4B] rounded-lg"
+                          className="p-2 text-[#8B7E6D] hover:text-[#E54B4B] hover:bg-[#FDE8E8] rounded-xl transition-all cursor-pointer border border-transparent hover:border-[#F8B4B4]"
                           title="Удалить аккаунт"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -2842,9 +2854,11 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {uniqueUsers.map((u) => {
+              const isTargetMaster = (u.email || '').toLowerCase() === 'zuubra1985@gmail.com';
+              const isTargetSuperAdmin = isTargetMaster || (u.email || '').toLowerCase() === 'novichek2@narod.ru' || u.role === 'superadmin';
               const isTargetAdmin = u.role === 'admin';
-              const isTargetSuperAdmin = u.email?.toLowerCase() === 'zuubra1985@gmail.com' || u.role === 'superadmin';
-              const isMe = u.id === currentUser.id;
+              const isMe = u.id === currentUser.id || ((u.email || '').toLowerCase() === (currentUser.email || '').toLowerCase());
+              const canManageThisCard = !isMe && (isMasterAdmin ? !isTargetMaster : !isTargetSuperAdmin);
 
               return (
                 <div
@@ -2885,19 +2899,22 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
 
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
-                          isTargetSuperAdmin
+                          isTargetMaster
+                            ? 'bg-[#FDE8E8] text-[#E54B4B] border border-[#F8B4B4]'
+                            : isTargetSuperAdmin
                             ? 'bg-[#FDE8E8] text-[#E54B4B]'
                             : isTargetAdmin
                             ? 'bg-[#FEF3C7] text-[#92400E]'
                             : 'bg-[#E8F1E7] text-[#2D5A27]'
                         }`}
                       >
-                        {isTargetSuperAdmin ? 'Главный админ' : isTargetAdmin ? 'Админ' : 'Турист'}
+                        {isTargetMaster ? 'Владелец / Главный админ' : isTargetSuperAdmin ? 'Главный админ' : isTargetAdmin ? 'Админ' : 'Турист'}
                       </span>
                     </div>
 
                     <div className="bg-white p-2.5 rounded-xl border border-[#EEEBE6] text-[11px] space-y-1">
                       <div className="text-[#6B665F] truncate">✉️ {u.email}</div>
+                      {u.telegram && <div className="text-[#0088cc] font-medium truncate">✈️ {u.telegram} {u.telegramId ? <span className="text-[10px] text-[#8B7E6D] font-mono">(ID: {u.telegramId})</span> : null}</div>}
                       {u.phone && <div className="text-[#6B665F]">📞 {u.phone}</div>}
                       <div className="text-[#2D5A27] font-medium truncate">🌊 {u.experienceLevel}</div>
                       {u.fstrRank && <div className="text-[#92400E] font-medium truncate">🏆 {u.fstrRank}</div>}
@@ -2960,18 +2977,18 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
                     <button
                       type="button"
                       onClick={() => setViewingUserModal(u)}
-                      className="px-3 py-1.5 bg-[#E8F1E7] hover:bg-[#D4E8D2] text-[#2D5A27] text-xs font-bold rounded-xl flex items-center gap-1 transition-all"
+                      className="px-3 py-1.5 bg-[#E8F1E7] hover:bg-[#D4E8D2] text-[#2D5A27] text-xs font-bold rounded-xl flex items-center gap-1 transition-all cursor-pointer"
                     >
                       <Eye className="w-3.5 h-3.5" />
                       <span>Визитка</span>
                     </button>
 
-                    {!isTargetSuperAdmin && !isMe && (
+                    {canManageThisCard && (
                       <div className="flex items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => {
-                            const newRole = isTargetAdmin ? 'user' : 'admin';
+                            const newRole = (isTargetAdmin || isTargetSuperAdmin) ? 'user' : 'admin';
                             askConfirmation({
                               title: 'Изменение роли',
                               message: `Изменить роль пользователя ${u.name} на "${newRole === 'admin' ? 'Администратор' : 'Обычный турист'}"?`,
@@ -2983,13 +3000,13 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
                               }
                             });
                           }}
-                          className={`px-2.5 py-1.5 text-xs font-bold rounded-xl border transition-all ${
-                            isTargetAdmin
+                          className={`px-2.5 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
+                            (isTargetAdmin || isTargetSuperAdmin)
                               ? 'bg-[#FDE8E8] text-[#E54B4B] border-[#F8B4B4] hover:bg-[#FCD8D8]'
                               : 'bg-white text-[#4A443E] border-[#E5E0D8] hover:bg-[#F2EFE9]'
                           }`}
                         >
-                          {isTargetAdmin ? 'Снять админа' : 'Сделать админом'}
+                          {(isTargetAdmin || isTargetSuperAdmin) ? 'Снять админа' : 'Сделать админом'}
                         </button>
 
                         <button
@@ -2997,7 +3014,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
                           onClick={() => {
                             askConfirmation({
                               title: 'Удалить участника?',
-                              message: `Удалить участника ${u.name} из базы данных?`,
+                              message: `Удалить участника ${u.name} (${u.email}) из базы данных? Это действие навсегда сотрет профиль.`,
                               confirmText: 'Да, удалить',
                               confirmVariant: 'danger',
                               onConfirm: () => {
@@ -3006,7 +3023,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
                               }
                             });
                           }}
-                          className="p-1.5 text-[#8B7E6D] hover:text-[#E54B4B] hover:bg-[#FDE8E8] rounded-xl transition-colors border border-transparent hover:border-[#F8B4B4]"
+                          className="p-1.5 text-[#8B7E6D] hover:text-[#E54B4B] hover:bg-[#FDE8E8] rounded-xl transition-colors border border-transparent hover:border-[#F8B4B4] cursor-pointer"
                           title="Удалить участника"
                         >
                           <Trash2 className="w-4 h-4" />
