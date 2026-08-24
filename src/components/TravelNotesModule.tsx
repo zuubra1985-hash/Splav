@@ -92,7 +92,6 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
   onOpenAdminNotesManager
 }) => {
   const isSuperAdmin = currentUser?.email?.toLowerCase() === 'zuubra1985@gmail.com' ||
-                       currentUser?.email?.toLowerCase() === 'novichek2@narod.ru' ||
                        currentUser?.role === 'superadmin';
   const isAdmin = Boolean(isAdminProp || isSuperAdmin || currentUser?.role === 'admin');
 

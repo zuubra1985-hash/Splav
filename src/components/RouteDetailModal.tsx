@@ -46,8 +46,7 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
 }) => {
   const isAdmin = currentUser?.role === 'admin' || 
                   currentUser?.role === 'superadmin' || 
-                  currentUser?.email?.toLowerCase() === 'zuubra1985@gmail.com' || 
-                  currentUser?.email?.toLowerCase() === 'novichek2@narod.ru';
+                  currentUser?.email?.toLowerCase() === 'zuubra1985@gmail.com';
 
   const isFavorite = Boolean(currentUser?.favoriteRouteIds?.includes(route.id));
 

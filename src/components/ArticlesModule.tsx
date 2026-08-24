@@ -19,8 +19,7 @@ export const ArticlesModule: React.FC<ArticlesModuleProps> = ({
 
   const isAdmin = currentUser?.role === 'superadmin' || 
                   currentUser?.role === 'admin' || 
-                  currentUser?.email.toLowerCase() === 'zuubra1985@gmail.com' ||
-                  currentUser?.email.toLowerCase() === 'novichek2@narod.ru';
+                  currentUser?.email.toLowerCase() === 'zuubra1985@gmail.com';
 
   const filteredArticles = articles.filter((a) => {
     if (selectedRegion !== 'ALL' && a.region !== selectedRegion) return false;

@@ -68,75 +68,6 @@ const INITIAL_USERS: AppUser[] = [
     vk: '',
     isReadyForExpeditions: true,
     showContactsPublicly: true
-  },
-  {
-    id: 'user-superadmin-novichek',
-    email: 'novichek2@narod.ru',
-    name: 'Главный Администратор (Дмитрий)',
-    phone: '',
-    role: 'superadmin',
-    city: 'Сургут',
-    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
-    experienceLevel: 'Опытный турист',
-    registeredAt: '2026-01-01',
-    favoriteRouteIds: [],
-    favoriteRivers: [],
-    vesselsOwned: [],
-    gearInventory: [],
-    badges: [],
-    bio: '',
-    callsign: '',
-    fstrRank: '',
-    telegram: '',
-    vk: '',
-    isReadyForExpeditions: true,
-    showContactsPublicly: true
-  },
-  {
-    id: 'user-2',
-    email: 'alex.taiga@mail.ru',
-    name: 'Алексей Медведев',
-    phone: '',
-    role: 'admin',
-    city: 'Сургут',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
-    experienceLevel: 'Опытный (5+ сплавов)',
-    registeredAt: '2026-03-15',
-    favoriteRouteIds: [],
-    favoriteRivers: [],
-    vesselsOwned: [],
-    gearInventory: [],
-    badges: [],
-    bio: '',
-    callsign: '',
-    fstrRank: '',
-    telegram: '',
-    vk: '',
-    isReadyForExpeditions: true,
-    showContactsPublicly: true
-  },
-  {
-    id: 'user-3',
-    email: 'elena.polar@yandex.ru',
-    name: 'Елена Белова',
-    phone: '',
-    role: 'user',
-    city: 'Салехард',
-    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&q=80',
-    experienceLevel: 'Средний (2-4 сплава)',
-    registeredAt: '2026-05-20',
-    favoriteRouteIds: [],
-    favoriteRivers: [],
-    vesselsOwned: [],
-    gearInventory: [],
-    badges: [],
-    bio: '',
-    callsign: '',
-    fstrRank: '',
-    telegram: '',
-    vk: '',
-    isReadyForExpeditions: true,
-    showContactsPublicly: true
   }
 ];
 
@@ -215,62 +146,27 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, [activeTab]);
 
-  // Online-Only Strict Mode Status
-  const [isOnline, setIsOnline] = useState<boolean>(() => typeof navigator !== 'undefined' ? navigator.onLine : true);
-  const [isCheckingConnection, setIsCheckingConnection] = useState<boolean>(false);
+  // Online Connection Status (Resilient for Telegram WebApp and Mobile browsers)
+  const [isOnline, setIsOnline] = useState<boolean>(true);
 
-  // Active Network Monitoring (Online-Only Architecture)
+  // Active Network Monitoring
   useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-    };
+    const handleOnline = () => setIsOnline(true);
     const handleOffline = () => {
-      setIsOnline(false);
+      // In embedded webviews (like Telegram), offline events can be false positives; double check
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        setIsOnline(false);
+      }
     };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // Periodic connectivity health check to backend & internet
-    const interval = setInterval(async () => {
-      if (typeof navigator !== 'undefined' && navigator.onLine) {
-        try {
-          const res = await fetch('/api/health', { method: 'GET', cache: 'no-store' });
-          if (res.ok) {
-            setIsOnline(true);
-          }
-        } catch {
-          if (!navigator.onLine) {
-            setIsOnline(false);
-          }
-        }
-      } else {
-        setIsOnline(false);
-      }
-    }, 15000);
-
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
-      clearInterval(interval);
     };
   }, []);
-
-  const handleCheckConnection = async () => {
-    setIsCheckingConnection(true);
-    try {
-      const res = await fetch('/api/health', { method: 'GET', cache: 'no-store' });
-      if (res.ok) {
-        setIsOnline(true);
-      } else {
-        setIsOnline(false);
-      }
-    } catch {
-      setIsOnline(false);
-    } finally {
-      setIsCheckingConnection(false);
-    }
-  };
 
   // Registered Users & Current Auth State (Guest by default on new visits)
   const [registeredUsers, setRegisteredUsers] = useState<AppUser[]>(() => {
@@ -280,8 +176,8 @@ export default function App() {
       const list: AppUser[] = stored ? JSON.parse(stored) : INITIAL_USERS;
       const map = new Map<string, AppUser>();
 
-      // Guaranteed root superadmins (unless explicitly deleted)
-      INITIAL_USERS.filter((u) => u.role === 'superadmin').forEach((sa) => {
+      // Guaranteed root master superadmin (unless explicitly deleted)
+      INITIAL_USERS.filter((u) => u.email.toLowerCase() === 'zuubra1985@gmail.com').forEach((sa) => {
         const key = sa.email.trim().toLowerCase();
         if (!deletedKeys.has(key) && !deletedKeys.has(sa.id.trim().toLowerCase())) {
           map.set(key, sa);
@@ -291,24 +187,30 @@ export default function App() {
       list.forEach((u) => {
         const emailKey = (u.email || '').trim().toLowerCase();
         const idKey = (u.id || '').trim().toLowerCase();
-        if (!emailKey || deletedKeys.has(emailKey) || deletedKeys.has(idKey)) return;
+        const tgClean = (u.telegram || '').trim().toLowerCase().replace('@', '');
+        const tgIdKey = u.telegramId ? String(u.telegramId).trim().toLowerCase() : '';
 
-        if (emailKey === 'novichek2@narod.ru') {
-          map.set(emailKey, {
-            ...u,
-            id: 'user-superadmin-novichek',
-            name: 'Главный Администратор (Дмитрий)',
-            role: 'superadmin'
-          });
-        } else if (emailKey === 'zuubra1985@gmail.com') {
+        if (!emailKey && !idKey) return;
+        if (
+          deletedKeys.has(emailKey) ||
+          deletedKeys.has(idKey) ||
+          (tgClean && deletedKeys.has(tgClean)) ||
+          (tgIdKey && deletedKeys.has(tgIdKey))
+        ) {
+          return;
+        }
+
+        if (emailKey === 'zuubra1985@gmail.com') {
           map.set(emailKey, {
             ...u,
             id: 'user-superadmin-zuubra',
             name: 'Администратор (zuubra1985)',
             role: 'superadmin'
           });
-        } else {
+        } else if (emailKey) {
           map.set(emailKey, u);
+        } else {
+          map.set(idKey, u);
         }
       });
       return Array.from(map.values());
@@ -621,12 +523,31 @@ export default function App() {
           prev.forEach((u) => {
             const k = (u.email || '').trim().toLowerCase();
             const idKey = (u.id || '').trim().toLowerCase();
-            if (k && !deletedKeys.has(k) && !deletedKeys.has(idKey)) map.set(k, u);
+            const tgClean = (u.telegram || '').trim().toLowerCase().replace('@', '');
+            const tgIdKey = u.telegramId ? String(u.telegramId).trim().toLowerCase() : '';
+            if (
+              (k && !deletedKeys.has(k) && !deletedKeys.has(idKey)) &&
+              (!tgClean || !deletedKeys.has(tgClean)) &&
+              (!tgIdKey || !deletedKeys.has(tgIdKey))
+            ) {
+              map.set(k || idKey, u);
+            }
           });
           sqlUsers.forEach((u) => {
             const k = (u.email || '').trim().toLowerCase();
             const idKey = (u.id || '').trim().toLowerCase();
-            if (k && !deletedKeys.has(k) && !deletedKeys.has(idKey)) map.set(k, u);
+            const tgClean = (u.telegram || '').trim().toLowerCase().replace('@', '');
+            const tgIdKey = u.telegramId ? String(u.telegramId).trim().toLowerCase() : '';
+            if (
+              deletedKeys.has(k) ||
+              deletedKeys.has(idKey) ||
+              (tgClean && deletedKeys.has(tgClean)) ||
+              (tgIdKey && deletedKeys.has(tgIdKey))
+            ) {
+              CloudSqlDbService.deleteUser(u.id).catch(console.warn);
+              return;
+            }
+            map.set(k || idKey, u);
           });
           return Array.from(map.values());
         });
@@ -650,16 +571,16 @@ export default function App() {
           setRegisteredUsers(allToSeed);
         }
       } else {
-        // Strict deduplication by normalized email, omitting deleted accounts
-        const emailMap = new Map<string, AppUser>();
+        // Strict deduplication by normalized email or ID, omitting deleted accounts
+        const userMap = new Map<string, AppUser>();
         const duplicateIdsToDelete: string[] = [];
 
-        // Guaranteed root superadmins (unless explicitly in deleted list)
-        INITIAL_USERS.filter((u) => u.role === 'superadmin').forEach((sa) => {
+        // Master owner always guaranteed unless explicitly deleted
+        INITIAL_USERS.filter((u) => u.email.toLowerCase() === 'zuubra1985@gmail.com').forEach((sa) => {
           const saEmail = sa.email.trim().toLowerCase();
           const saId = sa.id.trim().toLowerCase();
           if (!deletedKeys.has(saEmail) && !deletedKeys.has(saId)) {
-            emailMap.set(saEmail, sa);
+            userMap.set(saEmail, sa);
           }
         });
 
@@ -667,69 +588,59 @@ export default function App() {
         cloudUsers.forEach((u) => {
           const emailKey = (u.email || '').trim().toLowerCase();
           const idKey = (u.id || '').trim().toLowerCase();
-          if (!emailKey) return;
+          const tgClean = (u.telegram || '').trim().toLowerCase().replace('@', '');
+          const tgIdKey = u.telegramId ? String(u.telegramId).trim().toLowerCase() : '';
 
-          if (deletedKeys.has(emailKey) || deletedKeys.has(idKey)) {
+          if (!emailKey && !idKey) return;
+
+          if (
+            deletedKeys.has(emailKey) ||
+            deletedKeys.has(idKey) ||
+            (tgClean && deletedKeys.has(tgClean)) ||
+            (tgIdKey && deletedKeys.has(tgIdKey))
+          ) {
             // Delete lingering cloud documents for already deleted user
             UsersSyncService.removeUser(u.id).catch(console.warn);
             CloudSqlDbService.deleteUser(u.id).catch(console.warn);
             return;
           }
 
-          if (emailMap.has(emailKey)) {
-            const existing = emailMap.get(emailKey)!;
-            // Identify if this is the superadmin novichek2
-            if (emailKey === 'novichek2@narod.ru') {
-              if (u.id === 'user-superadmin-novichek') {
-                if (existing.id !== 'user-superadmin-novichek') {
-                  duplicateIdsToDelete.push(existing.id);
-                }
-                emailMap.set(emailKey, {
-                  ...existing,
-                  ...u,
-                  id: 'user-superadmin-novichek',
-                  name: 'Главный Администратор (Дмитрий)',
-                  role: 'superadmin'
-                });
-              } else {
-                duplicateIdsToDelete.push(u.id);
-              }
-            } else if (emailKey === 'zuubra1985@gmail.com') {
-              if (u.id === 'user-superadmin-zuubra') {
-                if (existing.id !== 'user-superadmin-zuubra') {
-                  duplicateIdsToDelete.push(existing.id);
-                }
-                emailMap.set(emailKey, {
-                  ...existing,
-                  ...u,
-                  id: 'user-superadmin-zuubra',
-                  name: 'Администратор (zuubra1985)',
-                  role: 'superadmin'
-                });
-              } else {
-                duplicateIdsToDelete.push(u.id);
-              }
+          const primaryKey = emailKey || idKey;
+
+          if (emailKey === 'zuubra1985@gmail.com') {
+            if (u.id === 'user-superadmin-zuubra') {
+              userMap.set(emailKey, {
+                ...u,
+                id: 'user-superadmin-zuubra',
+                name: 'Администратор (zuubra1985)',
+                role: 'superadmin'
+              });
             } else {
-              // General user: keep one record and merge fields
+              duplicateIdsToDelete.push(u.id);
+            }
+          } else {
+            if (userMap.has(primaryKey)) {
+              const existing = userMap.get(primaryKey)!;
               if (existing.id !== u.id) {
                 duplicateIdsToDelete.push(u.id);
               }
-              emailMap.set(emailKey, { ...existing, ...u });
+              // Respect whatever role was saved dynamically
+              userMap.set(primaryKey, { ...existing, ...u });
+            } else {
+              userMap.set(primaryKey, u);
             }
-          } else {
-            emailMap.set(emailKey, u);
           }
         });
 
         // 3. Purge duplicate documents from Firestore and CloudSQL
         duplicateIdsToDelete.forEach((dupId) => {
-          if (dupId && dupId !== 'user-superadmin-novichek' && dupId !== 'user-superadmin-zuubra') {
+          if (dupId && dupId !== 'user-superadmin-zuubra') {
             UsersSyncService.removeUser(dupId).catch(console.warn);
             CloudSqlDbService.deleteUser(dupId).catch(console.warn);
           }
         });
 
-        const uniqueUsers = Array.from(emailMap.values());
+        const uniqueUsers = Array.from(userMap.values());
         setRegisteredUsers(uniqueUsers);
         try {
           localStorage.setItem('splav86_users', JSON.stringify(uniqueUsers));
@@ -839,12 +750,31 @@ export default function App() {
             prev.forEach((u) => {
               const k = (u.email || '').trim().toLowerCase();
               const idKey = (u.id || '').trim().toLowerCase();
-              if (k && !deletedKeys.has(k) && !deletedKeys.has(idKey)) map.set(k, u);
+              const tgClean = (u.telegram || '').trim().toLowerCase().replace('@', '');
+              const tgIdKey = u.telegramId ? String(u.telegramId).trim().toLowerCase() : '';
+              if (
+                (k && !deletedKeys.has(k) && !deletedKeys.has(idKey)) &&
+                (!tgClean || !deletedKeys.has(tgClean)) &&
+                (!tgIdKey || !deletedKeys.has(tgIdKey))
+              ) {
+                map.set(k || idKey, u);
+              }
             });
             sqlUsers.forEach((u) => {
               const k = (u.email || '').trim().toLowerCase();
               const idKey = (u.id || '').trim().toLowerCase();
-              if (k && !deletedKeys.has(k) && !deletedKeys.has(idKey)) map.set(k, u);
+              const tgClean = (u.telegram || '').trim().toLowerCase().replace('@', '');
+              const tgIdKey = u.telegramId ? String(u.telegramId).trim().toLowerCase() : '';
+              if (
+                deletedKeys.has(k) ||
+                deletedKeys.has(idKey) ||
+                (tgClean && deletedKeys.has(tgClean)) ||
+                (tgIdKey && deletedKeys.has(tgIdKey))
+              ) {
+                CloudSqlDbService.deleteUser(u.id).catch(console.warn);
+                return;
+              }
+              map.set(k || idKey, u);
             });
             return Array.from(map.values());
           });
@@ -949,9 +879,13 @@ export default function App() {
   };
 
   const handleUpdateUserRole = (userId: string, newRole: UserRole) => {
+    let updatedList: AppUser[] = [];
     setRegisteredUsers((prev) => {
+      const target = prev.find((u) => u.id === userId);
+      const targetEmail = target?.email?.trim().toLowerCase();
+
       const updated = prev.map((u) => {
-        if (u.id === userId) {
+        if (u.id === userId || (targetEmail && u.email?.trim().toLowerCase() === targetEmail)) {
           const userWithRole = { ...u, role: newRole };
           UsersSyncService.saveUser(userWithRole).catch((err) => {
             console.warn('Failed to sync user role to Firestore:', err);
@@ -963,19 +897,34 @@ export default function App() {
         }
         return u;
       });
+      updatedList = updated;
+      try {
+        localStorage.setItem('splav86_users', JSON.stringify(updated));
+      } catch (e) {
+        console.warn(e);
+      }
       return updated;
     });
-    if (currentUser && currentUser.id === userId) {
-      setCurrentUser((prev) => prev ? { ...prev, role: newRole } : null);
+
+    if (currentUser && (currentUser.id === userId || (currentUser.email && registeredUsers.find(u => u.id === userId)?.email?.toLowerCase() === currentUser.email.toLowerCase()))) {
+      const updatedCurr = { ...currentUser, role: newRole };
+      setCurrentUser(updatedCurr);
+      try {
+        localStorage.setItem('splav86_current_user', JSON.stringify(updatedCurr));
+      } catch (e) {
+        console.warn(e);
+      }
     }
   };
 
   const handleDeleteUser = (userId: string) => {
     const targetUser = registeredUsers.find((u) => u.id === userId);
-    recordUserDeletion(userId, targetUser?.email);
+    const targetEmail = targetUser?.email?.trim().toLowerCase();
+
+    recordUserDeletion(userId, targetEmail, targetUser?.telegram, targetUser?.telegramId);
 
     const updated = registeredUsers.filter(
-      (u) => u.id !== userId && (!targetUser || (u.email || '').toLowerCase() !== (targetUser.email || '').toLowerCase())
+      (u) => u.id !== userId && (!targetEmail || (u.email || '').trim().toLowerCase() !== targetEmail)
     );
     setRegisteredUsers(updated);
 
@@ -985,15 +934,23 @@ export default function App() {
       console.warn('Failed to save updated users to localStorage:', e);
     }
 
-    UsersSyncService.removeUser(userId).catch((err) => {
-      console.warn('Failed to remove user from Firestore:', err);
-    });
+    // Remove from Firestore & CloudSQL
+    UsersSyncService.removeUser(userId).catch(console.warn);
     if (targetUser && targetUser.id !== userId) {
       UsersSyncService.removeUser(targetUser.id).catch(console.warn);
     }
-    CloudSqlDbService.deleteUser(userId).catch((err) => {
-      console.warn('Failed to delete user from CloudSQL:', err);
-    });
+    CloudSqlDbService.deleteUser(userId).catch(console.warn);
+    if (targetUser && targetUser.id !== userId) {
+      CloudSqlDbService.deleteUser(targetUser.id).catch(console.warn);
+    }
+
+    // If current user is the deleted user, log out
+    if (currentUser && (currentUser.id === userId || (targetEmail && currentUser.email?.trim().toLowerCase() === targetEmail))) {
+      setCurrentUser(null);
+      try {
+        localStorage.removeItem('splav86_current_user');
+      } catch (e) {}
+    }
   };
 
   const handleLogout = () => {
@@ -1281,7 +1238,6 @@ export default function App() {
 
   // Superadmin & Admin status
   const isSuperAdmin = currentUser?.email.toLowerCase() === 'zuubra1985@gmail.com' || 
-                       currentUser?.email.toLowerCase() === 'novichek2@narod.ru' || 
                        currentUser?.role === 'superadmin';
   const isAdmin = isSuperAdmin || currentUser?.role === 'admin';
 
@@ -1739,52 +1695,6 @@ export default function App() {
         registeredUsers={registeredUsers}
         onRegisterUser={handleRegisterUser}
       />
-
-      {/* ⚠️ STRICT ONLINE-ONLY REQUIREMENT OVERLAY */}
-      {!isOnline && (
-        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white border-2 border-[#E5E0D8] rounded-[32px] max-w-md w-full p-6 sm:p-8 text-center space-y-5 shadow-2xl animate-fade-in">
-            <div className="w-16 h-16 rounded-3xl bg-[#FDE8E8] text-[#E54B4B] flex items-center justify-center mx-auto shadow-inner">
-              <WifiOff className="w-8 h-8" />
-            </div>
-
-            <div className="space-y-2">
-              <span className="px-3 py-1 rounded-full bg-[#FDE8E8] text-[#E54B4B] text-[11px] font-black uppercase tracking-wider">
-                Режим: Только Онлайн
-              </span>
-              <h2 className="text-xl font-black text-[#1A1F1A]">
-                Требуется интернет-соединение
-              </h2>
-              <p className="text-xs text-[#6B665F] leading-relaxed">
-                Приложение <strong>SPLAV86</strong> работает в режиме реального времени для обеспечения актуальности маршрутов, походов, заявок и визиток экипажа.
-              </p>
-            </div>
-
-            <div className="p-3.5 bg-[#FAF8F5] rounded-2xl border border-[#EEEBE6] text-xs text-[#4A443E] space-y-1 text-left">
-              <div className="flex items-center gap-2 font-bold text-[#2D5A27]">
-                <Zap className="w-4 h-4 text-[#2D5A27]" />
-                <span>Актуальные данные</span>
-              </div>
-              <p className="text-[11px] text-[#6B665F]">
-                Офлайн-режим отключен для гарантии актуальности данных по рекам, наборам в группы и сообщениям капитанов.
-              </p>
-            </div>
-
-            <div className="space-y-2 pt-2">
-              <button
-                type="button"
-                onClick={handleCheckConnection}
-                disabled={isCheckingConnection}
-                className="w-full py-3 bg-[#2D5A27] hover:bg-[#3D7136] disabled:opacity-60 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <RefreshCw className={`w-4 h-4 ${isCheckingConnection ? 'animate-spin' : ''}`} />
-                <span>{isCheckingConnection ? 'Проверка соединения...' : 'Проверить подключение'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }

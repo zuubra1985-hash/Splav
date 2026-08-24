@@ -247,7 +247,7 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
   const [applicantExp, setApplicantExp] = useState('');
   const [applicantNotes, setApplicantNotes] = useState('');
 
-  const isAdmin = currentUser?.email.toLowerCase() === 'zuubra1985@gmail.com' || currentUser?.email.toLowerCase() === 'novichek2@narod.ru' || currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
+  const isAdmin = currentUser?.email.toLowerCase() === 'zuubra1985@gmail.com' || currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
 
   // Keep open modal in sync with live real-time trips updates
   useEffect(() => {

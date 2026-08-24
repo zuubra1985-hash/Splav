@@ -98,11 +98,25 @@ export const getDeletedUserKeys = (): Set<string> => {
   }
 };
 
-export const recordUserDeletion = (userId: string, email?: string) => {
+export const recordUserDeletion = (userId?: string, email?: string, telegram?: string, telegramId?: string | number) => {
   try {
     const deleted = getDeletedUserKeys();
-    if (userId) deleted.add(userId.trim().toLowerCase());
-    if (email) deleted.add(email.trim().toLowerCase());
+    if (userId) deleted.add(String(userId).trim().toLowerCase());
+    if (email) deleted.add(String(email).trim().toLowerCase());
+    if (telegram) {
+      const cleanTg = String(telegram).trim().toLowerCase().replace('@', '');
+      if (cleanTg) {
+        deleted.add(cleanTg);
+        deleted.add(`@${cleanTg}`);
+        deleted.add(`${cleanTg}@telegram.org`);
+      }
+    }
+    if (telegramId) {
+      const tgIdStr = String(telegramId).trim().toLowerCase();
+      deleted.add(tgIdStr);
+      deleted.add(`tg-${tgIdStr}`);
+      deleted.add(`tg_${tgIdStr}@splav86.ru`);
+    }
     localStorage.setItem(USERS_DELETED_KEY, JSON.stringify(Array.from(deleted)));
   } catch (e) {
     console.error('Failed to record user deletion:', e);

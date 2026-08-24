@@ -116,7 +116,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
   onClearInitialArticle
 }) => {
   const isMasterAdmin = currentUser?.email.toLowerCase() === 'zuubra1985@gmail.com';
-  const isSuperAdmin = isMasterAdmin || currentUser?.email.toLowerCase() === 'novichek2@narod.ru' || currentUser?.role === 'superadmin';
+  const isSuperAdmin = isMasterAdmin || currentUser?.role === 'superadmin';
   const isAdmin = isSuperAdmin || currentUser?.role === 'admin';
 
   const [activeCabinetTab, setActiveCabinetTabState] = useState<'profile' | 'applications' | 'sync_history' | 'routes' | 'articles' | 'trips' | 'faq' | 'travel_notes' | 'users' | 'backup' | 'telegram'>(() => {
@@ -2410,7 +2410,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
                 Управление администраторами и пользователями ({uniqueUsers.length})
               </h2>
               <p className="text-xs text-[#6B665F] mt-1">
-                Главные администраторы (<span className="font-mono font-bold text-[#E54B4B]">zuubra1985@gmail.com</span> / <span className="font-mono font-bold text-[#E54B4B]">novichek2@narod.ru</span>) имеют полный доступ к назначению и управлению правами.
+                Главный администратор (<span className="font-mono font-bold text-[#E54B4B]">zuubra1985@gmail.com</span>) имеет полный доступ к назначению и управлению правами.
               </p>
             </div>
 
@@ -2441,7 +2441,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
             <div className="divide-y divide-[#E5E0D8]">
               {uniqueUsers.map((user) => {
                 const isTargetMaster = (user.email || '').toLowerCase() === 'zuubra1985@gmail.com';
-                const isThisSuper = isTargetMaster || (user.email || '').toLowerCase() === 'novichek2@narod.ru' || user.role === 'superadmin';
+                const isThisSuper = isTargetMaster || user.role === 'superadmin';
                 const isMe = user.id === currentUser.id || (user.email || '').toLowerCase() === (currentUser.email || '').toLowerCase();
                 const canManageThisUser = !isMe && (isMasterAdmin ? !isTargetMaster : !isThisSuper);
 
@@ -2855,7 +2855,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {uniqueUsers.map((u) => {
               const isTargetMaster = (u.email || '').toLowerCase() === 'zuubra1985@gmail.com';
-              const isTargetSuperAdmin = isTargetMaster || (u.email || '').toLowerCase() === 'novichek2@narod.ru' || u.role === 'superadmin';
+              const isTargetSuperAdmin = isTargetMaster || u.role === 'superadmin';
               const isTargetAdmin = u.role === 'admin';
               const isMe = u.id === currentUser.id || ((u.email || '').toLowerCase() === (currentUser.email || '').toLowerCase());
               const canManageThisCard = !isMe && (isMasterAdmin ? !isTargetMaster : !isTargetSuperAdmin);

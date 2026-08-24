@@ -52,7 +52,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    const isSuperAdminEmail = cleanEmail === 'zuubra1985@gmail.com' || cleanEmail === 'novichek2@narod.ru';
+    const isSuperAdminEmail = cleanEmail === 'zuubra1985@gmail.com';
     
     // 1. Check superadmin credentials
     if (isSuperAdminEmail) {
@@ -63,14 +63,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
       // Check if superadmin is already in registeredUsers
       const existingSuper = registeredUsers.find((u) => u.email.trim().toLowerCase() === cleanEmail);
-      const canonicalId = cleanEmail === 'zuubra1985@gmail.com' ? 'user-superadmin-zuubra' : 'user-superadmin-novichek';
-      const defaultName = cleanEmail === 'zuubra1985@gmail.com' ? 'Администратор (zuubra1985)' : 'Главный Администратор (Дмитрий)';
+      const canonicalId = 'user-superadmin-zuubra';
+      const defaultName = 'Администратор (zuubra1985)';
       
       const superAdminUser: AppUser = existingSuper
         ? {
             ...existingSuper,
             id: canonicalId,
-            name: existingSuper.name && existingSuper.name !== 'Главный Администратор (novichek2)' ? existingSuper.name : defaultName,
+            name: existingSuper.name || defaultName,
             role: 'superadmin'
           }
         : {
@@ -147,7 +147,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    const isSuper = cleanEmail === 'zuubra1985@gmail.com' || cleanEmail === 'novichek2@narod.ru';
+    const isSuper = cleanEmail === 'zuubra1985@gmail.com';
 
     // 2. Fresh new tourist profile with clean sheet
     const newUser: AppUser = {
