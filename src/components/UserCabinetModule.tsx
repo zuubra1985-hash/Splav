@@ -244,6 +244,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
     callsign: string;
     phone: string;
     email: string;
+    password?: string;
     city: string;
     experienceLevel: string;
     fstrRank: string;
@@ -262,6 +263,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
     callsign: currentUser?.callsign || '',
     phone: currentUser?.phone || '',
     email: currentUser?.email || '',
+    password: currentUser?.password || '',
     city: currentUser?.city || 'Сургут',
     experienceLevel: currentUser?.experienceLevel || 'Любитель (1-2 к.с., спокойные реки)',
     fstrRank: currentUser?.fstrRank || '',
@@ -293,6 +295,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
       callsign: currentUser.callsign || '',
       phone: currentUser.phone,
       email: currentUser.email,
+      password: currentUser.password || '',
       city: currentUser.city || 'Сургут',
       experienceLevel: currentUser.experienceLevel || 'Любитель водных походов',
       fstrRank: currentUser.fstrRank || '',
@@ -348,6 +351,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
       callsign: profileForm.callsign.trim(),
       phone: profileForm.phone.trim(),
       email: profileForm.email.trim(),
+      password: (profileForm.password || '').trim(),
       city: profileForm.city.trim(),
       experienceLevel: profileForm.experienceLevel,
       fstrRank: profileForm.fstrRank.trim(),
@@ -4691,6 +4695,45 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
                         className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
                       />
                     </div>
+                  </div>
+
+                  {/* Web Login & Cross-Platform Credentials */}
+                  <div className="space-y-3 bg-[#FAF8F5] p-3.5 rounded-2xl border border-[#EEEBE6]">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-[#1A1F1A] text-xs flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5 text-[#2D5A27]" />
+                        Вход с компьютера (Web) и безопасность
+                      </span>
+                      <span className="text-[10px] text-[#2D5A27] font-bold">Кроссплатформенный доступ</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block text-[#4A443E] font-medium text-[11px] mb-1">Email для входа</label>
+                        <input
+                          type="email"
+                          placeholder="name@mail.ru"
+                          value={profileForm.email}
+                          onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
+                          className="w-full bg-white border border-[#E5E0D8] rounded-xl p-2 text-[#2D332D] outline-none focus:border-[#2D5A27] text-xs"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[#4A443E] font-medium text-[11px] mb-1">Пароль для входа с ПК</label>
+                        <input
+                          type="text"
+                          placeholder="Придумайте пароль"
+                          value={profileForm.password || ''}
+                          onChange={(e) => setProfileForm({ ...profileForm, password: e.target.value })}
+                          className="w-full bg-white border border-[#E5E0D8] rounded-xl p-2 text-[#2D332D] outline-none focus:border-[#2D5A27] text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <p className="text-[10px] text-[#8B7E6D] leading-tight">
+                      Укажите пароль, чтобы иметь возможность авторизоваться в SPLAV86 с любого компьютера или смартфона по вашему Email или Telegram-логину.
+                    </p>
                   </div>
 
                   {/* Readiness & Privacy Toggles */}

@@ -384,59 +384,35 @@ export default function App() {
   };
 
   // ----------------------------------------------------
-  // Telegram Mini App (TMA) Lifecycle & Seamless Auth
+  // Telegram Mini App (TMA) Lifecycle & Auth Choice
   // ----------------------------------------------------
   useEffect(() => {
     const tgTourist = initTelegramWebApp();
     if (tgTourist && tgTourist.id) {
-      // Auto-authenticate tourist seamlessly by Telegram ID
-      setCurrentUser((prevUser) => {
-        // If already logged in with this exact Telegram account, update profile data if needed
-        if (prevUser && (prevUser.id === `tg-${tgTourist.id}` || prevUser.telegramId === tgTourist.id)) {
-          const updated: AppUser = {
-            ...prevUser,
-            telegramId: tgTourist.id,
-            telegram: tgTourist.username ? `@${tgTourist.username}` : prevUser.telegram,
-            avatar: tgTourist.photo_url || prevUser.avatar
-          };
-          UsersSyncService.saveUser(updated).catch(console.warn);
-          CloudSqlDbService.saveUser(updated).catch(console.warn);
-          return updated;
-        }
-
-        const tgUsernameClean = (tgTourist.username || '').toLowerCase().replace('@', '');
-        // Only explicit master superadmin username gets superadmin; everyone else is standard 'user'
-        const isSuper = tgUsernameClean === 'zuubra1985';
-        
-        const autoUser: AppUser = {
-          id: `tg-${tgTourist.id}`,
-          telegramId: tgTourist.id,
-          name: [tgTourist.first_name, tgTourist.last_name].filter(Boolean).join(' ') || (tgTourist.username ? `@${tgTourist.username}` : `Турист TG #${tgTourist.id}`),
-          email: tgTourist.username ? `${tgTourist.username.toLowerCase()}@telegram.org` : `tg_${tgTourist.id}@splav86.ru`,
-          phone: '',
-          telegram: tgTourist.username ? `@${tgTourist.username}` : '',
-          avatar: tgTourist.photo_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
-          role: isSuper ? 'superadmin' : 'user',
-          registeredAt: new Date().toISOString().split('T')[0],
-          city: 'Югра / Ямал',
-          experienceLevel: 'Водный турист (Telegram)',
-          favoriteRouteIds: [],
-          isReadyForExpeditions: true,
-          showContactsPublicly: true
-        };
-
-        UsersSyncService.saveUser(autoUser).catch(console.warn);
-        CloudSqlDbService.saveUser(autoUser).catch(console.warn);
-        setRegisteredUsers((prev) => [...prev.filter((u) => u.id !== autoUser.id), autoUser]);
-
+      // Check if user is already logged in
+      const stored = localStorage.getItem('splav86_current_user');
+      if (!stored) {
+        // Prompt user with authorization modal offering Telegram 1-click, Email login, or Registration
+        setIsAuthModalOpen(true);
+      } else {
+        // If already logged in, update Telegram fields if matching
         try {
-          localStorage.setItem('splav86_current_user', JSON.stringify(autoUser));
+          const parsedUser: AppUser = JSON.parse(stored);
+          if (parsedUser && (parsedUser.telegramId === tgTourist.id || parsedUser.id === `tg-${tgTourist.id}`)) {
+            const updated: AppUser = {
+              ...parsedUser,
+              telegramId: tgTourist.id,
+              telegram: tgTourist.username ? `@${tgTourist.username}` : parsedUser.telegram,
+              avatar: tgTourist.photo_url || parsedUser.avatar
+            };
+            setCurrentUser(updated);
+            UsersSyncService.saveUser(updated).catch(console.warn);
+            CloudSqlDbService.saveUser(updated).catch(console.warn);
+          }
         } catch (e) {
-          console.error(e);
+          console.warn('Failed to parse existing current user:', e);
         }
-
-        return autoUser;
-      });
+      }
     }
   }, []);
 
