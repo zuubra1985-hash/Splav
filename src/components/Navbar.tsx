@@ -1,21 +1,24 @@
 import React from 'react';
-import { Compass, Waves, CloudRain, Users, BookOpen, Calculator, User, LogIn, RadioTower } from 'lucide-react';
+import { Compass, Waves, CloudRain, Users, BookOpen, User, LogIn, HelpCircle, BookmarkCheck, Edit3, Send } from 'lucide-react';
 import { Region, AppUser } from '../types';
+import { isTelegramWebApp } from '../utils/telegramWebApp';
 
 interface NavbarProps {
-  activeTab: 'routes' | 'weather_hydro' | 'companions' | 'mchs_safety' | 'articles' | 'calculator' | 'cabinet';
-  setActiveTab: (tab: 'routes' | 'weather_hydro' | 'companions' | 'mchs_safety' | 'articles' | 'calculator' | 'cabinet') => void;
+  activeTab: 'routes' | 'companions' | 'mchs_safety' | 'articles' | 'logbook' | 'cabinet';
+  setActiveTab: (tab: 'routes' | 'companions' | 'mchs_safety' | 'articles' | 'logbook' | 'cabinet') => void;
   selectedRegion?: Region;
   setSelectedRegion?: (region: Region) => void;
   currentUser: AppUser | null;
   onOpenAuth: () => void;
+  isOnline?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   setActiveTab,
   currentUser,
-  onOpenAuth
+  onOpenAuth,
+  isOnline = true
 }) => {
   return (
     <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-[#E5E0D8] shadow-xs">
@@ -76,8 +79,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                   : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4]'
               }`}
             >
-              <RadioTower className="w-4 h-4 text-[#2D5A27]" />
-              <span>Связь и МЧС</span>
+              <HelpCircle className="w-4 h-4 text-[#2D5A27]" />
+              <span>FAQ</span>
             </button>
 
             <button
@@ -93,33 +96,49 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             <button
-              onClick={() => setActiveTab('calculator')}
+              onClick={() => setActiveTab('logbook')}
               className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
-                activeTab === 'calculator'
+                activeTab === 'logbook'
                   ? 'bg-[#E8F1E7] text-[#2D5A27] border border-[#CDE0CC] shadow-2xs'
                   : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4]'
               }`}
             >
-              <Calculator className="w-4 h-4 text-[#2D5A27]" />
-              <span>Расчет</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('weather_hydro')}
-              className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
-                activeTab === 'weather_hydro'
-                  ? 'bg-[#E8F1E7] text-[#2D5A27] border border-[#CDE0CC] shadow-2xs'
-                  : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4]'
-              }`}
-            >
-              <CloudRain className="w-4 h-4 text-[#2D5A27]" />
-              <span>Гидрология</span>
+              <Edit3 className="w-4 h-4 text-[#2D5A27]" />
+              <span>Путевые заметки</span>
             </button>
           </nav>
 
           {/* Right Action buttons */}
           <div className="flex items-center space-x-2">
             
+            {/* Live Online Badge */}
+            <div 
+              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-colors ${
+                isOnline 
+                  ? 'bg-[#E8F1E7]/80 text-[#2D5A27] border-[#CDE0CC]' 
+                  : 'bg-[#FDE8E8] text-[#E54B4B] border-[#F8B4B4]'
+              }`}
+              title={isOnline ? 'Подключение к сети активно' : 'Нет подключения к интернету'}
+            >
+              <span className="relative flex h-2 w-2">
+                {isOnline && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                )}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-emerald-600' : 'bg-red-500'}`}></span>
+              </span>
+              <span className="truncate">{isOnline ? 'Онлайн' : 'Офлайн'}</span>
+            </div>
+
+            {isTelegramWebApp() && (
+              <div 
+                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-sky-50 text-[#0088cc] border border-sky-200"
+                title="Приложение запущено внутри Telegram Mini App"
+              >
+                <Send className="w-3 h-3 text-[#0088cc]" />
+                <span>Telegram</span>
+              </div>
+            )}
+
             {/* Profile / Auth Button */}
             {!currentUser ? (
               <button
@@ -164,66 +183,71 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Mobile Sticky Bottom Navigation Bar */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-md border-t border-[#E5E0D8] px-1 py-1.5 flex items-center justify-around shadow-lg pb-[max(0.375rem,env(safe-area-inset-bottom))]">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/98 backdrop-blur-md border-t border-[#E5E0D8] px-1 py-1 flex items-center justify-around shadow-2xl pb-[max(0.375rem,env(safe-area-inset-bottom))]">
         
         <button
           onClick={() => setActiveTab('routes')}
-          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${
+          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
             activeTab === 'routes'
-              ? 'text-[#2D5A27] font-extrabold bg-[#E8F1E7]/70'
+              ? 'text-[#2D5A27] font-black bg-[#E8F1E7]'
               : 'text-[#6B665F] font-medium'
           }`}
+          title="Каталог маршрутов и карта"
         >
           <Compass className="w-4 h-4 mb-0.5" />
-          <span className="text-[10px]">Карты</span>
+          <span className="text-[9px] font-bold">Маршруты</span>
         </button>
 
         <button
           onClick={() => setActiveTab('companions')}
-          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${
+          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
             activeTab === 'companions'
-              ? 'text-[#2D5A27] font-extrabold bg-[#E8F1E7]/70'
+              ? 'text-[#2D5A27] font-black bg-[#E8F1E7]'
               : 'text-[#6B665F] font-medium'
           }`}
+          title="Поиск попутчиков и организация походов"
         >
           <Users className="w-4 h-4 mb-0.5" />
-          <span className="text-[10px]">Попутчики</span>
+          <span className="text-[9px] font-bold">Попутчики</span>
         </button>
 
         <button
           onClick={() => setActiveTab('mchs_safety')}
-          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${
+          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
             activeTab === 'mchs_safety'
-              ? 'text-[#2D5A27] font-extrabold bg-[#E8F1E7]/70'
+              ? 'text-[#2D5A27] font-black bg-[#E8F1E7]'
               : 'text-[#6B665F] font-medium'
           }`}
+          title="FAQ: Безопасность, связь, МЧС и ответы на вопросы"
         >
-          <RadioTower className="w-4 h-4 mb-0.5" />
-          <span className="text-[10px] whitespace-nowrap">Связь/МЧС</span>
+          <HelpCircle className="w-4 h-4 mb-0.5" />
+          <span className="text-[9px] font-bold">FAQ</span>
         </button>
 
         <button
           onClick={() => setActiveTab('articles')}
-          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${
+          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
             activeTab === 'articles'
-              ? 'text-[#2D5A27] font-extrabold bg-[#E8F1E7]/70'
+              ? 'text-[#2D5A27] font-black bg-[#E8F1E7]'
               : 'text-[#6B665F] font-medium'
           }`}
+          title="Статьи, лоции и отчеты об экспедициях"
         >
           <BookOpen className="w-4 h-4 mb-0.5" />
-          <span className="text-[10px]">Статьи</span>
+          <span className="text-[9px] font-bold">Статьи</span>
         </button>
 
         <button
-          onClick={() => setActiveTab('calculator')}
-          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${
-            activeTab === 'calculator'
-              ? 'text-[#2D5A27] font-extrabold bg-[#E8F1E7]/70'
+          onClick={() => setActiveTab('logbook')}
+          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
+            activeTab === 'logbook'
+              ? 'text-[#2D5A27] font-black bg-[#E8F1E7]'
               : 'text-[#6B665F] font-medium'
           }`}
+          title="Путевые заметки, чек-лист и бортовой журнал"
         >
-          <Calculator className="w-4 h-4 mb-0.5" />
-          <span className="text-[10px]">Расчет</span>
+          <Edit3 className="w-4 h-4 mb-0.5" />
+          <span className="text-[9px] font-bold">Заметки</span>
         </button>
 
         <button
@@ -231,11 +255,12 @@ export const Navbar: React.FC<NavbarProps> = ({
             if (!currentUser) onOpenAuth();
             else setActiveTab('cabinet');
           }}
-          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${
+          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
             activeTab === 'cabinet'
-              ? 'text-[#2D5A27] font-extrabold bg-[#E8F1E7]/70'
+              ? 'text-[#2D5A27] font-black bg-[#E8F1E7]'
               : 'text-[#6B665F] font-medium'
           }`}
+          title="Личный кабинет"
         >
           {currentUser?.avatar ? (
             <img
@@ -246,7 +271,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           ) : (
             <User className="w-4 h-4 mb-0.5" />
           )}
-          <span className="text-[10px]">
+          <span className="text-[9px] font-bold truncate max-w-[46px]">
             {currentUser ? currentUser.name.split(' ')[0] : 'Войти'}
           </span>
         </button>

@@ -27,11 +27,16 @@ import {
   ArrowDown,
   Upload,
   RotateCcw,
-  Check
+  Check,
+  BookOpen,
+  ExternalLink,
+  Search,
+  RefreshCw
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { parseGpxFile } from '../utils/gpxParser';
 import { compressImageFile } from '../utils/imageCompressor';
+import { fetchWikipediaRiverData, searchWikipediaSuggestions, WikipediaRiverInfo, cleanRiverName } from '../utils/wikipediaService';
 
 interface RiverPassportEditorModalProps {
   initialRoute?: RiverRoute | null;
@@ -140,6 +145,114 @@ export const RiverPassportEditorModal: React.FC<RiverPassportEditorModalProps> =
   const [newWarning, setNewWarning] = useState('');
   const [newGearItem, setNewGearItem] = useState('');
 
+  // Wikipedia Integration State
+  const [wikiInfo, setWikiInfo] = useState<WikipediaRiverInfo | null>(null);
+  const [isLoadingWiki, setIsLoadingWiki] = useState<boolean>(false);
+  const [wikiSearchQuery, setWikiSearchQuery] = useState<string>('');
+  const [wikiSuggestions, setWikiSuggestions] = useState<Array<{ title: string; snippet: string }>>([]);
+  const [showWikiDropdown, setShowWikiDropdown] = useState<boolean>(false);
+  const [wikiApplied, setWikiApplied] = useState<boolean>(false);
+
+  // Auto-search Wikipedia when riverName changes (debounced)
+  const debounceTimerRef = useRef<any>(null);
+  const handleRiverNameChange = (newName: string) => {
+    setFormData(prev => {
+      // Auto-set route name if empty or default
+      const autoRouteName = (!prev.name || prev.name.startsWith('Сплав по реке'))
+        ? `Сплав по реке ${cleanRiverName(newName) || newName}`
+        : prev.name;
+      return { ...prev, riverName: newName, name: autoRouteName };
+    });
+
+    setWikiApplied(false);
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+
+    const clean = cleanRiverName(newName);
+    if (clean.length >= 3) {
+      debounceTimerRef.current = setTimeout(() => {
+        fetchWikiForQuery(clean);
+      }, 700);
+    } else {
+      setWikiInfo(null);
+      setWikiSuggestions([]);
+    }
+  };
+
+  const fetchWikiForQuery = async (query: string) => {
+    if (!query || query.trim().length < 2) return;
+    setIsLoadingWiki(true);
+    try {
+      const data = await fetchWikipediaRiverData(query);
+      setWikiInfo(data);
+      if (!data) {
+        // Look up suggestions
+        const suggestions = await searchWikipediaSuggestions(query);
+        setWikiSuggestions(suggestions);
+      } else {
+        setWikiSuggestions([]);
+      }
+    } catch (err) {
+      console.warn('Wikipedia load err:', err);
+    } finally {
+      setIsLoadingWiki(false);
+    }
+  };
+
+  const applyWikiData = () => {
+    if (!wikiInfo) return;
+
+    setFormData(prev => {
+      const updated: RiverRoute = {
+        ...prev,
+        riverName: prev.riverName || wikiInfo.title.replace(/\s*\([^)]*\)/g, ''),
+        wikipediaUrl: wikiInfo.pageUrl,
+        wikipediaExtract: wikiInfo.extract
+      };
+
+      // Auto-fill shortDesc if empty or default
+      if (!updated.shortDesc || updated.shortDesc.length < 15) {
+        updated.shortDesc = wikiInfo.description || wikiInfo.extract.slice(0, 160) + '...';
+      }
+
+      // Auto-fill description if empty or default
+      if (!updated.description || updated.description.length < 25) {
+        updated.description = wikiInfo.extract;
+      }
+
+      // Fill basin if found and not set
+      if (wikiInfo.riverBasin && (!updated.riverBasin || updated.riverBasin === 'Бассейн реки Обь')) {
+        updated.riverBasin = wikiInfo.riverBasin;
+      }
+
+      // Fill length if parsed and not customized
+      if (wikiInfo.lengthKm && (!updated.lengthKm || updated.lengthKm === 45)) {
+        updated.lengthKm = wikiInfo.lengthKm;
+      }
+
+      // Fill coordinates if available and startPoint is default
+      if (wikiInfo.coordinates && updated.startPoint.lat === 61.0 && updated.startPoint.lng === 69.0) {
+        updated.startPoint = {
+          name: `Исток / Створ реки ${cleanRiverName(updated.riverName)}`,
+          lat: wikiInfo.coordinates.lat,
+          lng: wikiInfo.coordinates.lng
+        };
+      }
+
+      // Set cover image if available and current cover is default
+      if (wikiInfo.originalImageUrl || wikiInfo.thumbnailUrl) {
+        const wikiImg = wikiInfo.originalImageUrl || wikiInfo.thumbnailUrl;
+        if (PRESET_COVERS.some(c => c.url === updated.coverImage)) {
+          updated.coverImage = wikiImg!;
+        }
+      }
+
+      return updated;
+    });
+
+    setWikiApplied(true);
+    confetti({ particleCount: 40, spread: 60, origin: { y: 0.6 } });
+  };
+
   // Editing POI modal / state
   const [editingPoi, setEditingPoi] = useState<RoutePOI | null>(null);
   const [newPoi, setNewPoi] = useState<Partial<RoutePOI>>({
@@ -157,7 +270,7 @@ export const RiverPassportEditorModal: React.FC<RiverPassportEditorModalProps> =
   const handleCoverPhotoUpload = async (file: File) => {
     try {
       setIsCompressingImage(true);
-      const compressedDataUrl = await compressImageFile(file, 1400, 900, 0.85);
+      const compressedDataUrl = await compressImageFile(file, 1200, 800, 0.74);
       setFormData(prev => ({ ...prev, coverImage: compressedDataUrl }));
       confetti({ particleCount: 30, spread: 40, origin: { y: 0.6 } });
     } catch (err: any) {
@@ -173,7 +286,7 @@ export const RiverPassportEditorModal: React.FC<RiverPassportEditorModalProps> =
       setIsCompressingImage(true);
       const newUrls: string[] = [];
       for (let i = 0; i < files.length; i++) {
-        const compressed = await compressImageFile(files[i], 1200, 800, 0.82);
+        const compressed = await compressImageFile(files[i], 1000, 750, 0.70);
         newUrls.push(compressed);
       }
       setFormData(prev => ({
@@ -199,7 +312,7 @@ export const RiverPassportEditorModal: React.FC<RiverPassportEditorModalProps> =
   const handleNewPoiPhotoUpload = async (file: File) => {
     try {
       setIsCompressingImage(true);
-      const compressed = await compressImageFile(file, 800, 600, 0.82);
+      const compressed = await compressImageFile(file, 700, 500, 0.70);
       setNewPoi(prev => ({ ...prev, photo: compressed }));
     } catch (err: any) {
       alert(err.message || 'Ошибка загрузки фото ориентира.');
@@ -213,7 +326,7 @@ export const RiverPassportEditorModal: React.FC<RiverPassportEditorModalProps> =
     if (!editingPoi) return;
     try {
       setIsCompressingImage(true);
-      const compressed = await compressImageFile(file, 800, 600, 0.82);
+      const compressed = await compressImageFile(file, 700, 500, 0.70);
       setEditingPoi(prev => prev ? ({ ...prev, photo: compressed }) : null);
     } catch (err: any) {
       alert(err.message || 'Ошибка загрузки фото ориентира.');
@@ -461,15 +574,15 @@ export const RiverPassportEditorModal: React.FC<RiverPassportEditorModalProps> =
           </button>
         </div>
 
-        {/* Tabs Bar */}
-        <div className="flex items-center gap-1.5 px-4 sm:px-6 pt-3 pb-2 border-b border-[#E5E0D8] overflow-x-auto bg-[#FCFAF7] shrink-0 text-xs">
+        {/* Tabs Bar: responsive grid list so all steps are directly visible */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-1.5 p-3 sm:px-6 sm:py-3 border-b border-[#E5E0D8] bg-[#FCFAF7] shrink-0 text-xs">
           {[
             { id: 'general', label: '1. Основное', icon: FileText },
             { id: 'geography', label: '2. Характер реки', icon: Waves },
-            { id: 'lotia', label: `3. Локация и точки (${formData.pois.length})`, icon: MapPin },
-            { id: 'logistics', label: '4. Заброска / Выброска', icon: Truck },
-            { id: 'safety', label: '5. МЧС и Снаряжение', icon: ShieldAlert },
-            { id: 'media', label: '6. Фото с устройства & GPX', icon: Camera }
+            { id: 'lotia', label: `3. Точки (${formData.pois.length})`, icon: MapPin },
+            { id: 'logistics', label: '4. Заброска', icon: Truck },
+            { id: 'safety', label: '5. МЧС', icon: ShieldAlert },
+            { id: 'media', label: '6. Фото & GPX', icon: Camera }
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -478,14 +591,14 @@ export const RiverPassportEditorModal: React.FC<RiverPassportEditorModalProps> =
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`px-3 py-2 rounded-xl font-bold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                className={`p-2 rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 text-center cursor-pointer ${
                   isActive
                     ? 'bg-[#2D5A27] text-white shadow-xs'
-                    : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-white'
+                    : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-white border border-[#E5E0D8]/60'
                 }`}
               >
-                <Icon className="w-3.5 h-3.5" />
-                <span>{tab.label}</span>
+                <Icon className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{tab.label}</span>
               </button>
             );
           })}
@@ -513,19 +626,146 @@ export const RiverPassportEditorModal: React.FC<RiverPassportEditorModalProps> =
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-[#8B7E6D] mb-1">
-                    Название реки *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Например: Собь, Тромъёган, Аган"
-                    value={formData.riverName}
-                    onChange={(e) => setFormData({ ...formData, riverName: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl text-xs text-[#2D332D] outline-none focus:border-[#2D5A27] focus:bg-white"
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-[#8B7E6D]">
+                      Название реки *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => fetchWikiForQuery(cleanRiverName(formData.riverName))}
+                      disabled={isLoadingWiki || !formData.riverName.trim()}
+                      className="text-[11px] font-bold text-[#2D5A27] hover:text-[#1F3E1B] flex items-center gap-1 transition-colors disabled:opacity-40"
+                    >
+                      {isLoadingWiki ? (
+                        <>
+                          <RefreshCw className="w-3 h-3 animate-spin" />
+                          <span>Поиск в Википедии...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3 h-3 text-[#2D5A27]" />
+                          <span>Найти в Википедии</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      required
+                      placeholder="Например: Собь, Тромъёган, Казым, Аган"
+                      value={formData.riverName}
+                      onChange={(e) => handleRiverNameChange(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl text-xs text-[#2D332D] outline-none focus:border-[#2D5A27] focus:bg-white"
+                    />
+                  </div>
                 </div>
               </div>
+
+              {/* WIKIPEDIA SMART AUTO-CARD */}
+              {wikiInfo && (
+                <div className="p-4 bg-gradient-to-br from-[#F4F8F3] to-[#EAEFE9] rounded-2xl border border-[#CDE0CC] shadow-xs space-y-3 animate-fade-in">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      {wikiInfo.thumbnailUrl ? (
+                        <img
+                          src={wikiInfo.thumbnailUrl}
+                          alt={wikiInfo.title}
+                          className="w-16 h-16 rounded-xl object-cover border border-[#CDE0CC] shrink-0 shadow-xs"
+                        />
+                      ) : (
+                        <div className="w-12 h-12 rounded-xl bg-[#2D5A27]/10 text-[#2D5A27] flex items-center justify-center shrink-0">
+                          <BookOpen className="w-6 h-6" />
+                        </div>
+                      )}
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black tracking-wider uppercase px-2 py-0.5 rounded-md bg-[#2D5A27] text-white">
+                            Википедия
+                          </span>
+                          <span className="text-xs font-extrabold text-[#1A1F1A]">
+                            {wikiInfo.displayTitle || wikiInfo.title}
+                          </span>
+                        </div>
+                        <p className="text-xs text-[#4A443E] mt-1 line-clamp-2 leading-relaxed">
+                          {wikiInfo.extract}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Wiki metadata tags */}
+                  <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-[#CDE0CC]/60 text-[11px]">
+                    {wikiInfo.lengthKm && (
+                      <span className="bg-white/80 px-2 py-0.5 rounded-lg text-[#2D5A27] font-bold border border-[#CDE0CC]">
+                        📏 Длина: {wikiInfo.lengthKm} км
+                      </span>
+                    )}
+                    {wikiInfo.riverBasin && (
+                      <span className="bg-white/80 px-2 py-0.5 rounded-lg text-[#2D332D] font-medium border border-[#CDE0CC]">
+                        🌊 {wikiInfo.riverBasin}
+                      </span>
+                    )}
+                    <a
+                      href={wikiInfo.pageUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[#2D5A27] hover:underline font-bold inline-flex items-center gap-1 ml-auto"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>Статья в Википедии</span>
+                    </a>
+                  </div>
+
+                  {/* Apply action button */}
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[11px] text-[#6B665F]">
+                      {wikiApplied ? '✓ Данные применены к паспорту' : 'Автоматически заполнить описание, длину, бассейн и фото:'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={applyWikiData}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 ${
+                        wikiApplied
+                          ? 'bg-[#2D5A27] text-white'
+                          : 'bg-[#2D5A27] hover:bg-[#3D7136] text-white'
+                      }`}
+                    >
+                      {wikiApplied ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Данные загружены!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
+                          <span>Заполнить паспорт из Википедии</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* WIKIPEDIA SUGGESTIONS (if direct not matched) */}
+              {!wikiInfo && wikiSuggestions.length > 0 && (
+                <div className="p-3 bg-[#F9F7F4] rounded-xl border border-[#E5E0D8] space-y-2 animate-fade-in text-xs">
+                  <span className="text-[#8B7E6D] font-bold">Найдено в Википедии по запросу:</span>
+                  <div className="space-y-1">
+                    {wikiSuggestions.map((sug, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => fetchWikiForQuery(sug.title)}
+                        className="w-full text-left p-2 rounded-lg bg-white hover:bg-[#E8F1E7] border border-[#E5E0D8] transition-colors flex items-center justify-between gap-2"
+                      >
+                        <span className="font-bold text-[#2D5A27]">{sug.title}</span>
+                        <span className="text-[11px] text-[#8B7E6D] truncate max-w-xs">{sug.snippet}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
@@ -699,6 +939,51 @@ export const RiverPassportEditorModal: React.FC<RiverPassportEditorModalProps> =
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   className="w-full px-3.5 py-2.5 bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl text-xs text-[#2D332D] outline-none focus:border-[#2D5A27] focus:bg-white"
                 />
+              </div>
+
+              {/* Wikipedia reference block in Geography tab */}
+              <div className="p-4 bg-[#F9F7F4] rounded-2xl border border-[#E5E0D8] space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#2D332D] flex items-center gap-1.5">
+                    <BookOpen className="w-4 h-4 text-[#2D5A27]" />
+                    Статья и данные из Википедии
+                  </span>
+                  {formData.wikipediaUrl && (
+                    <a
+                      href={formData.wikipediaUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-[#2D5A27] font-bold hover:underline inline-flex items-center gap-1"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Открыть источник</span>
+                    </a>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-[#8B7E6D] mb-1">
+                    Прямая ссылка на страницу Википедии (URL)
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://ru.wikipedia.org/wiki/..."
+                    value={formData.wikipediaUrl || ''}
+                    onChange={(e) => setFormData({ ...formData, wikipediaUrl: e.target.value })}
+                    className="w-full px-3 py-2 bg-white border border-[#E5E0D8] rounded-xl text-xs text-[#2D332D] outline-none focus:border-[#2D5A27]"
+                  />
+                </div>
+
+                {formData.wikipediaExtract && (
+                  <div>
+                    <label className="block text-[11px] font-bold text-[#8B7E6D] mb-1">
+                      Сохранённый фрагмент статьи из Википедии
+                    </label>
+                    <p className="p-2.5 bg-white rounded-xl border border-[#E5E0D8] text-xs text-[#4A443E] leading-relaxed italic">
+                      "{formData.wikipediaExtract}"
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Highlights List */}

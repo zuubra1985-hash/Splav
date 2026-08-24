@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AppUser, UserRole } from '../types';
-import { ShieldCheck, User, Mail, Lock, Phone, MapPin, CheckCircle2, X, Sparkles, LogIn, UserPlus } from 'lucide-react';
+import { ShieldCheck, Mail, Lock, Phone, MapPin, CheckCircle2, X, Sparkles, LogIn, UserPlus, AlertCircle } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface AuthModalProps {
@@ -30,7 +30,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [regPhone, setRegPhone] = useState<string>('');
   const [regCity, setRegCity] = useState<string>('Сургут');
   const [regPassword, setRegPassword] = useState<string>('');
-  const [regExperience, setRegExperience] = useState<string>('Средний (2-4 сплава)');
+  const [regExperience, setRegExperience] = useState<string>('Любитель водных походов');
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -41,57 +41,84 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setErrorMessage(null);
 
     const cleanEmail = loginEmail.trim().toLowerCase();
-    const isSuperAdminEmail = cleanEmail === 'zuubra1985@gmail.com' || cleanEmail === 'novichek2@narod.ru';
-    
-    // Check superadmin credentials
-    if (isSuperAdminEmail) {
-      if (loginPassword && loginPassword !== '110985DimA' && loginPassword !== 'admin86') {
-        setErrorMessage('Неверный пароль администратора.');
-        return;
-      }
+    const cleanPassword = loginPassword.trim();
 
-      const superAdminUser: AppUser = {
-        id: cleanEmail === 'zuubra1985@gmail.com' ? 'user-superadmin-zuubra' : 'user-superadmin-novichek',
-        email: cleanEmail,
-        name: cleanEmail === 'zuubra1985@gmail.com' ? 'Администратор (zuubra1985)' : 'Главный Администратор (Дмитрий)',
-        phone: '+7 (922) 000-00-86',
-        role: 'superadmin',
-        city: 'Ханты-Мансийск / Сургут',
-        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
-        experienceLevel: 'Эксперт / Инструктор-проводник',
-        registeredAt: '2026-01-01',
-        favoriteRouteIds: ['sob-polar-ural', 'sosva-nyaksimvol-berezovo']
-      };
-      onLoginSuccess(superAdminUser);
-      onClose();
-      confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+    if (!cleanEmail) {
+      setErrorMessage('Пожалуйста, введите ваш Email адрес.');
+      return;
+    }
+    if (!cleanPassword) {
+      setErrorMessage('Пожалуйста, введите пароль.');
       return;
     }
 
-    // Check existing users
+    const isSuperAdminEmail = cleanEmail === 'zuubra1985@gmail.com' || cleanEmail === 'novichek2@narod.ru';
+    
+    // 1. Check superadmin credentials
+    if (isSuperAdminEmail) {
+      if (cleanPassword !== '110985DimA' && cleanPassword !== 'admin86') {
+        setErrorMessage('Неверный пароль администратора. Доступ запрещен.');
+        return;
+      }
+
+      // Check if superadmin is already in registeredUsers
+      const existingSuper = registeredUsers.find((u) => u.email.trim().toLowerCase() === cleanEmail);
+      const canonicalId = cleanEmail === 'zuubra1985@gmail.com' ? 'user-superadmin-zuubra' : 'user-superadmin-novichek';
+      const defaultName = cleanEmail === 'zuubra1985@gmail.com' ? 'Администратор (zuubra1985)' : 'Главный Администратор (Дмитрий)';
+      
+      const superAdminUser: AppUser = existingSuper
+        ? {
+            ...existingSuper,
+            id: canonicalId,
+            name: existingSuper.name && existingSuper.name !== 'Главный Администратор (novichek2)' ? existingSuper.name : defaultName,
+            role: 'superadmin'
+          }
+        : {
+            id: canonicalId,
+            email: cleanEmail,
+            name: defaultName,
+            phone: '+7 (922) 000-00-86',
+            role: 'superadmin',
+            password: cleanPassword,
+            city: 'Ханты-Мансийск / Сургут',
+            avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
+            experienceLevel: 'Эксперт / Инструктор-проводник',
+            registeredAt: '2026-01-01',
+            favoriteRouteIds: ['sob-polar-ural', 'sosva-nyaksimvol-berezovo'],
+            isReadyForExpeditions: true,
+            showContactsPublicly: true
+          };
+
+      onLoginSuccess(superAdminUser);
+      onClose();
+      try {
+        confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+      } catch (e) {
+        console.log(e);
+      }
+      return;
+    }
+
+    // 2. Strict Check: User MUST be already registered!
     const existing = registeredUsers.find((u) => u.email.toLowerCase() === cleanEmail);
-    if (existing) {
-      onLoginSuccess(existing);
-      onClose();
+    if (!existing) {
+      setErrorMessage(`Пользователь с адресом «${cleanEmail}» не найден в базе. Если вы еще не зарегистрированы, пожалуйста, перейдите на вкладку «Регистрация» и создайте аккаунт.`);
+      return;
+    }
+
+    // 3. Check user password
+    if (existing.password && existing.password.trim() !== '' && existing.password !== cleanPassword) {
+      setErrorMessage('Неверный пароль. Пожалуйста, проверьте правильность ввода пароля.');
+      return;
+    }
+
+    // Login successful
+    onLoginSuccess(existing);
+    onClose();
+    try {
       confetti({ particleCount: 50, spread: 50, origin: { y: 0.6 } });
-    } else {
-      // Auto-register convenience for new users
-      const newUser: AppUser = {
-        id: `user-${Date.now()}`,
-        email: cleanEmail,
-        name: cleanEmail.split('@')[0],
-        phone: '+7 (900) 000-00-00',
-        city: 'Югра / Ямал',
-        role: isSuperAdminEmail ? 'superadmin' : 'user',
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
-        experienceLevel: 'Водный турист',
-        registeredAt: new Date().toISOString().slice(0, 10),
-        favoriteRouteIds: ['sob-polar-ural']
-      };
-      onRegisterUser(newUser);
-      onLoginSuccess(newUser);
-      onClose();
-      confetti({ particleCount: 60, spread: 50, origin: { y: 0.6 } });
+    } catch (e) {
+      console.log(e);
     }
   };
 
@@ -100,30 +127,62 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setErrorMessage(null);
 
     const cleanEmail = regEmail.trim().toLowerCase();
-    if (!cleanEmail || !regName) {
-      setErrorMessage('Заполните обязательные поля.');
+    const cleanName = regName.trim();
+    const cleanPassword = regPassword.trim();
+
+    if (!cleanName || !cleanEmail) {
+      setErrorMessage('Пожалуйста, укажите ваше имя и Email адрес.');
+      return;
+    }
+
+    if (!cleanPassword || cleanPassword.length < 3) {
+      setErrorMessage('Пароль должен содержать не менее 3 символов.');
+      return;
+    }
+
+    // 1. Strict Duplicate Check: Cannot register existing email!
+    const alreadyExists = registeredUsers.some((u) => u.email.toLowerCase() === cleanEmail);
+    if (alreadyExists) {
+      setErrorMessage(`Пользователь с Email «${cleanEmail}» уже зарегистрирован в Splav86! Пожалуйста, перейдите на вкладку «Вход» и введите пароль.`);
       return;
     }
 
     const isSuper = cleanEmail === 'zuubra1985@gmail.com' || cleanEmail === 'novichek2@narod.ru';
 
+    // 2. Fresh new tourist profile with clean sheet
     const newUser: AppUser = {
       id: `user-${Date.now()}`,
       email: cleanEmail,
-      name: regName,
-      phone: regPhone || '+7 (900) 000-00-00',
-      city: regCity,
+      name: cleanName,
+      password: cleanPassword,
+      phone: regPhone.trim(),
+      city: regCity.trim() || 'Югра / Ямал',
       role: isSuper ? 'superadmin' : 'user',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
-      experienceLevel: regExperience,
+      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
+      experienceLevel: regExperience || 'Начинающий турист',
       registeredAt: new Date().toISOString().slice(0, 10),
-      favoriteRouteIds: ['sob-polar-ural']
+      favoriteRouteIds: [],
+      favoriteRivers: [],
+      vesselsOwned: [],
+      gearInventory: [],
+      badges: [],
+      bio: '',
+      callsign: '',
+      fstrRank: '',
+      telegram: '',
+      vk: '',
+      isReadyForExpeditions: true,
+      showContactsPublicly: true
     };
 
     onRegisterUser(newUser);
     onLoginSuccess(newUser);
     onClose();
-    confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+    try {
+      confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+    } catch (e) {
+      console.log(e);
+    }
   };
 
   return (
@@ -141,12 +200,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 {authMode === 'login' ? 'Вход в Личный кабинет' : 'Регистрация в Splav86'}
               </h2>
               <p className="text-xs text-[#8B7E6D]">
-                {authMode === 'login' ? 'Доступ к вашим маршрутам и управлению' : 'Создайте аккаунт туриста или организатора'}
+                {authMode === 'login' ? 'Только для зарегистрированных пользователей' : 'Создайте новый чистый аккаунт туриста'}
               </p>
             </div>
           </div>
 
-          <button onClick={onClose} className="p-1 rounded-full text-[#8B7E6D] hover:text-[#1A1F1A]">
+          <button onClick={onClose} className="p-1 rounded-full text-[#8B7E6D] hover:text-[#1A1F1A] cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -154,8 +213,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* Mode Switcher */}
         <div className="grid grid-cols-2 bg-[#F9F7F4] p-1 rounded-2xl border border-[#EEEBE6] text-xs font-bold">
           <button
-            onClick={() => setAuthMode('login')}
-            className={`py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+            onClick={() => {
+              setAuthMode('login');
+              setErrorMessage(null);
+            }}
+            className={`py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
               authMode === 'login' ? 'bg-[#2D5A27] text-white shadow-sm' : 'text-[#6B665F] hover:text-[#2D5A27]'
             }`}
           >
@@ -163,8 +225,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             Вход
           </button>
           <button
-            onClick={() => setAuthMode('register')}
-            className={`py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+            onClick={() => {
+              setAuthMode('register');
+              setErrorMessage(null);
+            }}
+            className={`py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
               authMode === 'register' ? 'bg-[#2D5A27] text-white shadow-sm' : 'text-[#6B665F] hover:text-[#2D5A27]'
             }`}
           >
@@ -175,8 +240,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Error message */}
         {errorMessage && (
-          <div className="p-3 bg-[#FDE8E8] border border-[#F8B4B4] rounded-xl text-xs text-[#E54B4B] font-bold">
-            {errorMessage}
+          <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-medium flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
+            <span>{errorMessage}</span>
           </div>
         )}
 
@@ -192,7 +258,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   required
                   placeholder="name@mail.ru"
                   value={loginEmail}
-                  onChange={(e) => setLoginEmail(e.target.value)}
+                  onChange={(e) => {
+                    setLoginEmail(e.target.value);
+                    if (errorMessage) setErrorMessage(null);
+                  }}
                   className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl pl-9 pr-3 py-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
                 />
               </div>
@@ -207,7 +276,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   required
                   placeholder="••••••••"
                   value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
+                  onChange={(e) => {
+                    setLoginPassword(e.target.value);
+                    if (errorMessage) setErrorMessage(null);
+                  }}
                   className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl pl-9 pr-3 py-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
                 />
               </div>
@@ -215,11 +287,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
             <button
               type="submit"
-              className="w-full py-3 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2"
+              className="w-full py-3 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <LogIn className="w-4 h-4" />
               Войти в Личный кабинет
             </button>
+
+            <div className="text-center pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('register');
+                  setErrorMessage(null);
+                }}
+                className="text-xs text-[#2D5A27] hover:underline font-semibold cursor-pointer"
+              >
+                Нет аккаунта? Зарегистрироваться
+              </button>
+            </div>
           </form>
         )}
 
@@ -227,25 +312,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {authMode === 'register' && (
           <form onSubmit={handleRegisterSubmit} className="space-y-3 text-xs">
             <div>
-              <label className="block text-[#4A443E] font-medium mb-1">ФИО / Имя</label>
+              <label className="block text-[#4A443E] font-medium mb-1">ФИО / Имя туриста *</label>
               <input
                 type="text"
                 required
                 placeholder="Иван Смирнов"
                 value={regName}
-                onChange={(e) => setRegName(e.target.value)}
+                onChange={(e) => {
+                  setRegName(e.target.value);
+                  if (errorMessage) setErrorMessage(null);
+                }}
                 className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
               />
             </div>
 
             <div>
-              <label className="block text-[#4A443E] font-medium mb-1">Email</label>
+              <label className="block text-[#4A443E] font-medium mb-1">Email адрес *</label>
               <input
                 type="email"
                 required
                 placeholder="ivan@mail.ru"
                 value={regEmail}
-                onChange={(e) => setRegEmail(e.target.value)}
+                onChange={(e) => {
+                  setRegEmail(e.target.value);
+                  if (errorMessage) setErrorMessage(null);
+                }}
                 className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
               />
             </div>
@@ -258,17 +349,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   placeholder="+7 (922)..."
                   value={regPhone}
                   onChange={(e) => setRegPhone(e.target.value)}
-                  className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none"
+                  className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
                 />
               </div>
               <div>
-                <label className="block text-[#4A443E] font-medium mb-1">Город</label>
+                <label className="block text-[#4A443E] font-medium mb-1">Город / Населенный пункт</label>
                 <input
                   type="text"
                   placeholder="Сургут / Салехард"
                   value={regCity}
                   onChange={(e) => setRegCity(e.target.value)}
-                  className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none"
+                  className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
                 />
               </div>
             </div>
@@ -278,7 +369,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <select
                 value={regExperience}
                 onChange={(e) => setRegExperience(e.target.value)}
-                className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none"
+                className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
               >
                 <option value="Начинающий (0-1 сплав)">Начинающий (0-1 сплав)</option>
                 <option value="Средний (2-4 сплава)">Средний (2-4 сплава)</option>
@@ -288,24 +379,41 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-[#4A443E] font-medium mb-1">Придумайте пароль</label>
+              <label className="block text-[#4A443E] font-medium mb-1">Пароль для входа * (мин. 3 символа)</label>
               <input
                 type="password"
                 required
+                minLength={3}
                 placeholder="••••••••"
                 value={regPassword}
-                onChange={(e) => setRegPassword(e.target.value)}
-                className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none"
+                onChange={(e) => {
+                  setRegPassword(e.target.value);
+                  if (errorMessage) setErrorMessage(null);
+                }}
+                className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
               />
             </div>
 
             <button
               type="submit"
-              className="w-full py-3 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2"
+              className="w-full py-3 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <UserPlus className="w-4 h-4" />
               Зарегистрироваться
             </button>
+
+            <div className="text-center pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('login');
+                  setErrorMessage(null);
+                }}
+                className="text-xs text-[#2D5A27] hover:underline font-semibold cursor-pointer"
+              >
+                Уже есть аккаунт? Войти
+              </button>
+            </div>
           </form>
         )}
 

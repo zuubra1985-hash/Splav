@@ -3,89 +3,315 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { ArrowUp, WifiOff, Wifi, RefreshCw, Zap } from 'lucide-react';
 import { Navbar } from './components/Navbar';
 import { MapModule } from './components/MapModule';
 import { RouteDetailModal } from './components/RouteDetailModal';
-import { WeatherHydroModule } from './components/WeatherHydroModule';
 import { MchsModule } from './components/MchsModule';
 import { CompanionsModule } from './components/CompanionsModule';
 import { ArticlesModule } from './components/ArticlesModule';
-import { CalculatorModule } from './components/CalculatorModule';
+import { TravelNotesModule } from './components/TravelNotesModule';
 import { UserCabinetModule } from './components/UserCabinetModule';
 import { AuthModal } from './components/AuthModal';
 import { RiverPassportEditorModal } from './components/RiverPassportEditorModal';
 
 import { RIVERS_DATA } from './data/riversData';
-import { HYDRO_STATIONS_DATA } from './data/hydroData';
 import { WEATHER_POINTS_DATA } from './data/weatherData';
 import { COMPANION_TRIPS_DATA } from './data/tripsData';
 import { SAFETY_GUIDES_DATA } from './data/safetyGuideData';
 import { ARTICLES_DATA } from './data/articlesData';
 
-import { RiverRoute, Region, CompanionTrip, HydroStation, ArticleReport, AppUser, UserRole } from './types';
-import { TripsSyncService, RoutesSyncService, UsersSyncService, ArticlesSyncService, HydroSyncService } from './firebase';
+import { RiverRoute, Region, CompanionTrip, ArticleReport, AppUser, UserRole, FaqDataConfig, TravelNotesConfig, CrewReview, TravelNote, RiverReview } from './types';
+import { TripsSyncService, RoutesSyncService, UsersSyncService, ArticlesSyncService, FaqSyncService, TravelNotesSyncService } from './firebase';
+import { CloudSqlDbService } from './services/cloudSqlDb';
+import { INITIAL_FAQ_DATA } from './data/faqData';
+import { INITIAL_TRAVEL_NOTES_CONFIG } from './data/logbookData';
+import { 
+  initTelegramWebApp, 
+  telegramHaptic, 
+  setupTelegramBackButton, 
+  isTelegramWebApp 
+} from './utils/telegramWebApp';
+import { 
+  getDeletedTripIds, 
+  recordTripDeletion, 
+  getDeletedArticleIds, 
+  recordArticleDeletion, 
+  getDeletedRouteIds, 
+  recordRouteDeletion, 
+  getDeletedUserKeys, 
+  recordUserDeletion, 
+  clearAllDeletionRegistries 
+} from './utils/deletionRegistry';
 
 const INITIAL_USERS: AppUser[] = [
   {
     id: 'user-superadmin-zuubra',
     email: 'zuubra1985@gmail.com',
     name: 'Администратор (zuubra1985)',
-    phone: '+7 (922) 000-00-86',
+    phone: '',
     role: 'superadmin',
-    city: 'Ханты-Мансийск / Сургут',
+    city: 'Сургут',
     avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
-    experienceLevel: 'Эксперт / Инструктор-проводник',
+    experienceLevel: 'Опытный турист',
     registeredAt: '2026-01-01',
-    favoriteRouteIds: ['sob-polar-ural', 'sosva-nyaksimvol-berezovo']
+    favoriteRouteIds: [],
+    favoriteRivers: [],
+    vesselsOwned: [],
+    gearInventory: [],
+    badges: [],
+    bio: '',
+    callsign: '',
+    fstrRank: '',
+    telegram: '',
+    vk: '',
+    isReadyForExpeditions: true,
+    showContactsPublicly: true
   },
   {
     id: 'user-superadmin-novichek',
     email: 'novichek2@narod.ru',
     name: 'Главный Администратор (Дмитрий)',
-    phone: '+7 (922) 000-00-86',
+    phone: '',
     role: 'superadmin',
-    city: 'Ханты-Мансийск / Сургут',
+    city: 'Сургут',
     avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
-    experienceLevel: 'Эксперт / Инструктор-проводник',
+    experienceLevel: 'Опытный турист',
     registeredAt: '2026-01-01',
-    favoriteRouteIds: ['sob-polar-ural', 'sosva-nyaksimvol-berezovo']
+    favoriteRouteIds: [],
+    favoriteRivers: [],
+    vesselsOwned: [],
+    gearInventory: [],
+    badges: [],
+    bio: '',
+    callsign: '',
+    fstrRank: '',
+    telegram: '',
+    vk: '',
+    isReadyForExpeditions: true,
+    showContactsPublicly: true
   },
   {
     id: 'user-2',
     email: 'alex.taiga@mail.ru',
     name: 'Алексей Медведев',
-    phone: '+7 (912) 456-78-90',
+    phone: '',
     role: 'admin',
     city: 'Сургут',
     avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
     experienceLevel: 'Опытный (5+ сплавов)',
     registeredAt: '2026-03-15',
-    favoriteRouteIds: ['tromyogan-surgut', 'agan-nizhnevartovsk']
+    favoriteRouteIds: [],
+    favoriteRivers: [],
+    vesselsOwned: [],
+    gearInventory: [],
+    badges: [],
+    bio: '',
+    callsign: '',
+    fstrRank: '',
+    telegram: '',
+    vk: '',
+    isReadyForExpeditions: true,
+    showContactsPublicly: true
   },
   {
     id: 'user-3',
     email: 'elena.polar@yandex.ru',
     name: 'Елена Белова',
-    phone: '+7 (932) 888-12-34',
+    phone: '',
     role: 'user',
     city: 'Салехард',
     avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&q=80',
     experienceLevel: 'Средний (2-4 сплава)',
     registeredAt: '2026-05-20',
-    favoriteRouteIds: ['shchuchya-yamal-canyon']
+    favoriteRouteIds: [],
+    favoriteRivers: [],
+    vesselsOwned: [],
+    gearInventory: [],
+    badges: [],
+    bio: '',
+    callsign: '',
+    fstrRank: '',
+    telegram: '',
+    vk: '',
+    isReadyForExpeditions: true,
+    showContactsPublicly: true
   }
 ];
 
+const VALID_TABS = ['routes', 'companions', 'mchs_safety', 'articles', 'logbook', 'cabinet'] as const;
+type AppTab = typeof VALID_TABS[number];
+
+const getInitialTab = (): AppTab => {
+  if (typeof window !== 'undefined') {
+    const hash = window.location.hash.replace(/^#\/?/, '').split('/')[0];
+    if (VALID_TABS.includes(hash as AppTab)) {
+      return hash as AppTab;
+    }
+    try {
+      const saved = localStorage.getItem('splav86_active_tab');
+      if (saved && VALID_TABS.includes(saved as AppTab)) {
+        return saved as AppTab;
+      }
+    } catch (e) {}
+  }
+  return 'routes';
+};
+
+const getInitialRegion = (): Region => {
+  if (typeof window !== 'undefined') {
+    try {
+      const saved = localStorage.getItem('splav86_selected_region');
+      if (saved === 'ALL' || saved === 'ХМАО' || saved === 'ЯНАО') {
+        return saved as Region;
+      }
+    } catch (e) {}
+  }
+  return 'ALL';
+};
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'routes' | 'weather_hydro' | 'companions' | 'mchs_safety' | 'articles' | 'calculator' | 'cabinet'>('routes');
-  const [selectedRegion, setSelectedRegion] = useState<Region>('ALL');
+  const [activeTab, setActiveTabState] = useState<AppTab>(getInitialTab);
+  const [selectedRegion, setSelectedRegionState] = useState<Region>(getInitialRegion);
+
+  const setActiveTab = (tab: AppTab) => {
+    telegramHaptic('selection');
+    setActiveTabState(tab);
+    try {
+      localStorage.setItem('splav86_active_tab', tab);
+      if (typeof window !== 'undefined') {
+        if (window.location.hash.replace(/^#\/?/, '') !== tab) {
+          window.history.replaceState(null, '', `#${tab}`);
+        }
+      }
+    } catch (e) {}
+  };
+
+  const setSelectedRegion = (region: Region) => {
+    setSelectedRegionState(region);
+    try {
+      localStorage.setItem('splav86_selected_region', region);
+    } catch (e) {}
+  };
+
+  // Sync with browser URL hash / back-forward navigation
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace(/^#\/?/, '').split('/')[0];
+      if (VALID_TABS.includes(hash as AppTab)) {
+        setActiveTabState(hash as AppTab);
+        try {
+          localStorage.setItem('splav86_active_tab', hash);
+        } catch (e) {}
+      }
+    };
+
+    window.addEventListener('hashchange', handleHashChange);
+    if (typeof window !== 'undefined' && !window.location.hash) {
+      window.history.replaceState(null, '', `#${activeTab}`);
+    }
+
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [activeTab]);
+
+  // Online-Only Strict Mode Status
+  const [isOnline, setIsOnline] = useState<boolean>(() => typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [isCheckingConnection, setIsCheckingConnection] = useState<boolean>(false);
+
+  // Active Network Monitoring (Online-Only Architecture)
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // Periodic connectivity health check to backend & internet
+    const interval = setInterval(async () => {
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        try {
+          const res = await fetch('/api/health', { method: 'GET', cache: 'no-store' });
+          if (res.ok) {
+            setIsOnline(true);
+          }
+        } catch {
+          if (!navigator.onLine) {
+            setIsOnline(false);
+          }
+        }
+      } else {
+        setIsOnline(false);
+      }
+    }, 15000);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      clearInterval(interval);
+    };
+  }, []);
+
+  const handleCheckConnection = async () => {
+    setIsCheckingConnection(true);
+    try {
+      const res = await fetch('/api/health', { method: 'GET', cache: 'no-store' });
+      if (res.ok) {
+        setIsOnline(true);
+      } else {
+        setIsOnline(false);
+      }
+    } catch {
+      setIsOnline(false);
+    } finally {
+      setIsCheckingConnection(false);
+    }
+  };
 
   // Registered Users & Current Auth State (Guest by default on new visits)
   const [registeredUsers, setRegisteredUsers] = useState<AppUser[]>(() => {
     try {
+      const deletedKeys = getDeletedUserKeys();
       const stored = localStorage.getItem('splav86_users');
-      return stored ? JSON.parse(stored) : INITIAL_USERS;
+      const list: AppUser[] = stored ? JSON.parse(stored) : INITIAL_USERS;
+      const map = new Map<string, AppUser>();
+
+      // Guaranteed root superadmins (unless explicitly deleted)
+      INITIAL_USERS.filter((u) => u.role === 'superadmin').forEach((sa) => {
+        const key = sa.email.trim().toLowerCase();
+        if (!deletedKeys.has(key) && !deletedKeys.has(sa.id.trim().toLowerCase())) {
+          map.set(key, sa);
+        }
+      });
+
+      list.forEach((u) => {
+        const emailKey = (u.email || '').trim().toLowerCase();
+        const idKey = (u.id || '').trim().toLowerCase();
+        if (!emailKey || deletedKeys.has(emailKey) || deletedKeys.has(idKey)) return;
+
+        if (emailKey === 'novichek2@narod.ru') {
+          map.set(emailKey, {
+            ...u,
+            id: 'user-superadmin-novichek',
+            name: 'Главный Администратор (Дмитрий)',
+            role: 'superadmin'
+          });
+        } else if (emailKey === 'zuubra1985@gmail.com') {
+          map.set(emailKey, {
+            ...u,
+            id: 'user-superadmin-zuubra',
+            name: 'Администратор (zuubra1985)',
+            role: 'superadmin'
+          });
+        } else {
+          map.set(emailKey, u);
+        }
+      });
+      return Array.from(map.values());
     } catch {
       return INITIAL_USERS;
     }
@@ -106,38 +332,192 @@ export default function App() {
   const [routes, setRoutes] = useState<RiverRoute[]>(() => {
     try {
       const stored = localStorage.getItem('splav86_custom_routes_v5');
-      return stored ? JSON.parse(stored) : RIVERS_DATA;
-    } catch {
-      return RIVERS_DATA;
-    }
-  });
-
-  const [hydroStations, setHydroStations] = useState<HydroStation[]>(() => {
-    try {
-      const stored = localStorage.getItem('splav86_custom_hydro');
-      return stored ? JSON.parse(stored) : HYDRO_STATIONS_DATA;
-    } catch {
-      return HYDRO_STATIONS_DATA;
-    }
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
   });
 
   const [articles, setArticles] = useState<ArticleReport[]>(() => {
     try {
       const stored = localStorage.getItem('splav86_custom_articles');
-      return stored ? JSON.parse(stored) : ARTICLES_DATA;
-    } catch {
-      return ARTICLES_DATA;
-    }
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
   });
 
   const [trips, setTrips] = useState<CompanionTrip[]>(() => {
     try {
       const stored = localStorage.getItem('splav86_custom_trips_v5');
-      return stored ? JSON.parse(stored) : COMPANION_TRIPS_DATA;
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+
+  const [faqData, setFaqData] = useState<FaqDataConfig>(() => {
+    try {
+      const stored = localStorage.getItem('splav86_faq_data_v1');
+      return stored ? JSON.parse(stored) : INITIAL_FAQ_DATA;
     } catch {
-      return COMPANION_TRIPS_DATA;
+      return INITIAL_FAQ_DATA;
     }
   });
+
+  const [notesConfig, setNotesConfig] = useState<TravelNotesConfig>(() => {
+    try {
+      const stored = localStorage.getItem('splav86_travel_notes_config_v1');
+      const parsed: TravelNotesConfig = stored ? JSON.parse(stored) : { ...INITIAL_TRAVEL_NOTES_CONFIG };
+
+      // Also merge individual isolated local storage arrays if present
+      const storedCrew = localStorage.getItem('splav86_crew_reviews_v2');
+      if (storedCrew) {
+        try {
+          const list: CrewReview[] = JSON.parse(storedCrew);
+          if (Array.isArray(list) && list.length > 0) {
+            const map = new Map<string, CrewReview>();
+            (parsed.crewReviews || []).forEach((r) => map.set(r.id, r));
+            list.forEach((r) => map.set(r.id, r));
+            parsed.crewReviews = Array.from(map.values());
+          }
+        } catch (e) {
+          console.warn(e);
+        }
+      }
+
+      const storedNotes = localStorage.getItem('splav86_travel_notes_v2');
+      if (storedNotes) {
+        try {
+          const list: TravelNote[] = JSON.parse(storedNotes);
+          if (Array.isArray(list) && list.length > 0) {
+            const map = new Map<string, TravelNote>();
+            (parsed.notes || []).forEach((n) => map.set(n.id, n));
+            list.forEach((n) => map.set(n.id, n));
+            parsed.notes = Array.from(map.values());
+          }
+        } catch (e) {
+          console.warn(e);
+        }
+      }
+
+      const storedRiverReviews = localStorage.getItem('splav86_river_reviews_v2');
+      if (storedRiverReviews) {
+        try {
+          const list: RiverReview[] = JSON.parse(storedRiverReviews);
+          if (Array.isArray(list) && list.length > 0) {
+            const map = new Map<string, RiverReview>();
+            (parsed.riverReviews || []).forEach((r) => map.set(r.id, r));
+            list.forEach((r) => map.set(r.id, r));
+            parsed.riverReviews = Array.from(map.values());
+          }
+        } catch (e) {
+          console.warn(e);
+        }
+      }
+
+      return parsed;
+    } catch {
+      return INITIAL_TRAVEL_NOTES_CONFIG;
+    }
+  });
+
+  // Track scroll position to show compact, unobtrusive "Back to Top" floating button on mobile
+  const [showScrollTop, setShowScrollTop] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      // Only active on mobile viewport (< 768px)
+      if (window.innerWidth >= 768) {
+        setShowScrollTop(false);
+        return;
+      }
+
+      const scrollY = window.scrollY;
+      const totalScrollable = document.documentElement.scrollHeight - window.innerHeight;
+
+      if (totalScrollable <= 300) {
+        setShowScrollTop(false);
+        return;
+      }
+
+      // Appears only closer to the end of scrolling (e.g. > 60% of page or scrolled > 500px)
+      const threshold = Math.max(450, totalScrollable * 0.60);
+
+      if (scrollY >= threshold) {
+        setShowScrollTop(true);
+      } else {
+        setShowScrollTop(false);
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('resize', handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleScroll);
+    };
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    });
+  };
+
+  // ----------------------------------------------------
+  // Telegram Mini App (TMA) Lifecycle & Seamless Auth
+  // ----------------------------------------------------
+  useEffect(() => {
+    const tgTourist = initTelegramWebApp();
+    if (tgTourist) {
+      // Auto-authenticate tourist seamlessly if inside Telegram
+      setCurrentUser((prevUser) => {
+        if (prevUser) {
+          if (!prevUser.telegram && tgTourist.username) {
+            return {
+              ...prevUser,
+              telegram: `@${tgTourist.username}`,
+              avatar: prevUser.avatar || tgTourist.photo_url || prevUser.avatar
+            };
+          }
+          return prevUser;
+        }
+
+        const tgUsernameClean = tgTourist.username?.toLowerCase().replace('@', '');
+        const isSuper = Boolean(tgUsernameClean && ['zuubra1985', 'novichek2'].includes(tgUsernameClean));
+        
+        const autoUser: AppUser = {
+          id: `tg-${tgTourist.id}`,
+          name: [tgTourist.first_name, tgTourist.last_name].filter(Boolean).join(' ') || (tgTourist.username ? `@${tgTourist.username}` : 'Турист Telegram'),
+          email: tgTourist.username ? `${tgTourist.username.toLowerCase()}@telegram.org` : `tg_${tgTourist.id}@splav86.ru`,
+          phone: '',
+          telegram: tgTourist.username ? `@${tgTourist.username}` : '',
+          avatar: tgTourist.photo_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
+          role: isSuper ? 'superadmin' : 'user',
+          registeredAt: new Date().toISOString().split('T')[0],
+          city: 'Югра / Ямал',
+          experienceLevel: 'Водный турист (Telegram)',
+          favoriteRouteIds: [],
+          isReadyForExpeditions: true,
+          showContactsPublicly: true
+        };
+
+        UsersSyncService.saveUser(autoUser).catch(console.warn);
+        CloudSqlDbService.saveUser(autoUser).catch(console.warn);
+        setRegisteredUsers((prev) => [...prev.filter((u) => u.id !== autoUser.id), autoUser]);
+
+        return autoUser;
+      });
+    }
+  }, []);
 
   // Real-time Cloud Synchronization via Firebase Firestore
   useEffect(() => {
@@ -145,119 +525,77 @@ export default function App() {
     let isBootstrappingUsers = false;
     let isBootstrappingRoutes = false;
     let isBootstrappingArticles = false;
-    let isBootstrappingHydro = false;
+    let isBootstrappingFaq = false;
+    let isBootstrappingNotes = false;
 
-    // 1. Subscribe to Trips (Real-time expeditions)
+    // 1. Initial SQL fetch and Subscribe to Trips (Real-time expeditions)
+    CloudSqlDbService.fetchTrips().then((sqlTrips) => {
+      if (sqlTrips && sqlTrips.length > 0) {
+        setTrips(sqlTrips);
+      }
+    }).catch(console.warn);
+
     const unsubTrips = TripsSyncService.subscribeToTrips((cloudTrips) => {
-      if (!cloudTrips || cloudTrips.length === 0) {
-        if (!isBootstrappingTrips) {
-          isBootstrappingTrips = true;
-          const seedMap = new Map<string, CompanionTrip>();
-          COMPANION_TRIPS_DATA.forEach((t) => seedMap.set(t.id, t));
-          try {
-            const local = localStorage.getItem('splav86_custom_trips_v5');
-            if (local) {
-              const parsed: CompanionTrip[] = JSON.parse(local);
-              parsed.forEach((t) => seedMap.set(t.id, t));
-            }
-          } catch (e) {
-            console.error(e);
-          }
-          const allToSeed = Array.from(seedMap.values());
-          allToSeed.forEach((t) => {
-            TripsSyncService.saveTrip(t).catch(console.error);
-          });
-          setTrips(allToSeed);
-        }
-      } else {
-        // Cloud has trips: Check if local storage has any un-synced user trips and push them to cloud
-        try {
-          const local = localStorage.getItem('splav86_custom_trips_v5');
-          if (local) {
-            const parsed: CompanionTrip[] = JSON.parse(local);
-            const cloudIds = new Set(cloudTrips.map((t) => t.id));
-            parsed.forEach((localTrip) => {
-              if (!cloudIds.has(localTrip.id)) {
-                TripsSyncService.saveTrip(localTrip).catch(console.error);
-              }
-            });
-          }
-        } catch (e) {
-          console.error(e);
-        }
-
-        setTrips(cloudTrips);
-        try {
-          localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(cloudTrips));
-        } catch (e) {
-          console.error(e);
-        }
+      const tripsToSet = cloudTrips || [];
+      setTrips(tripsToSet);
+      try {
+        localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(tripsToSet));
+      } catch (e) {
+        console.error(e);
       }
     });
 
-    // 2. Subscribe to Routes (River passports and catalog)
-    const unsubRoutes = RoutesSyncService.subscribeToRoutes((cloudRoutes) => {
-      if (!cloudRoutes || cloudRoutes.length === 0) {
-        if (!isBootstrappingRoutes) {
-          isBootstrappingRoutes = true;
-          const seedMap = new Map<string, RiverRoute>();
-          RIVERS_DATA.forEach((r) => seedMap.set(r.id, r));
-          try {
-            const local = localStorage.getItem('splav86_custom_routes_v5');
-            if (local) {
-              const parsed: RiverRoute[] = JSON.parse(local);
-              parsed.forEach((r) => seedMap.set(r.id, r));
-            }
-          } catch (e) {
-            console.error(e);
-          }
-          const allToSeed = Array.from(seedMap.values());
-          allToSeed.forEach((r) => {
-            RoutesSyncService.saveRoute(r).catch(console.error);
-          });
-          setRoutes(allToSeed);
-        }
-      } else {
-        try {
-          const local = localStorage.getItem('splav86_custom_routes_v5');
-          if (local) {
-            const parsed: RiverRoute[] = JSON.parse(local);
-            const cloudIds = new Set(cloudRoutes.map((r) => r.id));
-            parsed.forEach((localRoute) => {
-              if (!cloudIds.has(localRoute.id)) {
-                RoutesSyncService.saveRoute(localRoute).catch(console.error);
-              }
-            });
-          }
-        } catch (e) {
-          console.error(e);
-        }
+    // 2. Initial SQL fetch and Subscribe to Routes (River passports and catalog)
+    CloudSqlDbService.fetchRoutes().then((sqlRoutes) => {
+      if (sqlRoutes && sqlRoutes.length > 0) {
+        setRoutes(sqlRoutes);
+      }
+    }).catch(console.warn);
 
-        setRoutes(cloudRoutes);
-        try {
-          localStorage.setItem('splav86_custom_routes_v5', JSON.stringify(cloudRoutes));
-        } catch (e) {
-          console.error(e);
-        }
+    const unsubRoutes = RoutesSyncService.subscribeToRoutes((cloudRoutes) => {
+      const routesToSet = cloudRoutes || [];
+      setRoutes(routesToSet);
+      try {
+        localStorage.setItem('splav86_custom_routes_v5', JSON.stringify(routesToSet));
+      } catch (e) {
+        console.error(e);
       }
     });
 
     // 3. Subscribe to Users (Tourists, Organizers, Admins)
+    CloudSqlDbService.fetchUsers().then((sqlUsers) => {
+      if (sqlUsers && sqlUsers.length > 0) {
+        const deletedKeys = getDeletedUserKeys();
+        setRegisteredUsers((prev) => {
+          const map = new Map<string, AppUser>();
+          INITIAL_USERS.filter(
+            (u) => !deletedKeys.has(u.email.trim().toLowerCase()) && !deletedKeys.has(u.id.trim().toLowerCase())
+          ).forEach((u) => map.set(u.email.trim().toLowerCase(), u));
+          prev.forEach((u) => {
+            const k = (u.email || '').trim().toLowerCase();
+            const idKey = (u.id || '').trim().toLowerCase();
+            if (k && !deletedKeys.has(k) && !deletedKeys.has(idKey)) map.set(k, u);
+          });
+          sqlUsers.forEach((u) => {
+            const k = (u.email || '').trim().toLowerCase();
+            const idKey = (u.id || '').trim().toLowerCase();
+            if (k && !deletedKeys.has(k) && !deletedKeys.has(idKey)) map.set(k, u);
+          });
+          return Array.from(map.values());
+        });
+      }
+    }).catch(console.warn);
+
     const unsubUsers = UsersSyncService.subscribeToUsers((cloudUsers) => {
+      const deletedKeys = getDeletedUserKeys();
+
       if (!cloudUsers || cloudUsers.length === 0) {
         if (!isBootstrappingUsers) {
           isBootstrappingUsers = true;
           const seedMap = new Map<string, AppUser>();
-          INITIAL_USERS.forEach((u) => seedMap.set(u.id, u));
-          try {
-            const local = localStorage.getItem('splav86_users');
-            if (local) {
-              const parsed: AppUser[] = JSON.parse(local);
-              parsed.forEach((u) => seedMap.set(u.id, u));
-            }
-          } catch (e) {
-            console.error(e);
-          }
+          INITIAL_USERS.filter(
+            (u) => !deletedKeys.has(u.email.trim().toLowerCase()) && !deletedKeys.has(u.id.trim().toLowerCase())
+          ).forEach((u) => seedMap.set(u.email.trim().toLowerCase(), u));
           const allToSeed = Array.from(seedMap.values());
           allToSeed.forEach((u) => {
             UsersSyncService.saveUser(u).catch(console.error);
@@ -265,125 +603,224 @@ export default function App() {
           setRegisteredUsers(allToSeed);
         }
       } else {
-        try {
-          const local = localStorage.getItem('splav86_users');
-          if (local) {
-            const parsed: AppUser[] = JSON.parse(local);
-            const cloudIds = new Set(cloudUsers.map((u) => u.id));
-            parsed.forEach((localUser) => {
-              if (!cloudIds.has(localUser.id)) {
-                UsersSyncService.saveUser(localUser).catch(console.error);
-              }
-            });
-          }
-        } catch (e) {
-          console.error(e);
-        }
+        // Strict deduplication by normalized email, omitting deleted accounts
+        const emailMap = new Map<string, AppUser>();
+        const duplicateIdsToDelete: string[] = [];
 
-        setRegisteredUsers(cloudUsers);
+        // Guaranteed root superadmins (unless explicitly in deleted list)
+        INITIAL_USERS.filter((u) => u.role === 'superadmin').forEach((sa) => {
+          const saEmail = sa.email.trim().toLowerCase();
+          const saId = sa.id.trim().toLowerCase();
+          if (!deletedKeys.has(saEmail) && !deletedKeys.has(saId)) {
+            emailMap.set(saEmail, sa);
+          }
+        });
+
+        // Merge cloud users, detect duplicates, and omit deleted users
+        cloudUsers.forEach((u) => {
+          const emailKey = (u.email || '').trim().toLowerCase();
+          const idKey = (u.id || '').trim().toLowerCase();
+          if (!emailKey) return;
+
+          if (deletedKeys.has(emailKey) || deletedKeys.has(idKey)) {
+            // Delete lingering cloud documents for already deleted user
+            UsersSyncService.removeUser(u.id).catch(console.warn);
+            CloudSqlDbService.deleteUser(u.id).catch(console.warn);
+            return;
+          }
+
+          if (emailMap.has(emailKey)) {
+            const existing = emailMap.get(emailKey)!;
+            // Identify if this is the superadmin novichek2
+            if (emailKey === 'novichek2@narod.ru') {
+              if (u.id === 'user-superadmin-novichek') {
+                if (existing.id !== 'user-superadmin-novichek') {
+                  duplicateIdsToDelete.push(existing.id);
+                }
+                emailMap.set(emailKey, {
+                  ...existing,
+                  ...u,
+                  id: 'user-superadmin-novichek',
+                  name: 'Главный Администратор (Дмитрий)',
+                  role: 'superadmin'
+                });
+              } else {
+                duplicateIdsToDelete.push(u.id);
+              }
+            } else if (emailKey === 'zuubra1985@gmail.com') {
+              if (u.id === 'user-superadmin-zuubra') {
+                if (existing.id !== 'user-superadmin-zuubra') {
+                  duplicateIdsToDelete.push(existing.id);
+                }
+                emailMap.set(emailKey, {
+                  ...existing,
+                  ...u,
+                  id: 'user-superadmin-zuubra',
+                  name: 'Администратор (zuubra1985)',
+                  role: 'superadmin'
+                });
+              } else {
+                duplicateIdsToDelete.push(u.id);
+              }
+            } else {
+              // General user: keep one record and merge fields
+              if (existing.id !== u.id) {
+                duplicateIdsToDelete.push(u.id);
+              }
+              emailMap.set(emailKey, { ...existing, ...u });
+            }
+          } else {
+            emailMap.set(emailKey, u);
+          }
+        });
+
+        // 3. Purge duplicate documents from Firestore and CloudSQL
+        duplicateIdsToDelete.forEach((dupId) => {
+          if (dupId && dupId !== 'user-superadmin-novichek' && dupId !== 'user-superadmin-zuubra') {
+            UsersSyncService.removeUser(dupId).catch(console.warn);
+            CloudSqlDbService.deleteUser(dupId).catch(console.warn);
+          }
+        });
+
+        const uniqueUsers = Array.from(emailMap.values());
+        setRegisteredUsers(uniqueUsers);
         try {
-          localStorage.setItem('splav86_users', JSON.stringify(cloudUsers));
+          localStorage.setItem('splav86_users', JSON.stringify(uniqueUsers));
         } catch (e) {
           console.error(e);
         }
       }
     });
 
-    // 4. Subscribe to Articles & Reports
+    // 4. Initial SQL fetch and Subscribe to Articles & Reports
+    CloudSqlDbService.fetchArticles().then((sqlArticles) => {
+      if (sqlArticles && sqlArticles.length > 0) {
+        setArticles(sqlArticles);
+      }
+    }).catch(console.warn);
+
     const unsubArticles = ArticlesSyncService.subscribeToArticles((cloudArticles) => {
-      if (!cloudArticles || cloudArticles.length === 0) {
-        if (!isBootstrappingArticles) {
-          isBootstrappingArticles = true;
-          const seedMap = new Map<string, ArticleReport>();
-          ARTICLES_DATA.forEach((a) => seedMap.set(a.id, a));
-          try {
-            const local = localStorage.getItem('splav86_custom_articles');
-            if (local) {
-              const parsed: ArticleReport[] = JSON.parse(local);
-              parsed.forEach((a) => seedMap.set(a.id, a));
-            }
-          } catch (e) {
-            console.error(e);
-          }
-          const allToSeed = Array.from(seedMap.values());
-          allToSeed.forEach((a) => {
-            ArticlesSyncService.saveArticle(a).catch(console.error);
-          });
-          setArticles(allToSeed);
-        }
-      } else {
-        // Sync local storage and built-in articles with cloud
-        try {
-          const cloudIds = new Set(cloudArticles.map((a) => a.id));
-          
-          // 1. Check if any catalog/built-in article is missing in cloud
-          ARTICLES_DATA.forEach((defArt) => {
-            if (!cloudIds.has(defArt.id)) {
-              ArticlesSyncService.saveArticle(defArt).catch(console.error);
-            }
-          });
+      const articlesToSet = cloudArticles || [];
+      setArticles(articlesToSet);
+      try {
+        localStorage.setItem('splav86_custom_articles', JSON.stringify(articlesToSet));
+      } catch (e) {
+        console.error(e);
+      }
+    });
 
-          // 2. Check if local storage has any un-synced user articles
-          const local = localStorage.getItem('splav86_custom_articles');
-          if (local) {
-            const parsed: ArticleReport[] = JSON.parse(local);
-            parsed.forEach((localArt) => {
-              if (!cloudIds.has(localArt.id)) {
-                ArticlesSyncService.saveArticle(localArt).catch(console.error);
-              }
+    // 5. Initial SQL fetch and Subscribe to FAQ Configuration
+    CloudSqlDbService.fetchFaq().then((sqlFaq) => {
+      if (sqlFaq) {
+        setFaqData(sqlFaq);
+      }
+    }).catch(console.warn);
+
+    const unsubFaq = FaqSyncService.subscribeToFaq((cloudFaq) => {
+      if (cloudFaq) {
+        setFaqData(cloudFaq);
+        CloudSqlDbService.saveFaq(cloudFaq).catch(console.warn);
+        try {
+          localStorage.setItem('splav86_faq_data_v1', JSON.stringify(cloudFaq));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    });
+
+    // 6. Initial SQL fetch and Subscribe to Travel Notes, Checklists & Reviews Configuration
+    CloudSqlDbService.fetchTravelNotes().then((sqlNotes) => {
+      if (sqlNotes) {
+        setNotesConfig(sqlNotes);
+      }
+    }).catch(console.warn);
+
+    const unsubNotes = TravelNotesSyncService.subscribeToNotesConfig((cloudNotes) => {
+      if (cloudNotes) {
+        setNotesConfig(cloudNotes);
+        CloudSqlDbService.saveTravelNotes(cloudNotes).catch(console.warn);
+        try {
+          localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(cloudNotes));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    });
+
+    // Periodic and window-focus sync across all 7 modules
+    const handleSilentSync = () => {
+      CloudSqlDbService.fetchTrips().then((sqlTrips) => {
+        if (sqlTrips && sqlTrips.length > 0) {
+          setTrips(sqlTrips);
+        }
+      }).catch(console.warn);
+
+      CloudSqlDbService.fetchRoutes().then((sqlRoutes) => {
+        if (sqlRoutes && sqlRoutes.length > 0) {
+          setRoutes(sqlRoutes);
+        }
+      }).catch(console.warn);
+
+      CloudSqlDbService.fetchArticles().then((sqlArticles) => {
+        if (sqlArticles && sqlArticles.length > 0) {
+          setArticles(sqlArticles);
+        }
+      }).catch(console.warn);
+
+      CloudSqlDbService.fetchUsers().then((sqlUsers) => {
+        if (sqlUsers && sqlUsers.length > 0) {
+          const deletedKeys = getDeletedUserKeys();
+          setRegisteredUsers((prev) => {
+            const map = new Map<string, AppUser>();
+            INITIAL_USERS.filter(
+              (u) => !deletedKeys.has(u.email.trim().toLowerCase()) && !deletedKeys.has(u.id.trim().toLowerCase())
+            ).forEach((u) => map.set(u.email.trim().toLowerCase(), u));
+            prev.forEach((u) => {
+              const k = (u.email || '').trim().toLowerCase();
+              const idKey = (u.id || '').trim().toLowerCase();
+              if (k && !deletedKeys.has(k) && !deletedKeys.has(idKey)) map.set(k, u);
             });
-          }
-        } catch (e) {
-          console.error(e);
-        }
-
-        setArticles(cloudArticles);
-        try {
-          localStorage.setItem('splav86_custom_articles', JSON.stringify(cloudArticles));
-        } catch (e) {
-          console.error(e);
-        }
-      }
-    });
-
-    // 5. Subscribe to Hydro Stations
-    const unsubHydro = HydroSyncService.subscribeToHydro((cloudHydro) => {
-      if (!cloudHydro || cloudHydro.length === 0) {
-        if (!isBootstrappingHydro) {
-          isBootstrappingHydro = true;
-          const seedMap = new Map<string, HydroStation>();
-          HYDRO_STATIONS_DATA.forEach((h) => seedMap.set(h.id, h));
-          try {
-            const local = localStorage.getItem('splav86_custom_hydro');
-            if (local) {
-              const parsed: HydroStation[] = JSON.parse(local);
-              parsed.forEach((h) => seedMap.set(h.id, h));
-            }
-          } catch (e) {
-            console.error(e);
-          }
-          const allToSeed = Array.from(seedMap.values());
-          allToSeed.forEach((h) => {
-            HydroSyncService.saveHydroStation(h).catch(console.error);
+            sqlUsers.forEach((u) => {
+              const k = (u.email || '').trim().toLowerCase();
+              const idKey = (u.id || '').trim().toLowerCase();
+              if (k && !deletedKeys.has(k) && !deletedKeys.has(idKey)) map.set(k, u);
+            });
+            return Array.from(map.values());
           });
-          setHydroStations(allToSeed);
         }
-      } else {
-        setHydroStations(cloudHydro);
-        try {
-          localStorage.setItem('splav86_custom_hydro', JSON.stringify(cloudHydro));
-        } catch (e) {
-          console.error(e);
+      }).catch(console.warn);
+
+      CloudSqlDbService.fetchTravelNotes().then((sqlNotes) => {
+        if (sqlNotes) {
+          setNotesConfig((prev) => ({
+            notes: sqlNotes.notes?.length ? sqlNotes.notes : prev.notes,
+            checklist: sqlNotes.checklist?.length ? sqlNotes.checklist : prev.checklist,
+            logbookTrips: sqlNotes.logbookTrips?.length ? sqlNotes.logbookTrips : prev.logbookTrips,
+            riverReviews: sqlNotes.riverReviews?.length ? sqlNotes.riverReviews : prev.riverReviews,
+            crewReviews: sqlNotes.crewReviews?.length ? sqlNotes.crewReviews : prev.crewReviews
+          }));
         }
-      }
-    });
+      }).catch(console.warn);
+
+      CloudSqlDbService.fetchFaq().then((sqlFaq) => {
+        if (sqlFaq) {
+          setFaqData(sqlFaq);
+        }
+      }).catch(console.warn);
+    };
+
+    const syncInterval = setInterval(handleSilentSync, 20000);
+    window.addEventListener('focus', handleSilentSync);
 
     return () => {
+      clearInterval(syncInterval);
+      window.removeEventListener('focus', handleSilentSync);
       unsubTrips();
       unsubRoutes();
       unsubUsers();
       unsubArticles();
-      unsubHydro();
+      unsubFaq();
+      unsubNotes();
     };
   }, []);
 
@@ -418,14 +855,6 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('splav86_custom_hydro', JSON.stringify(hydroStations));
-    } catch (e) {
-      console.error(e);
-    }
-  }, [hydroStations]);
-
-  useEffect(() => {
-    try {
       localStorage.setItem('splav86_custom_articles', JSON.stringify(articles));
     } catch (e) {
       console.error(e);
@@ -440,10 +869,21 @@ export default function App() {
     }
   }, [trips]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('splav86_faq_data_v1', JSON.stringify(faqData));
+    } catch (e) {
+      console.error(e);
+    }
+  }, [faqData]);
+
   const handleRegisterUser = (newUser: AppUser) => {
     setRegisteredUsers((prev) => [newUser, ...prev]);
     UsersSyncService.saveUser(newUser).catch((err) => {
       console.warn('Failed to sync new user to Firestore:', err);
+    });
+    CloudSqlDbService.saveUser(newUser).catch((err) => {
+      console.warn('Failed to sync new user to CloudSQL:', err);
     });
   };
 
@@ -454,6 +894,9 @@ export default function App() {
           const userWithRole = { ...u, role: newRole };
           UsersSyncService.saveUser(userWithRole).catch((err) => {
             console.warn('Failed to sync user role to Firestore:', err);
+          });
+          CloudSqlDbService.saveUser(userWithRole).catch((err) => {
+            console.warn('Failed to sync user role to CloudSQL:', err);
           });
           return userWithRole;
         }
@@ -467,9 +910,28 @@ export default function App() {
   };
 
   const handleDeleteUser = (userId: string) => {
-    setRegisteredUsers((prev) => prev.filter((u) => u.id !== userId));
+    const targetUser = registeredUsers.find((u) => u.id === userId);
+    recordUserDeletion(userId, targetUser?.email);
+
+    const updated = registeredUsers.filter(
+      (u) => u.id !== userId && (!targetUser || (u.email || '').toLowerCase() !== (targetUser.email || '').toLowerCase())
+    );
+    setRegisteredUsers(updated);
+
+    try {
+      localStorage.setItem('splav86_users', JSON.stringify(updated));
+    } catch (e) {
+      console.warn('Failed to save updated users to localStorage:', e);
+    }
+
     UsersSyncService.removeUser(userId).catch((err) => {
       console.warn('Failed to remove user from Firestore:', err);
+    });
+    if (targetUser && targetUser.id !== userId) {
+      UsersSyncService.removeUser(targetUser.id).catch(console.warn);
+    }
+    CloudSqlDbService.deleteUser(userId).catch((err) => {
+      console.warn('Failed to delete user from CloudSQL:', err);
     });
   };
 
@@ -479,30 +941,251 @@ export default function App() {
 
   const handleUpdateCurrentUser = (updatedUser: AppUser) => {
     setCurrentUser(updatedUser);
+
+    // 1. Update in registeredUsers list (by ID and normalized Email)
+    const normEmail = (updatedUser.email || '').trim().toLowerCase();
     setRegisteredUsers((prev) =>
-      prev.map((u) => (u.id === updatedUser.id ? updatedUser : u))
+      prev.map((u) => {
+        const uEmail = (u.email || '').trim().toLowerCase();
+        if (u.id === updatedUser.id || (normEmail && uEmail === normEmail)) {
+          return { ...u, ...updatedUser };
+        }
+        return u;
+      })
     );
+
+    // 2. Cascade avatar and name changes to trips (organizer & applications)
+    setTrips((prevTrips) => {
+      let changed = false;
+      const nextTrips = prevTrips.map((t) => {
+        let tripModified = false;
+        let nextOrg = t.organizer;
+        const orgEmail = (t.organizer.email || '').trim().toLowerCase();
+        const orgId = t.organizer.id;
+
+        if (orgId === updatedUser.id || (normEmail && orgEmail === normEmail)) {
+          nextOrg = {
+            ...t.organizer,
+            name: updatedUser.name || t.organizer.name,
+            avatar: updatedUser.avatar || t.organizer.avatar,
+            phone: updatedUser.phone || t.organizer.phone,
+            fstrRank: updatedUser.fstrRank || t.organizer.fstrRank
+          };
+          tripModified = true;
+        }
+
+        // Update applications by this user
+        let nextApps = t.applications;
+        if (t.applications && t.applications.length > 0) {
+          nextApps = t.applications.map((app) => {
+            const appEmail = (app.applicantEmail || '').trim().toLowerCase();
+            if (app.applicantUserId === updatedUser.id || (normEmail && appEmail === normEmail)) {
+              tripModified = true;
+              return {
+                ...app,
+                applicantName: updatedUser.name || app.applicantName,
+                applicantAvatar: updatedUser.avatar || app.applicantAvatar,
+                applicantPhone: updatedUser.phone || app.applicantPhone
+              };
+            }
+            return app;
+          });
+        }
+
+        if (tripModified) {
+          changed = true;
+          const updatedTrip = { ...t, organizer: nextOrg, applications: nextApps };
+          TripsSyncService.saveTrip(updatedTrip).catch(console.warn);
+          return updatedTrip;
+        }
+        return t;
+      });
+
+      if (changed) {
+        try {
+          localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(nextTrips));
+        } catch (e) {
+          console.warn(e);
+        }
+      }
+      return nextTrips;
+    });
+
+    // 3. Cascade avatar and name to articles
+    setArticles((prevArticles) => {
+      let changed = false;
+      const nextArticles = prevArticles.map((art) => {
+        const artEmail = (art.authorEmail || '').trim().toLowerCase();
+        if (art.authorId === updatedUser.id || (normEmail && artEmail === normEmail) || art.author === updatedUser.name) {
+          changed = true;
+          const updatedArt = {
+            ...art,
+            author: updatedUser.name || art.author,
+            authorAvatar: updatedUser.avatar || art.authorAvatar
+          };
+          ArticlesSyncService.saveArticle(updatedArt).catch(console.warn);
+          return updatedArt;
+        }
+        return art;
+      });
+
+      if (changed) {
+        try {
+          localStorage.setItem('splav86_custom_articles', JSON.stringify(nextArticles));
+        } catch (e) {
+          console.warn(e);
+        }
+      }
+      return nextArticles;
+    });
+
+    // 4. Save user to Firestore & CloudSQL
     UsersSyncService.saveUser(updatedUser).catch((err) => {
       console.warn('Failed to sync current user update to Firestore:', err);
     });
+    CloudSqlDbService.saveUser(updatedUser).catch((err) => {
+      console.warn('Failed to sync current user update to CloudSQL:', err);
+    });
+
+    // 5. Persist to localStorage
     try {
       localStorage.setItem('splav86_current_user', JSON.stringify(updatedUser));
-      const allUsers = registeredUsers.map((u) => (u.id === updatedUser.id ? updatedUser : u));
-      localStorage.setItem('splav86_registered_users', JSON.stringify(allUsers));
+      const allUsers = registeredUsers.map((u) => {
+        const uEmail = (u.email || '').trim().toLowerCase();
+        if (u.id === updatedUser.id || (normEmail && uEmail === normEmail)) {
+          return { ...u, ...updatedUser };
+        }
+        return u;
+      });
+      localStorage.setItem('splav86_users', JSON.stringify(allUsers));
     } catch (err) {
       console.error(err);
     }
   };
 
-  const handleResetToDefaults = () => {
+  const handleToggleFavoriteRoute = (routeId: string) => {
+    if (!currentUser) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+    const currentFavs = currentUser.favoriteRouteIds || [];
+    const exists = currentFavs.includes(routeId);
+    const nextFavs = exists
+      ? currentFavs.filter((id) => id !== routeId)
+      : [...currentFavs, routeId];
+
+    const updatedUser: AppUser = {
+      ...currentUser,
+      favoriteRouteIds: nextFavs
+    };
+    handleUpdateCurrentUser(updatedUser);
+  };
+
+  const handleClearAllUserCards = () => {
+    setRegisteredUsers((prev) => {
+      const cleaned = prev.map((u) => ({
+        ...u,
+        phone: '',
+        vesselsOwned: [],
+        gearInventory: [],
+        favoriteRivers: [],
+        favoriteRouteIds: [],
+        badges: [],
+        bio: '',
+        callsign: '',
+        fstrRank: '',
+        telegram: '',
+        vk: '',
+        isReadyForExpeditions: true,
+        showContactsPublicly: true
+      }));
+      cleaned.forEach((u) => {
+        UsersSyncService.saveUser(u).catch(console.warn);
+        CloudSqlDbService.saveUser(u).catch(console.warn);
+      });
+      localStorage.setItem('splav86_users', JSON.stringify(cleaned));
+      return cleaned;
+    });
+
+    if (currentUser) {
+      const updatedCurrent: AppUser = {
+        ...currentUser,
+        phone: '',
+        vesselsOwned: [],
+        gearInventory: [],
+        favoriteRivers: [],
+        favoriteRouteIds: [],
+        badges: [],
+        bio: '',
+        callsign: '',
+        fstrRank: '',
+        telegram: '',
+        vk: '',
+        isReadyForExpeditions: true,
+        showContactsPublicly: true
+      };
+      setCurrentUser(updatedCurrent);
+      localStorage.setItem('splav86_current_user', JSON.stringify(updatedCurrent));
+      UsersSyncService.saveUser(updatedCurrent).catch(console.warn);
+      CloudSqlDbService.saveUser(updatedCurrent).catch(console.warn);
+    }
+
+    const cleanedNotes: TravelNotesConfig = {
+      ...notesConfig,
+      crewReviews: []
+    };
+    setNotesConfig(cleanedNotes);
+    TravelNotesSyncService.saveNotesConfig(cleanedNotes).catch(console.warn);
+    CloudSqlDbService.saveTravelNotes(cleanedNotes).catch(console.warn);
+  };
+
+  const handleResetToDefaults = async () => {
     localStorage.removeItem('splav86_custom_routes');
-    localStorage.removeItem('splav86_custom_hydro');
+    localStorage.removeItem('splav86_custom_routes_v5');
     localStorage.removeItem('splav86_custom_articles');
     localStorage.removeItem('splav86_custom_trips');
-    setRoutes(RIVERS_DATA);
-    setHydroStations(HYDRO_STATIONS_DATA);
-    setArticles(ARTICLES_DATA);
-    setTrips(COMPANION_TRIPS_DATA);
+    localStorage.removeItem('splav86_custom_trips_v5');
+    localStorage.removeItem('splav86_faq_data_v1');
+    localStorage.removeItem('splav86_travel_notes_config_v1');
+    localStorage.removeItem('splav86_travel_notes_v2');
+    localStorage.removeItem('splav86_river_reviews_v2');
+    localStorage.removeItem('splav86_crew_reviews_v2');
+
+    // Wipe routes from cloud
+    routes.forEach((r) => {
+      RoutesSyncService.removeRoute(r.id).catch(console.warn);
+      CloudSqlDbService.deleteRoute(r.id).catch(console.warn);
+    });
+    setRoutes([]);
+    CloudSqlDbService.saveRoutes([]).catch(console.warn);
+
+    // Wipe articles from cloud
+    articles.forEach((a) => {
+      ArticlesSyncService.removeArticle(a.id).catch(console.warn);
+      CloudSqlDbService.deleteArticle(a.id).catch(console.warn);
+    });
+    setArticles([]);
+    CloudSqlDbService.saveArticles([]).catch(console.warn);
+
+    // Wipe trips from cloud
+    trips.forEach((t) => {
+      TripsSyncService.removeTrip(t.id).catch(console.warn);
+      CloudSqlDbService.deleteTrip(t.id).catch(console.warn);
+    });
+    setTrips([]);
+    CloudSqlDbService.saveTrips([]).catch(console.warn);
+
+    // Reset notes
+    setNotesConfig(INITIAL_TRAVEL_NOTES_CONFIG);
+    TravelNotesSyncService.saveNotesConfig(INITIAL_TRAVEL_NOTES_CONFIG).catch(console.warn);
+    CloudSqlDbService.saveTravelNotes(INITIAL_TRAVEL_NOTES_CONFIG).catch(console.warn);
+
+    // Reset FAQ
+    setFaqData(INITIAL_FAQ_DATA);
+    FaqSyncService.saveFaq(INITIAL_FAQ_DATA).catch(console.warn);
+    CloudSqlDbService.saveFaq(INITIAL_FAQ_DATA).catch(console.warn);
+
+    handleClearAllUserCards();
   };
 
   // Selected route state
@@ -511,14 +1194,38 @@ export default function App() {
   const [mchsInitialRoute, setMchsInitialRoute] = useState<RiverRoute | null>(null);
   const [isPassportEditorOpen, setIsPassportEditorOpen] = useState<boolean>(false);
   const [passportEditorRoute, setPassportEditorRoute] = useState<RiverRoute | null>(null);
-  const [cabinetInitialTab, setCabinetInitialTab] = useState<'profile' | 'routes' | 'hydro' | 'articles' | 'users' | 'backup'>('profile');
+  const [cabinetInitialTab, setCabinetInitialTab] = useState<'profile' | 'applications' | 'routes' | 'articles' | 'trips' | 'faq' | 'users' | 'travel_notes' | 'backup' | 'sync_history'>('profile');
   const [cabinetInitialArticle, setCabinetInitialArticle] = useState<ArticleReport | null>(null);
+
+  // Telegram Native BackButton integration
+  useEffect(() => {
+    const hasModal = Boolean(selectedRoute || isPassportEditorOpen || isAuthModalOpen);
+    if (hasModal) {
+      return setupTelegramBackButton(() => {
+        telegramHaptic('light');
+        if (selectedRoute) setSelectedRoute(null);
+        if (isPassportEditorOpen) setIsPassportEditorOpen(false);
+        if (isAuthModalOpen) setIsAuthModalOpen(false);
+      });
+    } else if (activeTab !== 'routes') {
+      return setupTelegramBackButton(() => {
+        telegramHaptic('light');
+        setActiveTab('routes');
+      });
+    }
+  }, [selectedRoute, isPassportEditorOpen, isAuthModalOpen, activeTab]);
 
   // Superadmin & Admin status
   const isSuperAdmin = currentUser?.email.toLowerCase() === 'zuubra1985@gmail.com' || 
                        currentUser?.email.toLowerCase() === 'novichek2@narod.ru' || 
                        currentUser?.role === 'superadmin';
   const isAdmin = isSuperAdmin || currentUser?.role === 'admin';
+
+  const handleOpenFaqEditor = () => {
+    if (!isAdmin) return;
+    setCabinetInitialTab('faq');
+    setActiveTab('cabinet');
+  };
 
   const handleOpenArticleEditor = (article?: ArticleReport) => {
     if (!isAdmin) return;
@@ -584,16 +1291,40 @@ export default function App() {
   };
 
   const handleCreateNewTrip = (newTrip: CompanionTrip) => {
-    setTrips((prev) => [newTrip, ...prev]);
+    setTrips((prev) => {
+      const updated = [newTrip, ...prev.filter(t => t.id !== newTrip.id)];
+      try {
+        localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      CloudSqlDbService.saveTrips(updated).catch(console.warn);
+      return updated;
+    });
     TripsSyncService.saveTrip(newTrip).catch((err) => {
       console.warn('Failed to sync new trip to Firestore:', err);
+    });
+    CloudSqlDbService.saveTrip(newTrip).catch((err) => {
+      console.warn('Failed to sync new trip to CloudSQL API:', err);
     });
   };
 
   const handleUpdateTrip = (updatedTrip: CompanionTrip) => {
-    setTrips((prev) => prev.map((t) => (t.id === updatedTrip.id ? updatedTrip : t)));
+    setTrips((prev) => {
+      const updated = prev.map((t) => (t.id === updatedTrip.id ? updatedTrip : t));
+      try {
+        localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      CloudSqlDbService.saveTrips(updated).catch(console.warn);
+      return updated;
+    });
     TripsSyncService.saveTrip(updatedTrip).catch((err) => {
       console.warn('Failed to sync updated trip to Firestore:', err);
+    });
+    CloudSqlDbService.saveTrip(updatedTrip).catch((err) => {
+      console.warn('Failed to sync updated trip to CloudSQL API:', err);
     });
   };
 
@@ -663,8 +1394,31 @@ export default function App() {
     setActiveTab('routes');
   };
 
+  // Filter routes: public catalog routes + public shared routes + user's own uploaded personal routes (or all routes for admins)
+  const accessibleRoutes = useMemo(() => {
+    return routes.filter((r) => {
+      // If not personal, it is a base public catalog route
+      if (!r.isPersonal) return true;
+      // If author chose to share/publish it, it's public for everyone
+      if (r.isPublic) return true;
+      // If current user is the author, they can view their own private route
+      if (
+        currentUser &&
+        ((r.authorId && r.authorId === currentUser.id) ||
+          (r.authorEmail && r.authorEmail.toLowerCase() === currentUser.email.toLowerCase()))
+      ) {
+        return true;
+      }
+      // Admins see all routes for moderation
+      if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin')) {
+        return true;
+      }
+      return false;
+    });
+  }, [routes, currentUser]);
+
   // Filter routes by region
-  const regionFilteredRoutes = routes.filter((r) => {
+  const regionFilteredRoutes = accessibleRoutes.filter((r) => {
     if (selectedRegion === 'ALL') return true;
     return r.region === selectedRegion;
   });
@@ -680,10 +1434,11 @@ export default function App() {
         setSelectedRegion={setSelectedRegion}
         currentUser={currentUser}
         onOpenAuth={() => setIsAuthModalOpen(true)}
+        isOnline={isOnline}
       />
 
       {/* Main View Area */}
-      <main className="flex-1 pb-20 xl:pb-8">
+      <main className={`flex-1 ${activeTab === 'routes' ? 'pb-0' : 'pb-16 sm:pb-6'}`}>
         
         {/* 1. ROUTES & LEAFLET MAP */}
         {activeTab === 'routes' && (
@@ -693,6 +1448,7 @@ export default function App() {
             currentUser={currentUser}
             onSelectRoute={setSelectedRoute}
             onOpenRouteDetails={(r) => setDetailModalRoute(r)}
+            onToggleFavorite={handleToggleFavoriteRoute}
             onOpenPassportEditor={isAdmin ? (r) => {
               setPassportEditorRoute(r || null);
               setIsPassportEditorOpen(true);
@@ -707,31 +1463,57 @@ export default function App() {
                 }
                 return updated;
               });
+              RoutesSyncService.saveRoute(newRoute).catch((err) => {
+                console.warn('Failed to sync added route to Firestore:', err);
+              });
               setSelectedRoute(newRoute);
             } : undefined}
           />
         )}
 
-        {/* 2. WEATHER & HYDROLOGY */}
-        {activeTab === 'weather_hydro' && (
-          <WeatherHydroModule
-            weatherPoints={WEATHER_POINTS_DATA}
-            hydroStations={hydroStations}
-            selectedRegion={selectedRegion}
-          />
-        )}
-
-        {/* 3. COMPANIONS & TRIPS */}
+        {/* 2. COMPANIONS & TRIPS */}
         {activeTab === 'companions' && (
           <CompanionsModule
             trips={trips}
             selectedRegion={selectedRegion}
             currentUser={currentUser}
+            registeredUsers={registeredUsers}
+            crewReviews={notesConfig.crewReviews}
             routes={routes}
             onOpenAuth={() => setIsAuthModalOpen(true)}
             onCreateTrip={handleCreateNewTrip}
             onUpdateTrip={handleUpdateTrip}
             onViewOnMainMap={handleViewTripOnMainMap}
+            onOpenCabinetApplications={() => {
+              setCabinetInitialTab('applications');
+              setActiveTab('cabinet');
+            }}
+            onAddCrewReview={(newRev) => {
+              const updated = [newRev, ...(notesConfig.crewReviews || [])];
+              const newConfig = { ...notesConfig, crewReviews: updated };
+              setNotesConfig(newConfig);
+              try {
+                localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
+              } catch (e) {
+                console.error(e);
+              }
+              TravelNotesSyncService.saveNotesConfig(newConfig).catch((err) => {
+                console.warn('Failed to sync new review to Firestore:', err);
+              });
+            }}
+            onDeleteCrewReview={(reviewId) => {
+              const updated = (notesConfig.crewReviews || []).filter(r => r.id !== reviewId);
+              const newConfig = { ...notesConfig, crewReviews: updated };
+              setNotesConfig(newConfig);
+              try {
+                localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
+              } catch (e) {
+                console.error(e);
+              }
+              TravelNotesSyncService.saveNotesConfig(newConfig).catch((err) => {
+                console.warn('Failed to sync deleted review to Firestore:', err);
+              });
+            }}
             onDeleteTrip={(tripId) => {
               setTrips(prev => {
                 const updated = prev.filter(t => t.id !== tripId);
@@ -745,20 +1527,26 @@ export default function App() {
               TripsSyncService.removeTrip(tripId).catch((err) => {
                 console.warn('Failed to remove trip from Firestore:', err);
               });
+              CloudSqlDbService.deleteTrip(tripId).catch((err) => {
+                console.warn('Failed to remove trip from CloudSQL:', err);
+              });
             }}
           />
         )}
 
-        {/* 4. MCHS & WILDERNESS SAFETY */}
+        {/* 3. FAQ & MCHS & WILDERNESS SAFETY */}
         {activeTab === 'mchs_safety' && (
           <MchsModule
             routes={routes}
-            safetyGuides={SAFETY_GUIDES_DATA}
+            safetyGuides={faqData.safetyGuides || SAFETY_GUIDES_DATA}
             initialRoute={mchsInitialRoute}
+            faqData={faqData}
+            isAdmin={isAdmin}
+            onOpenFaqEditor={handleOpenFaqEditor}
           />
         )}
 
-        {/* 5. ARTICLES & RIVER PILOT GUIDES */}
+        {/* 4. ARTICLES & RIVER PILOT GUIDES */}
         {activeTab === 'articles' && (
           <ArticlesModule
             articles={articles}
@@ -768,12 +1556,24 @@ export default function App() {
           />
         )}
 
-        {/* 6. EXPEDITION CALCULATOR & GEAR CHECKLIST */}
-        {activeTab === 'calculator' && (
-          <CalculatorModule />
+        {/* 5. TRAVEL NOTES, PACKING CHECKLIST & LOGBOOK */}
+        {activeTab === 'logbook' && (
+          <TravelNotesModule
+            routes={routes}
+            currentUser={currentUser}
+            registeredUsers={registeredUsers}
+            onOpenAuth={() => setIsAuthModalOpen(true)}
+            isAdmin={isAdmin}
+            notesConfig={notesConfig}
+            setNotesConfig={setNotesConfig}
+            onOpenAdminNotesManager={() => {
+              setCabinetInitialTab('travel_notes');
+              setActiveTab('cabinet');
+            }}
+          />
         )}
 
-        {/* 7. PERSONAL ACCOUNT & SUPER ADMIN CABINET */}
+        {/* 6. PERSONAL ACCOUNT & SUPER ADMIN CABINET */}
         {activeTab === 'cabinet' && (
           <UserCabinetModule
             currentUser={currentUser}
@@ -785,28 +1585,56 @@ export default function App() {
             onDeleteUser={handleDeleteUser}
             routes={routes}
             setRoutes={setRoutes}
-            hydroStations={hydroStations}
-            setHydroStations={setHydroStations}
             articles={articles}
             setArticles={setArticles}
             trips={trips}
             setTrips={setTrips}
+            faqData={faqData}
+            setFaqData={setFaqData}
+            notesConfig={notesConfig}
+            setNotesConfig={setNotesConfig}
             onResetToDefaults={handleResetToDefaults}
+            onClearAllUserCards={handleClearAllUserCards}
             onSelectRoute={(r) => {
               setSelectedRoute(r);
               setActiveTab('routes');
             }}
             onOpenRouteDetails={(r) => setDetailModalRoute(r)}
-            onOpenPassportEditor={isAdmin ? (r) => {
+            onOpenPassportEditor={(r) => {
               setPassportEditorRoute(r || null);
               setIsPassportEditorOpen(true);
-            } : undefined}
+            }}
             initialCabinetTab={cabinetInitialTab}
             initialEditingArticle={cabinetInitialArticle}
+            onClearInitialArticle={() => setCabinetInitialArticle(null)}
           />
         )}
 
+        {/* Compact Footer (hidden on full-screen map to avoid unnecessary scrolling) */}
+        {activeTab !== 'routes' && (
+          <footer className="mt-4 py-3 border-t border-[#E5E0D8] text-center text-xs text-[#8B7E6D]">
+            <div className="flex items-center justify-center gap-2 max-w-7xl mx-auto px-4">
+              <span className="font-bold text-[#1A1F1A]">SPLAV86</span>
+              <span>— Водный туризм ХМАО-Югры и ЯНАО</span>
+            </div>
+          </footer>
+        )}
+
       </main>
+
+      {/* Discrete Floating "Back to Top" Button - Mobile Only */}
+      <button
+        onClick={scrollToTop}
+        aria-label="Вернуться наверх к выбору вкладок"
+        title="Наверх к меню"
+        className={`sm:hidden fixed bottom-20 right-3 z-40 w-8 h-8 flex items-center justify-center bg-[#2D5A27]/85 active:bg-[#2D5A27] text-white rounded-full shadow-md backdrop-blur-xs border border-white/30 cursor-pointer transition-all duration-300 ${
+          showScrollTop
+            ? 'opacity-85 scale-100 pointer-events-auto'
+            : 'opacity-0 scale-75 pointer-events-none'
+        }`}
+      >
+        <ArrowUp className="w-3.5 h-3.5" />
+      </button>
 
       {/* Route Detail Modal */}
       {detailModalRoute && (
@@ -815,15 +1643,20 @@ export default function App() {
           currentUser={currentUser}
           onClose={() => setDetailModalRoute(null)}
           onSelectForMchs={handleSelectForMchs}
-          onEditRoute={isAdmin ? (r) => {
-            setPassportEditorRoute(r);
-            setIsPassportEditorOpen(true);
-          } : undefined}
+          onToggleFavorite={handleToggleFavoriteRoute}
+          onEditRoute={
+            (isAdmin || (currentUser && ((detailModalRoute.authorId && detailModalRoute.authorId === currentUser.id) || (detailModalRoute.authorEmail && detailModalRoute.authorEmail.toLowerCase() === currentUser.email.toLowerCase()))))
+              ? (r) => {
+                  setPassportEditorRoute(r);
+                  setIsPassportEditorOpen(true);
+                }
+              : undefined
+          }
         />
       )}
 
-      {/* River Passport Full Editor Modal (Admin only) */}
-      {isPassportEditorOpen && isAdmin && (
+      {/* River Passport Full Editor Modal (Admin or Route Author) */}
+      {isPassportEditorOpen && (isAdmin || (passportEditorRoute && currentUser && ((passportEditorRoute.authorId && passportEditorRoute.authorId === currentUser.id) || (passportEditorRoute.authorEmail && passportEditorRoute.authorEmail.toLowerCase() === currentUser.email.toLowerCase())))) && (
         <RiverPassportEditorModal
           initialRoute={passportEditorRoute}
           onSave={handleSavePassport}
@@ -842,6 +1675,51 @@ export default function App() {
         registeredUsers={registeredUsers}
         onRegisterUser={handleRegisterUser}
       />
+
+      {/* ⚠️ STRICT ONLINE-ONLY REQUIREMENT OVERLAY */}
+      {!isOnline && (
+        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white border-2 border-[#E5E0D8] rounded-[32px] max-w-md w-full p-6 sm:p-8 text-center space-y-5 shadow-2xl animate-fade-in">
+            <div className="w-16 h-16 rounded-3xl bg-[#FDE8E8] text-[#E54B4B] flex items-center justify-center mx-auto shadow-inner">
+              <WifiOff className="w-8 h-8" />
+            </div>
+
+            <div className="space-y-2">
+              <span className="px-3 py-1 rounded-full bg-[#FDE8E8] text-[#E54B4B] text-[11px] font-black uppercase tracking-wider">
+                Режим: Только Онлайн
+              </span>
+              <h2 className="text-xl font-black text-[#1A1F1A]">
+                Требуется интернет-соединение
+              </h2>
+              <p className="text-xs text-[#6B665F] leading-relaxed">
+                Приложение <strong>SPLAV86</strong> работает в режиме реального времени для обеспечения актуальности маршрутов, походов, заявок и визиток экипажа.
+              </p>
+            </div>
+
+            <div className="p-3.5 bg-[#FAF8F5] rounded-2xl border border-[#EEEBE6] text-xs text-[#4A443E] space-y-1 text-left">
+              <div className="flex items-center gap-2 font-bold text-[#2D5A27]">
+                <Zap className="w-4 h-4 text-[#2D5A27]" />
+                <span>Актуальные данные</span>
+              </div>
+              <p className="text-[11px] text-[#6B665F]">
+                Офлайн-режим отключен для гарантии актуальности данных по рекам, наборам в группы и сообщениям капитанов.
+              </p>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <button
+                type="button"
+                onClick={handleCheckConnection}
+                disabled={isCheckingConnection}
+                className="w-full py-3 bg-[#2D5A27] hover:bg-[#3D7136] disabled:opacity-60 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <RefreshCw className={`w-4 h-4 ${isCheckingConnection ? 'animate-spin' : ''}`} />
+                <span>{isCheckingConnection ? 'Проверка соединения...' : 'Проверить подключение'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { MchsFormState, RiverRoute, SafetyGuide } from '../types';
+import { MchsFormState, RiverRoute, SafetyGuide, FaqDataConfig, FaqQuestionItem } from '../types';
+import { INITIAL_FAQ_DATA } from '../data/faqData';
 import { 
-  RadioTower, 
   Radio, 
   AlertTriangle, 
   FileText, 
@@ -10,34 +10,67 @@ import {
   Check, 
   Clock, 
   Phone, 
-  MapPin, 
   Send, 
   CheckCircle2, 
   ShieldCheck, 
-  HeartPulse, 
   Satellite, 
   WifiOff, 
-  Volume2, 
   HelpCircle, 
-  ExternalLink,
   Flame,
-  Plane
+  Plane,
+  Edit3,
+  Search,
+  ChevronDown,
+  ChevronUp,
+  Sparkles,
+  LifeBuoy
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface MchsModuleProps {
   routes: RiverRoute[];
-  safetyGuides: SafetyGuide[];
+  safetyGuides?: SafetyGuide[];
   initialRoute?: RiverRoute | null;
-  onOpenQuickSos?: () => void;
+  faqData?: FaqDataConfig;
+  isAdmin?: boolean;
+  onOpenFaqEditor?: (subSection?: 'guides' | 'questions' | 'hotlines' | 'frequencies' | 'signals' | 'texts') => void;
 }
 
 export const MchsModule: React.FC<MchsModuleProps> = ({
   routes,
-  safetyGuides,
-  initialRoute
+  safetyGuides: legacyGuides,
+  initialRoute,
+  faqData = INITIAL_FAQ_DATA,
+  isAdmin = false,
+  onOpenFaqEditor
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'satellite_comms' | 'mchs_form' | 'handbook' | 'checkin_timer'>('satellite_comms');
+  const [activeSubTab, setActiveSubTabState] = useState<'faq_questions' | 'satellite_comms' | 'handbook' | 'mchs_form' | 'checkin_timer'>(() => {
+    try {
+      const saved = localStorage.getItem('splav86_mchs_subtab');
+      if (saved && ['faq_questions', 'satellite_comms', 'handbook', 'mchs_form', 'checkin_timer'].includes(saved)) {
+        return saved as any;
+      }
+    } catch (e) {}
+    return 'faq_questions';
+  });
+
+  const setActiveSubTab = (tab: 'faq_questions' | 'satellite_comms' | 'handbook' | 'mchs_form' | 'checkin_timer') => {
+    setActiveSubTabState(tab);
+    try {
+      localStorage.setItem('splav86_mchs_subtab', tab);
+    } catch (e) {}
+  };
+  const [selectedGuide, setSelectedGuide] = useState<SafetyGuide | null>(null);
+  const [guideCopied, setGuideCopied] = useState<boolean>(false);
+
+  // FAQ Search & Filter
+  const [faqSearchQuery, setFaqSearchQuery] = useState<string>('');
+  const [selectedFaqCategory, setSelectedFaqCategory] = useState<string>('all');
+  const [expandedFaqIds, setExpandedFaqIds] = useState<Record<string, boolean>>({});
+
+  // Safety Handbook Search & Filter
+  const [guideSearchQuery, setGuideSearchQuery] = useState<string>('');
+  const [selectedGuideCategory, setSelectedGuideCategory] = useState<string>('all');
 
   // Form State for MCHS Registration
   const [formData, setFormData] = useState<MchsFormState>({
@@ -68,6 +101,16 @@ export const MchsModule: React.FC<MchsModuleProps> = ({
 
   const [copiedSuccess, setCopiedSuccess] = useState<boolean>(false);
   const [copiedSosText, setCopiedSosText] = useState<boolean>(false);
+
+  // Active guides list: either from faqData config or legacy fallback
+  const guidesList: SafetyGuide[] = faqData?.safetyGuides && faqData.safetyGuides.length > 0 
+    ? faqData.safetyGuides 
+    : (legacyGuides && legacyGuides.length > 0 ? legacyGuides : INITIAL_FAQ_DATA.safetyGuides);
+
+  const emergencyContacts = faqData?.emergencyContacts || INITIAL_FAQ_DATA.emergencyContacts;
+  const radioFrequencies = faqData?.radioFrequencies || INITIAL_FAQ_DATA.radioFrequencies;
+  const visualSignals = faqData?.visualSignals || INITIAL_FAQ_DATA.visualSignals;
+  const faqQuestions = faqData?.faqQuestions || INITIAL_FAQ_DATA.faqQuestions;
 
   // Auto-fill from route selector
   const handleRoutePreset = (routeId: string) => {
@@ -140,39 +183,7 @@ ${formData.notes}`;
   };
 
   const handleDownloadCommsCheatSheet = () => {
-    const text = `ПРАКТИЧЕСКАЯ ПАМЯТКА СВЯЗИ И ЭКСТРЕННЫХ СЛУЖБ (ЮГРА И ЯМАЛ)
-============================================================
-Сохраните этот файл в память телефона и запишите номера в спутниковый телефон (Iridium / Thuraya / InReach).
-
-1. ПРЯМЫЕ ТЕЛЕФОНЫ ДЕЖУРНЫХ ЧАСТЕЙ СПАСАТЕЛЕЙ:
-------------------------------------------------------------
-• ГКУ «Ямалспас» (Салехард, ЯНАО): +7 (34922) 4-44-44
-• ЦУКС МЧС России по ХМАО-Югре (Ханты-Мансийск): +7 (3467) 39-77-77
-• Арктический аварийно-спасательный центр (Воркута / Полярный Урал): +7 (82151) 3-11-22
-• Единая служба спасения (при наличии сотовой сети): 112
-
-2. АВАРИЙНЫЕ РАДИОЧАСТОТЫ (УКВ / VHF / РЕЧНЫЕ):
-------------------------------------------------------------
-• 121.500 МГц — Международная аварийная авиационная частота (мониторится бортами).
-• 156.800 МГц (Канал 16 VHF) — Международный бедственный канал речного и морского флота.
-• 145.500 МГц (FM) — Вызывная частота радиолюбителей (2 метра).
-• 433.075 МГц (Канал 1 LPD) — Стандартный внутригрупповой канал на сплаве.
-
-3. ЗНАКИ СИГНАЛИЗАЦИИ «ЗЕМЛЯ - ВОЗДУХ» ДЛЯ ПОИСКОВЫХ ВЕРТОЛЕТОВ:
-------------------------------------------------------------
-(Выкладываются на песчаной косе или снежнике из весел, ярких гермомешков и тентов, длина полосы не менее 3 метров)
-• [ V ] — Требуется помощь (Require Assistance)
-• [ X ] — Требуется медицинская помощь (Require Medical Assistance)
-• [ N ] — Нет / Отрицательно (No)
-• [ Y ] — Да / Положительно (Yes)
-• [ ↑ ] — Двигаемся в этом направлении (Proceeding in this direction)
-
-4. ТРЕХОГНЕВОЙ СИГНАЛ БЕДСТВИЯ:
-------------------------------------------------------------
-Три костра, расположенные треугольником или на одной линии на расстоянии 20-30 метров друг от друга.
-
-Сплав86 — Исследуем Север там, куда не ведут дороги.`;
-
+    const text = faqData?.cheatSheetContent || INITIAL_FAQ_DATA.cheatSheetContent;
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -183,6 +194,35 @@ ${formData.notes}`;
     confetti({ particleCount: 40, spread: 60, origin: { y: 0.6 } });
   };
 
+  const toggleFaqQuestion = (id: string) => {
+    setExpandedFaqIds(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }));
+  };
+
+  // Filtered FAQ questions
+  const filteredFaqQuestions = faqQuestions.filter(item => {
+    const matchesCategory = selectedFaqCategory === 'all' || item.category === selectedFaqCategory;
+    const query = faqSearchQuery.toLowerCase().trim();
+    const matchesQuery = !query || 
+      item.question.toLowerCase().includes(query) || 
+      item.answer.toLowerCase().includes(query);
+    return matchesCategory && matchesQuery;
+  });
+
+  // Filtered Safety Guides
+  const filteredGuides = guidesList.filter(guide => {
+    const matchesCategory = selectedGuideCategory === 'all' || guide.category === selectedGuideCategory;
+    const query = guideSearchQuery.toLowerCase().trim();
+    const matchesQuery = !query || 
+      guide.title.toLowerCase().includes(query) || 
+      guide.shortSummary.toLowerCase().includes(query) ||
+      (guide.rules || []).some(r => r.toLowerCase().includes(query)) ||
+      (guide.tag || '').toLowerCase().includes(query);
+    return matchesCategory && matchesQuery;
+  });
+
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-6 space-y-6">
       
@@ -191,31 +231,64 @@ ${formData.notes}`;
         <div>
           <div className="flex items-center gap-2.5">
             <div className="p-2.5 rounded-2xl bg-[#E8F1E7] text-[#2D5A27]">
-              <RadioTower className="w-6 h-6" />
+              <HelpCircle className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-black text-[#1A1F1A]">
-                Единый центр: Связь и МЧС
-              </h1>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h1 className="text-xl sm:text-2xl font-black text-[#1A1F1A]">
+                  {faqData?.title || 'FAQ: Связь, МЧС и Безопасность'}
+                </h1>
+                {isAdmin && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-[#FEF3C7] text-[#B45309] border border-[#FDE68A] text-[10px] font-black flex items-center gap-1">
+                    <Edit3 className="w-3 h-3" />
+                    Режим Администратора
+                  </span>
+                )}
+              </div>
               <p className="text-xs sm:text-sm text-[#6B665F] mt-0.5">
-                Спутниковые каналы, аварийные радиочастоты, спасательные службы и регистрация тургрупп.
+                {faqData?.subtitle || 'Спутниковые каналы, аварийные радиочастоты, спасательные службы, регистрация групп и выживание в тайге.'}
               </p>
             </div>
           </div>
         </div>
 
-        {/* Action Button: Download CheatSheet */}
-        <button
-          onClick={handleDownloadCommsCheatSheet}
-          className="px-4 py-2.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold text-xs rounded-2xl shadow-sm transition-all flex items-center gap-2 self-start md:self-auto shrink-0"
-        >
-          <Download className="w-4 h-4" />
-          <span>Скачать шпаргалку в .TXT</span>
-        </button>
+        {/* Action Buttons: Admin Edit Shortcut + Download CheatSheet */}
+        <div className="flex items-center gap-2.5 self-start md:self-auto shrink-0 flex-wrap">
+          {isAdmin && onOpenFaqEditor && (
+            <button
+              onClick={() => onOpenFaqEditor('questions')}
+              className="px-3.5 py-2.5 bg-[#E8F1E7] hover:bg-[#D4E8D2] text-[#2D5A27] font-bold text-xs rounded-2xl border border-[#CDE0CC] shadow-xs transition-all flex items-center gap-1.5"
+              title="Открыть редактор контента FAQ в Личном кабинете"
+            >
+              <Edit3 className="w-4 h-4" />
+              <span>Редактировать FAQ в ЛК</span>
+            </button>
+          )}
+
+          <button
+            onClick={handleDownloadCommsCheatSheet}
+            className="px-4 py-2.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold text-xs rounded-2xl shadow-sm transition-all flex items-center gap-2 shrink-0"
+          >
+            <Download className="w-4 h-4" />
+            <span>Скачать шпаргалку в .TXT</span>
+          </button>
+        </div>
       </div>
 
-      {/* Subtabs Selector: Vertical list on mobile, horizontal row on desktop */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2 md:gap-1.5 bg-white p-2.5 md:p-1.5 rounded-2xl border border-[#E5E0D8] shadow-xs">
+      {/* Subtabs Selector */}
+      <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2 md:gap-1.5 bg-white p-2.5 md:p-1.5 rounded-2xl border border-[#E5E0D8] shadow-xs overflow-x-auto">
+        <button
+          onClick={() => setActiveSubTab('faq_questions')}
+          className={`px-4 py-3 md:py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-start md:justify-center gap-2.5 w-full md:w-auto md:shrink-0 text-left md:text-center ${
+            activeSubTab === 'faq_questions'
+              ? 'bg-[#2D5A27] text-white shadow-xs'
+              : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4]'
+          }`}
+        >
+          <HelpCircle className="w-4 h-4 shrink-0" />
+          <span>Частые вопросы (FAQ) ({faqQuestions.length})</span>
+        </button>
+
         <button
           onClick={() => setActiveSubTab('satellite_comms')}
           className={`px-4 py-3 md:py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-start md:justify-center gap-2.5 w-full md:w-auto md:shrink-0 text-left md:text-center ${
@@ -226,6 +299,18 @@ ${formData.notes}`;
         >
           <Satellite className="w-4 h-4 shrink-0" />
           <span>Спутник, Радио и Телефоны спасателей</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('handbook')}
+          className={`px-4 py-3 md:py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-start md:justify-center gap-2.5 w-full md:w-auto md:shrink-0 text-left md:text-center ${
+            activeSubTab === 'handbook'
+              ? 'bg-[#2D5A27] text-white shadow-xs'
+              : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4]'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4 shrink-0" />
+          <span>Справочник выживания и безопасности ({guidesList.length})</span>
         </button>
 
         <button
@@ -241,18 +326,6 @@ ${formData.notes}`;
         </button>
 
         <button
-          onClick={() => setActiveSubTab('handbook')}
-          className={`px-4 py-3 md:py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-start md:justify-center gap-2.5 w-full md:w-auto md:shrink-0 text-left md:text-center ${
-            activeSubTab === 'handbook'
-              ? 'bg-[#2D5A27] text-white shadow-xs'
-              : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4]'
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4 shrink-0" />
-          <span>Правила выживания и безопасности в тайге</span>
-        </button>
-
-        <button
           onClick={() => setActiveSubTab('checkin_timer')}
           className={`px-4 py-3 md:py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-start md:justify-center gap-2.5 w-full md:w-auto md:shrink-0 text-left md:text-center ${
             activeSubTab === 'checkin_timer'
@@ -265,7 +338,168 @@ ${formData.notes}`;
         </button>
       </div>
 
-      {/* 1. SATELLITE COMMS, RADIO & RESCUE HOTLINES TAB */}
+      {/* 1. FAQ QUESTIONS & ANSWERS ACCORDION */}
+      {activeSubTab === 'faq_questions' && (
+        <div className="space-y-6">
+          
+          {/* Header Card with Search & Categories */}
+          <div className="bg-white border border-[#E5E0D8] rounded-[28px] p-5 sm:p-6 shadow-sm space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-base sm:text-lg font-black text-[#1A1F1A] flex items-center gap-2">
+                  <LifeBuoy className="w-5 h-5 text-[#2D5A27]" />
+                  База знаний и часто задаваемые вопросы туристу-воднику
+                </h2>
+                <p className="text-xs text-[#6B665F] mt-0.5">
+                  Юридические нормы, ГИМС, пропуска КМНС и погранзоны, связь, экипировка и действия при ЧС.
+                </p>
+              </div>
+
+              {isAdmin && onOpenFaqEditor && (
+                <button
+                  onClick={() => onOpenFaqEditor('questions')}
+                  className="px-3 py-2 bg-[#E8F1E7] hover:bg-[#D4E8D2] text-[#2D5A27] text-xs font-bold rounded-xl border border-[#CDE0CC] transition-all flex items-center gap-1.5 shrink-0 self-start md:self-auto"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Управление вопросами</span>
+                </button>
+              )}
+            </div>
+
+            {/* Search Input */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-[#8B7E6D] absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Поиск по вопросам и ответам (ГИМС, пропуска, медведи, спутник, экипировка)..."
+                value={faqSearchQuery}
+                onChange={(e) => setFaqSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl text-xs text-[#2D332D] outline-none focus:border-[#2D5A27] focus:bg-white transition-all"
+              />
+              {faqSearchQuery && (
+                <button
+                  onClick={() => setFaqSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#8B7E6D] hover:text-[#1A1F1A]"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Category Filter Chips */}
+            <div className="flex items-center gap-1.5 flex-wrap pt-1">
+              {[
+                { id: 'all', label: 'Все вопросы' },
+                { id: 'permits_gims', label: '⚖️ ГИМС, Законы и Пропуска' },
+                { id: 'satellite_sos', label: '📡 Спутниковая связь и SOS' },
+                { id: 'wildlife', label: '🐻 Медведи и дикая природа' },
+                { id: 'routes_logistics', label: '🧭 Логистика и Маршруты' },
+                { id: 'general', label: '📋 Общие правила' }
+              ].map(cat => (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedFaqCategory(cat.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    selectedFaqCategory === cat.id
+                      ? 'bg-[#2D5A27] text-white shadow-2xs'
+                      : 'bg-[#F9F7F4] hover:bg-[#EAE7E2] text-[#6B665F]'
+                  }`}
+                >
+                  {cat.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* FAQ Accordion List */}
+          {filteredFaqQuestions.length === 0 ? (
+            <div className="bg-white border border-[#E5E0D8] rounded-[28px] p-8 text-center space-y-3">
+              <HelpCircle className="w-10 h-10 text-[#8B7E6D] mx-auto opacity-50" />
+              <h3 className="text-sm font-bold text-[#1A1F1A]">Вопросы по вашему запросу не найдены</h3>
+              <p className="text-xs text-[#6B665F] max-w-sm mx-auto">
+                Попробуйте изменить поисковый запрос или выберите другую категорию.
+              </p>
+              {isAdmin && onOpenFaqEditor && (
+                <button
+                  onClick={() => onOpenFaqEditor('questions')}
+                  className="px-4 py-2 bg-[#2D5A27] hover:bg-[#3D7136] text-white text-xs font-bold rounded-xl shadow-xs"
+                >
+                  + Добавить новый вопрос в FAQ
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredFaqQuestions.map((faqItem, idx) => {
+                const isExpanded = expandedFaqIds[faqItem.id] ?? (idx === 0 || faqItem.isPopular);
+                const categoryLabels: Record<string, string> = {
+                  permits_gims: 'ГИМС и законы',
+                  satellite_sos: 'Связь и SOS',
+                  wildlife: 'Дикая природа',
+                  routes_logistics: 'Логистика',
+                  general: 'Общий регламент'
+                };
+
+                return (
+                  <div
+                    key={faqItem.id}
+                    className="bg-white border border-[#E5E0D8] rounded-2xl overflow-hidden shadow-2xs transition-all hover:border-[#2D5A27]/50"
+                  >
+                    <button
+                      onClick={() => toggleFaqQuestion(faqItem.id)}
+                      className="w-full p-4 sm:p-5 text-left flex items-start justify-between gap-3 transition-colors hover:bg-[#F9F7F4]/60"
+                    >
+                      <div className="space-y-1.5 pr-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2 py-0.5 rounded-md bg-[#E8F1E7] text-[#2D5A27] text-[10px] font-extrabold uppercase">
+                            {categoryLabels[faqItem.category] || 'FAQ'}
+                          </span>
+                          {faqItem.isPopular && (
+                            <span className="px-2 py-0.5 rounded-md bg-[#FEF3C7] text-[#B45309] text-[10px] font-extrabold flex items-center gap-1">
+                              <Sparkles className="w-2.5 h-2.5" />
+                              Популярный вопрос
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="text-sm sm:text-base font-bold text-[#1A1F1A] leading-snug">
+                          {faqItem.question}
+                        </h3>
+                      </div>
+
+                      <div className="p-1.5 rounded-xl bg-[#F9F7F4] text-[#2D5A27] shrink-0 mt-0.5">
+                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </div>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="px-4 sm:px-5 pb-5 pt-1 text-xs sm:text-sm text-[#4A443E] leading-relaxed border-t border-[#F2EFEA] bg-[#FAFAF8]/50 space-y-3">
+                        <p className="whitespace-pre-line font-normal">
+                          {faqItem.answer}
+                        </p>
+
+                        {isAdmin && onOpenFaqEditor && (
+                          <div className="pt-2 border-t border-[#E5E0D8]/40 flex justify-end">
+                            <button
+                              onClick={() => onOpenFaqEditor('questions')}
+                              className="text-[11px] font-bold text-[#2D5A27] hover:underline flex items-center gap-1"
+                            >
+                              <Edit3 className="w-3 h-3" />
+                              <span>Редактировать этот вопрос в кабинете</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {/* 2. SATELLITE COMMS, RADIO & RESCUE HOTLINES TAB */}
       {activeSubTab === 'satellite_comms' && (
         <div className="space-y-6">
           
@@ -274,13 +508,22 @@ ${formData.notes}`;
             <div className="p-2.5 bg-[#F59E0B] text-white rounded-2xl shrink-0 mt-0.5">
               <WifiOff className="w-5 h-5" />
             </div>
-            <div>
+            <div className="space-y-1">
               <h3 className="text-sm font-extrabold text-[#92400E]">
-                Внимание: На 95% рек Югры и Полярного Урала сотовая связь отсутствует
+                {faqData?.warningTitle || 'Внимание: На 95% рек Югры и Полярного Урала сотовая связь отсутствует'}
               </h3>
-              <p className="text-xs text-[#78350F] mt-1 leading-relaxed">
-                В экстремальной ситуации у вас не будет доступа к интернету. Все контакты спасателей, радиочастоты и сигналы бедствия необходимо <strong>заранее переписать в блокнот или сохранить в спутниковый телефон</strong> до отправления на маршрут.
+              <p className="text-xs text-[#78350F] leading-relaxed">
+                {faqData?.warningText || 'В экстремальной ситуации у вас не будет доступа к интернету. Все контакты спасателей, радиочастоты и сигналы бедствия необходимо заранее переписать в блокнот или сохранить в спутниковый телефон до отправления на маршрут.'}
               </p>
+              {isAdmin && onOpenFaqEditor && (
+                <button
+                  onClick={() => onOpenFaqEditor('texts')}
+                  className="text-[11px] text-[#92400E] font-black underline flex items-center gap-1 pt-1"
+                >
+                  <Edit3 className="w-3 h-3" />
+                  <span>Редактировать текст предупреждения в кабинете</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -288,84 +531,87 @@ ${formData.notes}`;
             
             {/* Direct Rescue Hotlines Directory */}
             <div className="bg-white border border-[#E5E0D8] rounded-[28px] p-6 shadow-sm space-y-4">
-              <h2 className="text-base font-black text-[#1A1F1A] flex items-center gap-2">
-                <Phone className="w-5 h-5 text-[#2D5A27]" />
-                Прямые номера оперативных дежурных ПСО
-              </h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-black text-[#1A1F1A] flex items-center gap-2">
+                  <Phone className="w-5 h-5 text-[#2D5A27]" />
+                  Прямые номера оперативных дежурных ПСО
+                </h2>
+                {isAdmin && onOpenFaqEditor && (
+                  <button
+                    onClick={() => onOpenFaqEditor('hotlines')}
+                    className="text-xs text-[#2D5A27] font-bold hover:underline flex items-center gap-1"
+                  >
+                    <Edit3 className="w-3 h-3" />
+                    <span>Править</span>
+                  </button>
+                )}
+              </div>
 
               <div className="space-y-3">
-                {/* 112 */}
-                <div className="bg-[#FDF2F2] border border-[#F8B4B4] p-4 rounded-2xl flex items-center justify-between">
-                  <div>
-                    <span className="text-sm font-black text-[#E54B4B] block">112 (Единая служба спасения)</span>
-                    <p className="text-[11px] text-[#7F1D1D]">Работает при наличии хотя бы одной сотовой вышки любого оператора</p>
-                  </div>
-                  <a
-                    href="tel:112"
-                    className="px-3.5 py-1.5 bg-[#E54B4B] hover:bg-[#D43A3A] text-white font-bold text-xs rounded-xl shadow-xs shrink-0"
+                {emergencyContacts.map((contact) => (
+                  <div 
+                    key={contact.id}
+                    className={`p-4 rounded-2xl border flex items-center justify-between gap-3 ${
+                      contact.isCritical
+                        ? 'bg-[#FDF2F2] border-[#F8B4B4]'
+                        : 'bg-[#F9F7F4] border-[#EEEBE6]'
+                    }`}
                   >
-                    112
-                  </a>
-                </div>
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-xs font-bold ${contact.isCritical ? 'text-[#E54B4B]' : 'text-[#1A1F1A]'}`}>
+                          {contact.name}
+                        </span>
+                        {contact.badge && (
+                          <span className="px-2 py-0.2 rounded-md bg-white/80 text-[10px] font-bold text-[#6B665F] border border-[#E5E0D8]">
+                            {contact.badge}
+                          </span>
+                        )}
+                      </div>
+                      <span className={`text-sm font-black block font-mono ${contact.isCritical ? 'text-[#E54B4B]' : 'text-[#2D5A27]'}`}>
+                        {contact.phone}
+                      </span>
+                      <p className="text-[10px] text-[#6B665F] leading-tight">
+                        {contact.description}
+                      </p>
+                    </div>
 
-                {/* Yamalspas */}
-                <div className="bg-[#F9F7F4] p-4 rounded-2xl border border-[#EEEBE6] flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-bold text-[#1A1F1A] block">ГКУ «Ямалспас» (Полярный Урал / Салехард)</span>
-                    <span className="text-sm font-black text-[#2B4C7E]">+7 (34922) 4-44-44</span>
-                    <p className="text-[10px] text-[#8B7E6D]">Круглосуточный оперативный дежурный ПСО</p>
+                    <a
+                      href={`tel:${contact.phone.replace(/[^0-9+]/g, '')}`}
+                      className={`px-3.5 py-1.5 font-bold text-xs rounded-xl shadow-xs shrink-0 ${
+                        contact.isCritical
+                          ? 'bg-[#E54B4B] hover:bg-[#D43A3A] text-white'
+                          : 'bg-[#2D5A27] hover:bg-[#3D7136] text-white'
+                      }`}
+                    >
+                      Вызов
+                    </a>
                   </div>
-                  <a
-                    href="tel:+73492244444"
-                    className="px-3.5 py-1.5 bg-[#2B4C7E] hover:bg-[#1E365B] text-white font-bold text-xs rounded-xl shadow-xs shrink-0"
-                  >
-                    Вызов
-                  </a>
-                </div>
-
-                {/* KhMAO */}
-                <div className="bg-[#F9F7F4] p-4 rounded-2xl border border-[#EEEBE6] flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-bold text-[#1A1F1A] block">ЦУКС МЧС России по ХМАО-Югре (Ханты-Мансийск)</span>
-                    <span className="text-sm font-black text-[#2D5A27]">+7 (3467) 39-77-77</span>
-                    <p className="text-[10px] text-[#8B7E6D]">Центр управления в кризисных ситуациях</p>
-                  </div>
-                  <a
-                    href="tel:+73467397777"
-                    className="px-3.5 py-1.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold text-xs rounded-xl shadow-xs shrink-0"
-                  >
-                    Вызов
-                  </a>
-                </div>
-
-                {/* Vorkuta Rescue */}
-                <div className="bg-[#F9F7F4] p-4 rounded-2xl border border-[#EEEBE6] flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-bold text-[#1A1F1A] block">Арктический АКАСЦ МЧС (Воркута / горы)</span>
-                    <span className="text-sm font-black text-[#D97706]">+7 (82151) 3-11-22</span>
-                    <p className="text-[10px] text-[#8B7E6D]">Горно-спасательный отряд Полярного Урала</p>
-                  </div>
-                  <a
-                    href="tel:+78215131122"
-                    className="px-3.5 py-1.5 bg-[#D97706] hover:bg-[#B45309] text-white font-bold text-xs rounded-xl shadow-xs shrink-0"
-                  >
-                    Вызов
-                  </a>
-                </div>
+                ))}
               </div>
 
               {/* Ready SOS Template Generator */}
               <div className="pt-2">
-                <span className="text-xs font-bold text-[#8B7E6D] uppercase tracking-wider block mb-2">
-                  Формат сообщения для спутникового трекера (SMS / InReach):
-                </span>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-[#8B7E6D] uppercase tracking-wider block">
+                    Формат сообщения для спутникового трекера (SMS / InReach):
+                  </span>
+                  {isAdmin && onOpenFaqEditor && (
+                    <button
+                      onClick={() => onOpenFaqEditor('texts')}
+                      className="text-[11px] text-[#2D5A27] font-bold hover:underline"
+                    >
+                      Изменить шаблон
+                    </button>
+                  )}
+                </div>
                 <div className="bg-[#FDF2F2] border border-[#F8B4B4] p-3.5 rounded-2xl space-y-2">
                   <p className="text-xs text-[#7F1D1D] font-mono bg-white p-2.5 rounded-xl border border-[#F8B4B4] leading-relaxed">
-                    SOS! Группа Сплав86 на р. Собь. Требуется помощь. Коорд: 67.0423 N, 65.4121 E. 6 чел. Рация: 145.500 МГц.
+                    {faqData?.sosTemplateText || INITIAL_FAQ_DATA.sosTemplateText}
                   </p>
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText('SOS! Группа Сплав86 на р. Собь. Требуется помощь. Коорд: 67.0423 N, 65.4121 E. 6 чел. Рация: 145.500 МГц.');
+                      navigator.clipboard.writeText(faqData?.sosTemplateText || INITIAL_FAQ_DATA.sosTemplateText);
                       setCopiedSosText(true);
                       setTimeout(() => setCopiedSosText(false), 2500);
                     }}
@@ -384,68 +630,82 @@ ${formData.notes}`;
               
               {/* Frequencies Card */}
               <div className="bg-white border border-[#E5E0D8] rounded-[28px] p-6 shadow-sm space-y-4">
-                <h2 className="text-base font-black text-[#1A1F1A] flex items-center gap-2">
-                  <Radio className="w-5 h-5 text-[#2B4C7E]" />
-                  Аварийные радиочастоты (УКВ / VHF)
-                </h2>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-black text-[#1A1F1A] flex items-center gap-2">
+                    <Radio className="w-5 h-5 text-[#2B4C7E]" />
+                    Аварийные радиочастоты (УКВ / VHF)
+                  </h2>
+                  {isAdmin && onOpenFaqEditor && (
+                    <button
+                      onClick={() => onOpenFaqEditor('frequencies')}
+                      className="text-xs text-[#2D5A27] font-bold hover:underline flex items-center gap-1"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      <span>Править</span>
+                    </button>
+                  )}
+                </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="bg-[#F9F7F4] p-3.5 rounded-2xl border border-[#EEEBE6]">
-                    <span className="text-[10px] font-extrabold uppercase text-[#E54B4B] block">Авиационный бедственный</span>
-                    <strong className="text-base text-[#1A1F1A] font-black font-mono">121.500 МГц</strong>
-                    <p className="text-[10px] text-[#6B665F] mt-0.5">Слушают все пролетающие гражданские и военные борта</p>
-                  </div>
-
-                  <div className="bg-[#F9F7F4] p-3.5 rounded-2xl border border-[#EEEBE6]">
-                    <span className="text-[10px] font-extrabold uppercase text-[#2B4C7E] block">Речной / Морской флот</span>
-                    <strong className="text-base text-[#1A1F1A] font-black font-mono">156.800 МГц</strong>
-                    <p className="text-[10px] text-[#6B665F] mt-0.5">16 канал VHF. Международный канал бедствия на реках</p>
-                  </div>
-
-                  <div className="bg-[#F9F7F4] p-3.5 rounded-2xl border border-[#EEEBE6]">
-                    <span className="text-[10px] font-extrabold uppercase text-[#2D5A27] block">Радиолюбительский вызов</span>
-                    <strong className="text-base text-[#1A1F1A] font-black font-mono">145.500 МГц</strong>
-                    <p className="text-[10px] text-[#6B665F] mt-0.5">Вызывная частота 2-метрового диапазона радиолюбителей</p>
-                  </div>
-
-                  <div className="bg-[#F9F7F4] p-3.5 rounded-2xl border border-[#EEEBE6]">
-                    <span className="text-[10px] font-extrabold uppercase text-[#8B7E6D] block">Связь экипажей на воде</span>
-                    <strong className="text-base text-[#1A1F1A] font-black font-mono">433.075 МГц</strong>
-                    <p className="text-[10px] text-[#6B665F] mt-0.5">Канал 1 LPD для раций Baofeng / Motorola между судами</p>
-                  </div>
+                  {radioFrequencies.map((freq) => (
+                    <div key={freq.id} className="bg-[#F9F7F4] p-3.5 rounded-2xl border border-[#EEEBE6] space-y-1">
+                      <span className="text-[10px] font-extrabold uppercase text-[#2B4C7E] block">{freq.tag || freq.name}</span>
+                      <strong className="text-base text-[#1A1F1A] font-black font-mono block">{freq.frequency}</strong>
+                      <p className="text-[10px] text-[#6B665F] mt-0.5 leading-tight">{freq.description}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
 
               {/* Ground-to-Air Visual Rescue Signs */}
               <div className="bg-white border border-[#E5E0D8] rounded-[28px] p-6 shadow-sm space-y-4">
-                <h2 className="text-base font-black text-[#1A1F1A] flex items-center gap-2">
-                  <Plane className="w-5 h-5 text-[#D97706]" />
-                  Международные визуальные знаки «Земля — Воздух»
-                </h2>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-black text-[#1A1F1A] flex items-center gap-2">
+                    <Plane className="w-5 h-5 text-[#D97706]" />
+                    Международные визуальные знаки «Земля — Воздух»
+                  </h2>
+                  {isAdmin && onOpenFaqEditor && (
+                    <button
+                      onClick={() => onOpenFaqEditor('signals')}
+                      className="text-xs text-[#2D5A27] font-bold hover:underline flex items-center gap-1"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      <span>Править</span>
+                    </button>
+                  )}
+                </div>
                 <p className="text-xs text-[#6B665F]">
                   Выкладываются на песчаной косе, открытом яру или снежнике из весел, ярких гермомешков и оранжевых тентов (длина полос не менее 3 метров):
                 </p>
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 font-mono text-center">
-                  <div className="p-3 rounded-2xl bg-[#FDF2F2] border border-[#F8B4B4]">
-                    <span className="text-2xl font-black text-[#E54B4B] block font-sans">V</span>
-                    <span className="text-[11px] font-bold text-[#7F1D1D] block mt-1">Требуется помощь</span>
-                  </div>
-
-                  <div className="p-3 rounded-2xl bg-[#FDF2F2] border border-[#F8B4B4]">
-                    <span className="text-2xl font-black text-[#E54B4B] block font-sans">X</span>
-                    <span className="text-[11px] font-bold text-[#7F1D1D] block mt-1">Нужен врач</span>
-                  </div>
-
-                  <div className="p-3 rounded-2xl bg-[#E8F1E7] border border-[#CDE0CC]">
-                    <span className="text-2xl font-black text-[#2D5A27] block font-sans">Y</span>
-                    <span className="text-[11px] font-bold text-[#2D5A27] block mt-1">Да / Согласен</span>
-                  </div>
-
-                  <div className="p-3 rounded-2xl bg-[#F9F7F4] border border-[#E5E0D8]">
-                    <span className="text-2xl font-black text-[#6B665F] block font-sans">N</span>
-                    <span className="text-[11px] font-bold text-[#6B665F] block mt-1">Нет / Отказ</span>
-                  </div>
+                  {visualSignals.map((vis) => {
+                    const isRed = vis.color === 'red';
+                    const isGreen = vis.color === 'green';
+                    return (
+                      <div 
+                        key={vis.id} 
+                        className={`p-3 rounded-2xl border ${
+                          isRed 
+                            ? 'bg-[#FDF2F2] border-[#F8B4B4]' 
+                            : isGreen 
+                            ? 'bg-[#E8F1E7] border-[#CDE0CC]' 
+                            : 'bg-[#F9F7F4] border-[#E5E0D8]'
+                        }`}
+                      >
+                        <span className={`text-2xl font-black block font-sans ${
+                          isRed ? 'text-[#E54B4B]' : isGreen ? 'text-[#2D5A27]' : 'text-[#6B665F]'
+                        }`}>
+                          {vis.code}
+                        </span>
+                        <span className={`text-[11px] font-bold block mt-1 leading-tight ${
+                          isRed ? 'text-[#7F1D1D]' : isGreen ? 'text-[#2D5A27]' : 'text-[#6B665F]'
+                        }`}>
+                          {vis.meaning}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <div className="bg-[#F9F7F4] p-3 rounded-xl border border-[#EEEBE6] text-[11px] text-[#6B665F] flex items-center gap-2">
@@ -461,7 +721,164 @@ ${formData.notes}`;
         </div>
       )}
 
-      {/* 2. MCHS OFFICIAL REGISTRATION FORM TAB */}
+      {/* 3. WILDERNESS SAFETY & TAIGA SURVIVAL HANDBOOK */}
+      {activeSubTab === 'handbook' && (
+        <div className="space-y-6">
+          <div className="bg-[#E8F1E7]/60 border border-[#CDE0CC] rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black text-[#2D5A27] flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4" />
+                Справочник безопасности в тайге и на северных реках
+              </h3>
+              <p className="text-xs text-[#52784C] mt-0.5">
+                Нажмите на любую карточку ниже, чтобы открыть полное иллюстрированное руководство, действия при ЧС и прямые телефоны спасателей.
+              </p>
+            </div>
+            
+            <div className="flex items-center gap-2 shrink-0">
+              {isAdmin && onOpenFaqEditor && (
+                <button
+                  onClick={() => onOpenFaqEditor('guides')}
+                  className="text-xs font-bold bg-[#2D5A27] text-white px-3 py-1.5 rounded-xl shadow-2xs hover:bg-[#3D7136] transition-all flex items-center gap-1"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Управление статьями</span>
+                </button>
+              )}
+              <span className="text-xs font-bold bg-white text-[#2D5A27] px-3 py-1.5 rounded-xl border border-[#CDE0CC]">
+                {guidesList.length} руководств
+              </span>
+            </div>
+          </div>
+
+          {/* Guide Search & Category Filters */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-[#8B7E6D] absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Поиск по статьям безопасности (медведи, заломы, оверкиль, аптечка)..."
+                value={guideSearchQuery}
+                onChange={(e) => setGuideSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 bg-white border border-[#E5E0D8] rounded-xl text-xs text-[#2D332D] outline-none focus:border-[#2D5A27]"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+              {[
+                { id: 'all', label: 'Все темы' },
+                { id: 'bear', label: '🐻 Медведи' },
+                { id: 'hypothermia', label: '❄️ Холодная вода' },
+                { id: 'rapids', label: '🌊 Пороги и заломы' },
+                { id: 'satellite', label: '📡 Спутник и SOS' },
+                { id: 'firstaid', label: '🩹 Первая помощь' },
+                { id: 'indigenous', label: '🏕️ Стойбища КМНС' }
+              ].map(cat => (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedGuideCategory(cat.id)}
+                  className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold whitespace-nowrap transition-all ${
+                    selectedGuideCategory === cat.id
+                      ? 'bg-[#2D5A27] text-white shadow-2xs'
+                      : 'bg-white border border-[#E5E0D8] text-[#6B665F] hover:bg-[#F9F7F4]'
+                  }`}
+                >
+                  {cat.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filteredGuides.length === 0 ? (
+            <div className="bg-white border border-[#E5E0D8] rounded-[28px] p-8 text-center text-xs text-[#6B665F]">
+              По запросу "{guideSearchQuery}" статей не найдено.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {filteredGuides.map((guide) => {
+                const isCritical = guide.importance === 'Критически важно';
+                return (
+                  <div
+                    key={guide.id}
+                    onClick={() => setSelectedGuide(guide)}
+                    className="bg-white border border-[#E5E0D8] rounded-[28px] p-6 shadow-sm flex flex-col justify-between space-y-4 hover:border-[#2D5A27] hover:shadow-md transition-all cursor-pointer group"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full ${
+                          isCritical
+                            ? 'bg-[#FEE2E2] text-[#DC2626] border border-[#FECACA]'
+                            : 'bg-[#E8F1E7] text-[#2D5A27] border border-[#CDE0CC]'
+                        }`}>
+                          {guide.importance}
+                        </span>
+                        <span className="text-[10px] text-[#8B7E6D] font-bold">
+                          {guide.readTimeMin} мин чтения
+                        </span>
+                      </div>
+
+                      <div className="flex items-start gap-2.5">
+                        <div className="p-2 rounded-xl bg-[#E8F1E7] text-[#2D5A27] group-hover:scale-105 transition-transform shrink-0 mt-0.5">
+                          <ShieldCheck className="w-5 h-5" />
+                        </div>
+                        <h3 className="text-sm font-bold text-[#1A1F1A] leading-snug group-hover:text-[#2D5A27] transition-colors">
+                          {guide.title}
+                        </h3>
+                      </div>
+
+                      <p className="text-xs text-[#6B665F] leading-relaxed line-clamp-2">
+                        {guide.shortSummary}
+                      </p>
+                    </div>
+
+                    <div className="space-y-2 pt-3 border-t border-[#E5E0D8]/60">
+                      <span className="text-[10px] font-bold text-[#8B7E6D] uppercase tracking-wider block">
+                        Главные правила:
+                      </span>
+                      <ul className="space-y-1 text-xs text-[#2D332D]">
+                        {(guide.rules || []).slice(0, 2).map((rule, idx) => (
+                          <li key={idx} className="flex items-start gap-1.5">
+                            <span className="text-[#2D5A27] font-bold mt-0.5">•</span>
+                            <span className="leading-tight line-clamp-1">{rule}</span>
+                          </li>
+                        ))}
+                      </ul>
+
+                      <div className="pt-2 flex items-center gap-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedGuide(guide);
+                          }}
+                          className="flex-1 py-2 bg-[#F9F7F4] hover:bg-[#E8F1E7] text-[#2D5A27] text-xs font-bold rounded-xl border border-[#E5E0D8] group-hover:border-[#CDE0CC] transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <span>Читать правила</span>
+                          <span>→</span>
+                        </button>
+
+                        {isAdmin && onOpenFaqEditor && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenFaqEditor('guides');
+                            }}
+                            className="p-2 bg-[#E8F1E7] hover:bg-[#D4E8D2] text-[#2D5A27] rounded-xl border border-[#CDE0CC] transition-all"
+                            title="Редактировать статью в кабинете"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 4. MCHS OFFICIAL REGISTRATION FORM TAB */}
       {activeSubTab === 'mchs_form' && (
         <div className="space-y-6">
           
@@ -685,47 +1102,7 @@ ${formData.notes}`;
         </div>
       )}
 
-      {/* 3. WILDERNESS SAFETY & TAIGA SURVIVAL HANDBOOK */}
-      {activeSubTab === 'handbook' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {safetyGuides.map((guide) => (
-            <div
-              key={guide.id}
-              className="bg-white border border-[#E5E0D8] rounded-[28px] p-6 shadow-sm flex flex-col justify-between space-y-4 hover:border-[#2D5A27]/40 transition-colors"
-            >
-              <div>
-                <div className="flex items-center gap-2">
-                  <div className="p-2 rounded-xl bg-[#E8F1E7] text-[#2D5A27]">
-                    <ShieldCheck className="w-5 h-5" />
-                  </div>
-                  <h3 className="text-sm font-bold text-[#1A1F1A]">
-                    {guide.title}
-                  </h3>
-                </div>
-                <p className="text-xs text-[#6B665F] mt-2 leading-relaxed">
-                  {guide.summary}
-                </p>
-              </div>
-
-              <div className="space-y-2 pt-3 border-t border-[#E5E0D8]/60">
-                <span className="text-[10px] font-bold text-[#8B7E6D] uppercase tracking-wider block">
-                  Ключевые правила:
-                </span>
-                <ul className="space-y-1.5 text-xs text-[#2D332D]">
-                  {guide.points.map((pt, idx) => (
-                    <li key={idx} className="flex items-start gap-2">
-                      <span className="text-[#2D5A27] font-bold mt-0.5">•</span>
-                      <span className="leading-tight">{pt}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* 4. CHECKIN TIMER */}
+      {/* 5. CHECKIN TIMER */}
       {activeSubTab === 'checkin_timer' && (
         <div className="bg-white border border-[#E5E0D8] rounded-[28px] p-6 sm:p-8 max-w-2xl mx-auto shadow-sm space-y-5 text-center">
           <div className="w-14 h-14 bg-[#E8F1E7] text-[#2D5A27] rounded-3xl mx-auto flex items-center justify-center shadow-md">
@@ -753,6 +1130,176 @@ ${formData.notes}`;
               <span className="text-[#8B7E6D] font-bold">Основной канал:</span>
               <span className="text-[#2B4C7E] font-mono font-bold">Iridium / InReach SMS</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* SAFETY GUIDE DETAIL MODAL */}
+      {selectedGuide && (
+        <div className="fixed inset-0 z-[3500] bg-black/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
+          <div className="bg-white border border-[#E5E0D8] rounded-[28px] max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col my-auto text-[#2D332D]">
+            
+            {/* Modal Header */}
+            <div className="p-5 sm:p-6 bg-gradient-to-r from-[#1A2E19] to-[#2D5A27] text-white rounded-t-[28px] flex items-start justify-between gap-4">
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full ${
+                    selectedGuide.importance === 'Критически важно'
+                      ? 'bg-red-500 text-white'
+                      : 'bg-white/20 text-white'
+                  }`}>
+                    {selectedGuide.importance}
+                  </span>
+                  <span className="text-[10px] bg-white/20 text-white px-2.5 py-0.5 rounded-full font-bold">
+                    {selectedGuide.tag}
+                  </span>
+                  <span className="text-[10px] text-white/80 font-medium">
+                    {selectedGuide.readTimeMin} мин чтения
+                  </span>
+                </div>
+                <h2 className="text-lg sm:text-xl font-black leading-tight">
+                  {selectedGuide.title}
+                </h2>
+              </div>
+
+              <button
+                onClick={() => setSelectedGuide(null)}
+                className="p-2 bg-white/20 hover:bg-white/30 text-white rounded-full transition-colors shrink-0"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body Content */}
+            <div className="p-5 sm:p-6 space-y-6">
+              
+              {/* Summary */}
+              <div className="bg-[#F9F7F4] p-4 rounded-2xl border border-[#E5E0D8]">
+                <p className="text-xs sm:text-sm text-[#2D332D] leading-relaxed font-medium">
+                  {selectedGuide.shortSummary}
+                </p>
+              </div>
+
+              {/* Rules List */}
+              {selectedGuide.rules && selectedGuide.rules.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="text-xs font-black uppercase text-[#2D5A27] tracking-wider flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4" />
+                    Базовые правила и регламент
+                  </h3>
+                  <div className="space-y-2">
+                    {selectedGuide.rules.map((rule, i) => (
+                      <div key={i} className="flex items-start gap-2.5 p-3 rounded-xl bg-[#F9F7F4] border border-[#EEEBE6]">
+                        <span className="w-5 h-5 rounded-full bg-[#E8F1E7] text-[#2D5A27] text-xs font-black flex items-center justify-center shrink-0 mt-0.5">
+                          {i + 1}
+                        </span>
+                        <p className="text-xs text-[#2D332D] leading-relaxed">{rule}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* DO / DONT GRID */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                
+                {/* DO List */}
+                {selectedGuide.doList && selectedGuide.doList.length > 0 && (
+                  <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-2xl p-4 space-y-2.5">
+                    <h4 className="text-xs font-black uppercase text-[#166534] tracking-wider flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-[#166534]" />
+                      Что ОБЯЗАТЕЛЬНО делать:
+                    </h4>
+                    <ul className="space-y-2">
+                      {selectedGuide.doList.map((item, idx) => (
+                        <li key={idx} className="flex items-start gap-2 text-xs text-[#14532D]">
+                          <span className="font-bold text-[#166534]">•</span>
+                          <span className="leading-snug">{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* DONT List */}
+                {selectedGuide.dontList && selectedGuide.dontList.length > 0 && (
+                  <div className="bg-[#FEF2F2] border border-[#FECACA] rounded-2xl p-4 space-y-2.5">
+                    <h4 className="text-xs font-black uppercase text-[#991B1B] tracking-wider flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 text-[#DC2626]" />
+                      Что КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО:
+                    </h4>
+                    <ul className="space-y-2">
+                      {selectedGuide.dontList.map((item, idx) => (
+                        <li key={idx} className="flex items-start gap-2 text-xs text-[#7F1D1D]">
+                          <span className="font-bold text-[#DC2626]">✕</span>
+                          <span className="leading-snug">{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+              </div>
+
+              {/* Emergency Contacts if any */}
+              {selectedGuide.emergencyContacts && selectedGuide.emergencyContacts.length > 0 && (
+                <div className="space-y-3 pt-2">
+                  <h3 className="text-xs font-black uppercase text-[#92400E] tracking-wider flex items-center gap-2">
+                    <Phone className="w-4 h-4" />
+                    Экстренные телефоны для этого случая
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {selectedGuide.emergencyContacts.map((contact, i) => (
+                      <div key={i} className="bg-[#FFFBEB] border border-[#FDE68A] rounded-xl p-3 flex flex-col justify-between">
+                        <div>
+                          <div className="text-xs font-bold text-[#92400E]">{contact.name}</div>
+                          <div className="text-[11px] text-[#B45309] mt-0.5">{contact.note}</div>
+                        </div>
+                        <a
+                          href={`tel:${contact.phone.replace(/[^0-9+]/g, '')}`}
+                          className="mt-2 text-xs font-black font-mono text-[#2D5A27] bg-white px-2.5 py-1 rounded-lg border border-[#FDE68A] hover:bg-[#E8F1E7] transition-colors inline-block w-fit"
+                        >
+                          📞 {contact.phone}
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 sm:p-5 bg-[#F9F7F4] border-t border-[#E5E0D8] rounded-b-[28px] flex flex-wrap items-center justify-between gap-3">
+              <button
+                onClick={() => {
+                  const guideText = `${selectedGuide.title.toUpperCase()}\n\n${selectedGuide.shortSummary}\n\nПРАВИЛА:\n${selectedGuide.rules.map((r, i) => `${i + 1}. ${r}`).join('\n')}\n\nЧТО ДЕЛАТЬ:\n${(selectedGuide.doList || []).map(d => `• ${d}`).join('\n')}\n\nЗАПРЕЩЕНО:\n${(selectedGuide.dontList || []).map(d => `✕ ${d}`).join('\n')}`;
+                  navigator.clipboard.writeText(guideText);
+                  setGuideCopied(true);
+                  setTimeout(() => setGuideCopied(false), 2500);
+                }}
+                className="px-4 py-2.5 bg-white hover:bg-[#E8F1E7] text-[#2D5A27] text-xs font-bold rounded-xl border border-[#E5E0D8] transition-all flex items-center gap-1.5 shadow-xs"
+              >
+                {guideCopied ? <Check className="w-4 h-4 text-[#2D5A27]" /> : <Copy className="w-4 h-4" />}
+                <span>{guideCopied ? 'Скопировано в буфер!' : 'Скопировать памятку'}</span>
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => window.print()}
+                  className="px-4 py-2.5 bg-white text-[#2D332D] hover:bg-[#EAE7E2] text-xs font-bold rounded-xl border border-[#E5E0D8] transition-all"
+                >
+                  Печать
+                </button>
+                <button
+                  onClick={() => setSelectedGuide(null)}
+                  className="px-5 py-2.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white text-xs font-bold rounded-xl shadow-xs transition-all"
+                >
+                  Понятно
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
       )}

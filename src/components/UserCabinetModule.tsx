@@ -1,14 +1,23 @@
 import React, { useState, useRef } from 'react';
-import { AppUser, UserRole, RiverRoute, HydroStation, ArticleReport, CompanionTrip, TripApplication } from '../types';
-import { parseGpxFile } from '../utils/gpxParser';
-import { ArticlesSyncService, TripsSyncService, RoutesSyncService, HydroSyncService, UsersSyncService } from '../firebase';
+import { AppUser, UserRole, RiverRoute, ArticleReport, CompanionTrip, TripApplication, FaqDataConfig, TravelNotesConfig, VesselType } from '../types';
+import { parseGpxFile, generateGpxString } from '../utils/gpxParser';
+import { compressImageFile, compressAvatarFile, compressDataUrl } from '../utils/imageCompressor';
+import { recordTripDeletion, recordArticleDeletion, recordRouteDeletion } from '../utils/deletionRegistry';
+import { ArticlesSyncService, TripsSyncService, RoutesSyncService, UsersSyncService, FaqSyncService, TravelNotesSyncService } from '../firebase';
+import { CloudSqlDbService } from '../services/cloudSqlDb';
+import { INITIAL_FAQ_DATA } from '../data/faqData';
+import { INITIAL_TRAVEL_NOTES_CONFIG } from '../data/logbookData';
+import { FaqAdminSection } from './FaqAdminSection';
+import { TravelNotesAdminSection } from './TravelNotesAdminSection';
+import { SyncHistorySection } from './SyncHistorySection';
+import { TelegramMiniAppSection } from './TelegramMiniAppSection';
+import { UserProfileModal } from './UserProfileModal';
 import { 
   ShieldCheck, 
   User, 
   Crown, 
   Users, 
   Compass, 
-  Droplets, 
   BookOpen, 
   FileJson, 
   LogOut, 
@@ -22,6 +31,7 @@ import {
   RefreshCw, 
   CheckCircle2, 
   AlertCircle, 
+  AlertTriangle,
   UserCheck, 
   UserX, 
   MapPin, 
@@ -33,7 +43,20 @@ import {
   Image as ImageIcon,
   Award,
   FileDown,
-  Navigation2
+  Navigation2,
+  HelpCircle,
+  Star,
+  Anchor,
+  Sparkles,
+  Send,
+  Eye,
+  Check,
+  Share2,
+  Globe,
+  Lock,
+  Unlock,
+  Clock,
+  Phone
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -47,18 +70,22 @@ interface UserCabinetModuleProps {
   onDeleteUser: (userId: string) => void;
   routes: RiverRoute[];
   setRoutes: React.Dispatch<React.SetStateAction<RiverRoute[]>>;
-  hydroStations: HydroStation[];
-  setHydroStations: React.Dispatch<React.SetStateAction<HydroStation[]>>;
   articles: ArticleReport[];
   setArticles: React.Dispatch<React.SetStateAction<ArticleReport[]>>;
   trips: CompanionTrip[];
   setTrips: React.Dispatch<React.SetStateAction<CompanionTrip[]>>;
+  faqData?: FaqDataConfig;
+  setFaqData?: React.Dispatch<React.SetStateAction<FaqDataConfig>>;
+  notesConfig?: TravelNotesConfig;
+  setNotesConfig?: React.Dispatch<React.SetStateAction<TravelNotesConfig>>;
   onResetToDefaults: () => void;
+  onClearAllUserCards?: () => void;
   onSelectRoute: (route: RiverRoute) => void;
   onOpenRouteDetails: (route: RiverRoute) => void;
   onOpenPassportEditor?: (route?: RiverRoute) => void;
-  initialCabinetTab?: 'profile' | 'routes' | 'hydro' | 'articles' | 'trips' | 'users' | 'backup';
+  initialCabinetTab?: 'profile' | 'routes' | 'articles' | 'trips' | 'faq' | 'travel_notes' | 'users' | 'backup';
   initialEditingArticle?: ArticleReport | null;
+  onClearInitialArticle?: () => void;
 }
 
 export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
@@ -71,46 +98,182 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
   onDeleteUser,
   routes,
   setRoutes,
-  hydroStations,
-  setHydroStations,
   articles,
   setArticles,
   trips,
   setTrips,
+  faqData = INITIAL_FAQ_DATA,
+  setFaqData,
+  notesConfig = INITIAL_TRAVEL_NOTES_CONFIG,
+  setNotesConfig,
   onResetToDefaults,
+  onClearAllUserCards,
   onSelectRoute,
   onOpenRouteDetails,
   onOpenPassportEditor,
   initialCabinetTab,
-  initialEditingArticle
+  initialEditingArticle,
+  onClearInitialArticle
 }) => {
   const isSuperAdmin = currentUser?.email.toLowerCase() === 'zuubra1985@gmail.com' || currentUser?.email.toLowerCase() === 'novichek2@narod.ru' || currentUser?.role === 'superadmin';
   const isAdmin = isSuperAdmin || currentUser?.role === 'admin';
 
-  const [activeCabinetTab, setActiveCabinetTab] = useState<'profile' | 'routes' | 'hydro' | 'articles' | 'trips' | 'users' | 'backup'>(
-    isAdmin ? (initialCabinetTab || 'profile') : 'profile'
-  );
+  const [activeCabinetTab, setActiveCabinetTabState] = useState<'profile' | 'applications' | 'sync_history' | 'routes' | 'articles' | 'trips' | 'faq' | 'travel_notes' | 'users' | 'backup' | 'telegram'>(() => {
+    if (initialCabinetTab && (isAdmin || initialCabinetTab !== 'sync_history')) return initialCabinetTab;
+    try {
+      const saved = localStorage.getItem('splav86_cabinet_active_tab');
+      if (saved) {
+        if (saved === 'sync_history' && !isAdmin) return 'profile';
+        return saved as any;
+      }
+    } catch (e) {}
+    return 'profile';
+  });
 
-  // Strictly ensure regular users never see or access admin management tabs
+  const setActiveCabinetTab = (tab: 'profile' | 'applications' | 'sync_history' | 'routes' | 'articles' | 'trips' | 'faq' | 'travel_notes' | 'users' | 'backup' | 'telegram') => {
+    setActiveCabinetTabState(tab);
+    try {
+      localStorage.setItem('splav86_cabinet_active_tab', tab);
+    } catch (e) {}
+  };
+
+  // Local fallback state for Notes if parent setNotesConfig isn't provided
+  const [internalNotesConfig, setInternalNotesConfig] = useState<TravelNotesConfig>(notesConfig || INITIAL_TRAVEL_NOTES_CONFIG);
+  const currentNotesConfig = notesConfig || internalNotesConfig;
+  const handleSetNotesConfig: React.Dispatch<React.SetStateAction<TravelNotesConfig>> = (value) => {
+    if (setNotesConfig) {
+      setNotesConfig(value);
+    } else {
+      setInternalNotesConfig(value);
+    }
+  };
+
+  // Local fallback state for FAQ if parent setFaqData isn't provided
+  const [internalFaqData, setInternalFaqData] = useState<FaqDataConfig>(faqData || INITIAL_FAQ_DATA);
+  const currentFaqData = faqData || internalFaqData;
+
+  const handleSetFaqData: React.Dispatch<React.SetStateAction<FaqDataConfig>> = (action) => {
+    if (setFaqData) {
+      setFaqData(action);
+    } else {
+      setInternalFaqData(action);
+    }
+  };
+
+  // Ensure regular users only access profile, applications, and sync_history tabs
   React.useEffect(() => {
-    if (!isAdmin && activeCabinetTab !== 'profile') {
+    if (!isAdmin && activeCabinetTab !== 'profile' && activeCabinetTab !== 'applications' && activeCabinetTab !== 'sync_history') {
       setActiveCabinetTab('profile');
     }
   }, [isAdmin, activeCabinetTab]);
+
+  React.useEffect(() => {
+    if (initialCabinetTab) {
+      if (isAdmin || initialCabinetTab === 'profile' || initialCabinetTab === 'applications' || initialCabinetTab === 'sync_history') {
+        setActiveCabinetTab(initialCabinetTab);
+      }
+    }
+  }, [initialCabinetTab, isAdmin]);
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  // Profile Edit State
+  // Deduplicated unique users map (guarantees no double accounts)
+  const uniqueUsers = React.useMemo(() => {
+    const map = new Map<string, AppUser>();
+    registeredUsers.forEach((u) => {
+      const emailKey = (u.email || '').trim().toLowerCase();
+      if (emailKey) {
+        if (!map.has(emailKey)) {
+          map.set(emailKey, u);
+        } else {
+          // If collision, prefer user with canonical id or more filled fields
+          const existing = map.get(emailKey)!;
+          if (u.id === 'user-superadmin-novichek' || u.id === 'user-superadmin-zuubra') {
+            map.set(emailKey, { ...existing, ...u });
+          }
+        }
+      } else if (!map.has(u.id)) {
+        map.set(u.id, u);
+      }
+    });
+    return Array.from(map.values());
+  }, [registeredUsers]);
+
+  // Profile Dossier & Modal Viewing State
+  const [viewingUserModal, setViewingUserModal] = useState<AppUser | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState<boolean>(false);
+  const [profileEditTab, setProfileEditTab] = useState<'main' | 'fleet' | 'gear' | 'rivers' | 'badges' | 'contacts'>('main');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cabinetGpxFileInputRef = useRef<HTMLInputElement>(null);
   const [isProcessingImage, setIsProcessingImage] = useState<boolean>(false);
-  const [profileForm, setProfileForm] = useState({
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    confirmVariant?: 'danger' | 'primary';
+    onConfirm: () => void;
+  } | null>(null);
+
+  const askConfirmation = (opts: {
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    confirmVariant?: 'danger' | 'primary';
+    onConfirm: () => void;
+  }) => {
+    setConfirmModal({
+      isOpen: true,
+      title: opts.title,
+      message: opts.message,
+      confirmText: opts.confirmText || 'Удалить',
+      cancelText: opts.cancelText || 'Отмена',
+      confirmVariant: opts.confirmVariant || 'danger',
+      onConfirm: opts.onConfirm
+    });
+  };
+
+  // Custom text inputs for quick adding
+  const [customGearInput, setCustomGearInput] = useState<string>('');
+  const [customRiverInput, setCustomRiverInput] = useState<string>('');
+
+  const [profileForm, setProfileForm] = useState<{
+    name: string;
+    callsign: string;
+    phone: string;
+    email: string;
+    city: string;
+    experienceLevel: string;
+    fstrRank: string;
+    avatar: string;
+    bio: string;
+    vesselsOwned: VesselType[];
+    gearInventory: string[];
+    favoriteRivers: string[];
+    badges: string[];
+    telegram: string;
+    vk: string;
+    isReadyForExpeditions: boolean;
+    showContactsPublicly: boolean;
+  }>({
     name: currentUser?.name || '',
+    callsign: currentUser?.callsign || '',
     phone: currentUser?.phone || '',
     email: currentUser?.email || '',
-    city: currentUser?.city || 'Югра',
-    experienceLevel: currentUser?.experienceLevel || 'Любитель (1-2 к.с.)',
-    avatar: currentUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80'
+    city: currentUser?.city || 'Сургут',
+    experienceLevel: currentUser?.experienceLevel || 'Любитель (1-2 к.с., спокойные реки)',
+    fstrRank: currentUser?.fstrRank || '',
+    avatar: currentUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
+    bio: currentUser?.bio || '',
+    vesselsOwned: currentUser?.vesselsOwned || [],
+    gearInventory: currentUser?.gearInventory || [],
+    favoriteRivers: currentUser?.favoriteRivers || [],
+    badges: currentUser?.badges || [],
+    telegram: currentUser?.telegram || '',
+    vk: currentUser?.vk || '',
+    isReadyForExpeditions: currentUser?.isReadyForExpeditions !== false,
+    showContactsPublicly: currentUser?.showContactsPublicly || false
   });
 
   const AVATAR_PRESETS = [
@@ -126,16 +289,28 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
     if (!currentUser) return;
     setProfileForm({
       name: currentUser.name,
+      callsign: currentUser.callsign || '',
       phone: currentUser.phone,
       email: currentUser.email,
-      city: currentUser.city || 'Югра',
-      experienceLevel: currentUser.experienceLevel || 'Любитель (1-2 к.с.)',
-      avatar: currentUser.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80'
+      city: currentUser.city || 'Сургут',
+      experienceLevel: currentUser.experienceLevel || 'Любитель водных походов',
+      fstrRank: currentUser.fstrRank || '',
+      avatar: currentUser.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
+      bio: currentUser.bio || '',
+      vesselsOwned: currentUser.vesselsOwned || [],
+      gearInventory: currentUser.gearInventory || [],
+      favoriteRivers: currentUser.favoriteRivers || [],
+      badges: currentUser.badges || [],
+      telegram: currentUser.telegram || '',
+      vk: currentUser.vk || '',
+      isReadyForExpeditions: currentUser.isReadyForExpeditions !== false,
+      showContactsPublicly: currentUser.showContactsPublicly || false
     });
+    setProfileEditTab('main');
     setIsEditingProfile(true);
   };
 
-  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -145,44 +320,17 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
     }
 
     setIsProcessingImage(true);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          const maxDim = 400;
-          const width = img.width;
-          const height = img.height;
-
-          const minDim = Math.min(width, height);
-          const startX = (width - minDim) / 2;
-          const startY = (height - minDim) / 2;
-
-          canvas.width = maxDim;
-          canvas.height = maxDim;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.imageSmoothingQuality = 'high';
-            ctx.drawImage(img, startX, startY, minDim, minDim, 0, 0, maxDim, maxDim);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
-            setProfileForm((prev) => ({ ...prev, avatar: dataUrl }));
-            showNotification('Фотография успешно загружена с устройства!');
-          }
-        } catch (err) {
-          console.error(err);
-          showNotification('Ошибка обработки фото', 'error');
-        } finally {
-          setIsProcessingImage(false);
-        }
-      };
-      img.onerror = () => {
-        setIsProcessingImage(false);
-        showNotification('Не удалось прочитать изображение', 'error');
-      };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
+    try {
+      const dataUrl = await compressAvatarFile(file);
+      setProfileForm((prev) => ({ ...prev, avatar: dataUrl }));
+      showNotification('Фотография профиля успешно загружена!');
+    } catch (err) {
+      console.error(err);
+      showNotification('Ошибка обработки фото', 'error');
+    } finally {
+      setIsProcessingImage(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const handleSaveProfile = (e: React.FormEvent) => {
@@ -196,81 +344,78 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
     const updated: AppUser = {
       ...currentUser,
       name: profileForm.name.trim(),
+      callsign: profileForm.callsign.trim(),
       phone: profileForm.phone.trim(),
       email: profileForm.email.trim(),
       city: profileForm.city.trim(),
       experienceLevel: profileForm.experienceLevel,
-      avatar: profileForm.avatar.trim()
+      fstrRank: profileForm.fstrRank.trim(),
+      avatar: profileForm.avatar.trim(),
+      bio: profileForm.bio.trim(),
+      vesselsOwned: profileForm.vesselsOwned,
+      gearInventory: profileForm.gearInventory,
+      favoriteRivers: profileForm.favoriteRivers,
+      badges: profileForm.badges,
+      telegram: profileForm.telegram.trim(),
+      vk: profileForm.vk.trim(),
+      isReadyForExpeditions: profileForm.isReadyForExpeditions,
+      showContactsPublicly: profileForm.showContactsPublicly
     };
 
     onUpdateCurrentUser(updated);
+    UsersSyncService.saveUser(updated).catch((err) => {
+      console.warn('Failed to sync user profile to Firestore:', err);
+    });
+
     setIsEditingProfile(false);
-    showNotification('Ваш профиль успешно обновлен!');
-    confetti({ particleCount: 50, spread: 60, origin: { y: 0.6 } });
+    showNotification('Визитная карточка туриста успешно сохранена!');
+    confetti({ particleCount: 60, spread: 70, origin: { y: 0.6 } });
   };
 
   // Edit / Create States
   const [editingRoute, setEditingRoute] = useState<RiverRoute | null>(null);
   const [isNewRoute, setIsNewRoute] = useState<boolean>(false);
 
-  const [editingHydro, setEditingHydro] = useState<HydroStation | null>(null);
-  const [isNewHydro, setIsNewHydro] = useState<boolean>(false);
-
   const [editingArticle, setEditingArticle] = useState<ArticleReport | null>(initialEditingArticle || null);
   const [isNewArticle, setIsNewArticle] = useState<boolean>(false);
+  const [isSavingArticle, setIsSavingArticle] = useState<boolean>(false);
   const articleCoverInputRef = useRef<HTMLInputElement>(null);
   const articleGalleryInputRef = useRef<HTMLInputElement>(null);
   const [isProcessingArticlePhoto, setIsProcessingArticlePhoto] = useState<boolean>(false);
 
-  // Compress & convert device image to high-res optimized Data URL
-  const compressAndLoadArticleImage = (file: File, maxWidth = 1400, quality = 0.85): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      if (!file.type.startsWith('image/')) {
-        reject(new Error('Неверный формат изображения'));
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          try {
-            let w = img.width;
-            let h = img.height;
-            if (w > maxWidth) {
-              h = Math.round((h * maxWidth) / w);
-              w = maxWidth;
-            }
-            const canvas = document.createElement('canvas');
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.imageSmoothingQuality = 'high';
-              ctx.drawImage(img, 0, 0, w, h);
-              resolve(canvas.toDataURL('image/jpeg', quality));
-            } else {
-              resolve(e.target?.result as string);
-            }
-          } catch {
-            resolve(e.target?.result as string);
-          }
-        };
-        img.onerror = () => reject(new Error('Ошибка загрузки фото'));
-        img.src = e.target?.result as string;
-      };
-      reader.onerror = () => reject(new Error('Ошибка чтения файла'));
-      reader.readAsDataURL(file);
-    });
+  const handleCloseArticleEditor = () => {
+    setEditingArticle(null);
+    if (onClearInitialArticle) {
+      onClearInitialArticle();
+    }
   };
+
+  // Sync initialCabinetTab from external triggers (e.g. from CompanionsModule)
+  React.useEffect(() => {
+    if (initialCabinetTab) {
+      setActiveCabinetTab(initialCabinetTab);
+    }
+  }, [initialCabinetTab]);
+
+  // Sync initialEditingArticle from external trigger (e.g. from ArticlesModule "Редактировать")
+  React.useEffect(() => {
+    if (initialEditingArticle) {
+      setEditingArticle(JSON.parse(JSON.stringify(initialEditingArticle)));
+      setIsNewArticle(!articles.some(a => a.id === initialEditingArticle.id));
+      if (onClearInitialArticle) {
+        onClearInitialArticle();
+      }
+    }
+  }, [initialEditingArticle, articles, onClearInitialArticle]);
 
   const handleArticleCoverFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setIsProcessingArticlePhoto(true);
     try {
-      const dataUrl = await compressAndLoadArticleImage(file, 1600, 0.88);
+      const dataUrl = await compressImageFile(file, 1200, 800, 0.74);
       setEditingArticle((prev) => (prev ? { ...prev, coverImage: dataUrl } : null));
-      showNotification('Главная обложка статьи успешно загружена с устройства!');
+      showNotification('Главная обложка статьи успешно загружена и оптимизирована!');
     } catch (err) {
       console.error(err);
       showNotification('Не удалось загрузить изображение с устройства', 'error');
@@ -288,7 +433,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
       const loaded: { url: string; caption: string }[] = [];
       for (const file of files) {
         if (file.type.startsWith('image/')) {
-          const dataUrl = await compressAndLoadArticleImage(file, 1400, 0.85);
+          const dataUrl = await compressImageFile(file, 1000, 750, 0.70);
           const cleanName = file.name.replace(/\.[^/.]+$/, '');
           loaded.push({ url: dataUrl, caption: cleanName });
         }
@@ -321,23 +466,140 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
   const handleSaveTrip = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingTrip) return;
-    setTrips((prev) => prev.map((t) => (t.id === editingTrip.id ? editingTrip : t)));
+    setTrips((prev) => {
+      const updated = prev.map((t) => (t.id === editingTrip.id ? editingTrip : t));
+      try {
+        localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      CloudSqlDbService.saveTrips(updated).catch(console.warn);
+      return updated;
+    });
     TripsSyncService.saveTrip(editingTrip).catch((err) => {
       console.warn('Failed to sync trip to Firestore:', err);
     });
+    CloudSqlDbService.saveTrip(editingTrip).catch(console.warn);
     showNotification(`Экспедиция "${editingTrip.title}" успешно обновлена!`);
     setEditingTrip(null);
     confetti({ particleCount: 40, spread: 50, origin: { y: 0.6 } });
   };
 
   const handleDeleteTrip = (tripId: string, title: string) => {
-    if (window.confirm(`Вы уверены, что хотите удалить экспедицию "${title}"?`)) {
-      setTrips((prev) => prev.filter((t) => t.id !== tripId));
-      TripsSyncService.removeTrip(tripId).catch((err) => {
-        console.warn('Failed to remove trip from Firestore:', err);
-      });
-      showNotification(`Экспедиция "${title}" удалена.`, 'error');
+    askConfirmation({
+      title: 'Удалить экспедицию?',
+      message: `Вы уверены, что хотите удалить экспедицию "${title}"? Это действие необратимо.`,
+      confirmText: 'Да, удалить поход',
+      confirmVariant: 'danger',
+      onConfirm: () => {
+        recordTripDeletion(tripId);
+        setTrips((prev) => {
+          const updated = prev.filter((t) => t.id !== tripId);
+          try {
+            localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(updated));
+          } catch (err) {
+            console.error(err);
+          }
+          CloudSqlDbService.saveTrips(updated).catch(console.warn);
+          return updated;
+        });
+        TripsSyncService.removeTrip(tripId).catch((err) => {
+          console.warn('Failed to remove trip from Firestore:', err);
+        });
+        CloudSqlDbService.deleteTrip(tripId).catch(console.warn);
+        showNotification(`Экспедиция "${title}" удалена.`, 'error');
+      }
+    });
+  };
+
+  const handleToggleRoutePublic = (routeId: string) => {
+    const targetRoute = routes.find((r) => r.id === routeId);
+    if (!targetRoute) return;
+
+    const nextIsPublic = !targetRoute.isPublic;
+    const updatedRoute: RiverRoute = {
+      ...targetRoute,
+      isPublic: nextIsPublic,
+      lastPassportRevision: new Date().toISOString().split('T')[0]
+    };
+
+    setRoutes((prev) => {
+      const next = prev.map((r) => (r.id === routeId ? updatedRoute : r));
+      try {
+        localStorage.setItem('splav86_custom_routes_v5', JSON.stringify(next));
+      } catch (e) {
+        console.error(e);
+      }
+      return next;
+    });
+
+    RoutesSyncService.saveRoute(updatedRoute).catch(console.warn);
+    CloudSqlDbService.saveRoute(updatedRoute).catch(console.warn);
+
+    if (nextIsPublic) {
+      showNotification(`Трек "${updatedRoute.name}" опубликован! Теперь он доступен всем сплавщикам в каталоге и на интерактивной карте.`);
+      confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+    } else {
+      showNotification(`Трек "${updatedRoute.name}" переведен в личный статус (скрыт из общего каталога).`);
     }
+  };
+
+  const handleDownloadGpx = (route: RiverRoute) => {
+    try {
+      const gpxString = generateGpxString(route);
+      const blob = new Blob([gpxString], { type: 'application/gpx+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = route.gpxFileName || `${(route.name || 'track').replace(/\s+/g, '_')}_splav86.gpx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showNotification(`GPX файл "${route.name}" успешно скачан!`);
+    } catch (e: any) {
+      showNotification('Ошибка скачивания GPX файла', 'error');
+    }
+  };
+
+  const handleDeleteMyRoute = (routeId: string) => {
+    const target = routes.find((r) => r.id === routeId);
+    if (!target) return;
+    askConfirmation({
+      title: 'Удалить личный GPX трек?',
+      message: `Вы действительно хотите удалить ваш трек "${target.name}" (${target.lengthKm} км)? Это действие необратимо.`,
+      confirmText: 'Да, удалить трек',
+      confirmVariant: 'danger',
+      onConfirm: () => {
+        confirmDeleteRoute(target);
+      }
+    });
+  };
+
+  const confirmDeleteRoute = (target: RiverRoute) => {
+    const routeId = target.id;
+    const nextRoutes = routes.filter((r) => r.id !== routeId);
+
+    setRoutes(nextRoutes);
+    try {
+      localStorage.setItem('splav86_custom_routes_v5', JSON.stringify(nextRoutes));
+    } catch (e) {
+      console.error(e);
+    }
+
+    if (currentUser?.favoriteRouteIds?.includes(routeId)) {
+      const updatedUser = {
+        ...currentUser,
+        favoriteRouteIds: currentUser.favoriteRouteIds.filter((id) => id !== routeId)
+      };
+      onUpdateCurrentUser(updatedUser);
+      UsersSyncService.saveUser(updatedUser).catch(console.warn);
+      CloudSqlDbService.saveUser(updatedUser).catch(console.warn);
+    }
+
+    RoutesSyncService.removeRoute(routeId).catch(console.warn);
+    CloudSqlDbService.saveRoutes(nextRoutes).catch(console.warn);
+    showNotification(`Личный трек "${target.name}" успешно удален.`);
   };
 
   const handleCabinetGpxUpload = (file: File) => {
@@ -370,9 +632,9 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
           elevationGainM: parsed.elevationGainM || 50,
           avgFlowSpeedKmh: 3.5,
           seasonMonths: 'Июнь — Сентябрь',
-          description: parsed.description,
-          shortDesc: `Импортированный GPX трек (${parsed.totalDistanceKm} км, перепад ${parsed.elevationGainM} м).`,
-          highlights: ['Импортировано из GPS навигатора', 'Фактический пройденный трек'],
+          description: parsed.description || `Личный GPX трек водного похода по реке ${parsed.name}.`,
+          shortDesc: `Личный трек (${parsed.totalDistanceKm} км, перепад ${parsed.elevationGainM} м).`,
+          highlights: ['Личный GPS трек из навигатора', 'Фактически пройденная нитка маршрута'],
           warnings: ['Проверьте уровень воды и гидрологическую обстановку'],
           mchsRegistrationRequired: true,
           kmnsPermitNeeded: false,
@@ -382,6 +644,12 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
             elevationM: ep.elev
           })),
           gpxFileName: `${parsed.name.toLowerCase().replace(/\s+/g, '_')}_splav86.gpx`,
+          isPersonal: true,
+          isPublic: false, // Приватный по умолчанию: виден и редактируется только автором!
+          authorId: currentUser?.id || 'guest',
+          authorName: currentUser?.name || 'Турист',
+          authorEmail: currentUser?.email || '',
+          lastPassportRevision: new Date().toISOString().split('T')[0],
           pois: parsed.waypoints.length > 0 ? parsed.waypoints : [
             {
               id: `poi-st-${Date.now()}`,
@@ -412,16 +680,25 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
           return updated;
         });
 
+        RoutesSyncService.saveRoute(newRoute).catch((err) => {
+          console.warn('Failed to sync imported GPX route to Firestore:', err);
+        });
+        CloudSqlDbService.saveRoute(newRoute).catch((err) => {
+          console.warn('Failed to sync imported GPX route to CloudSQL:', err);
+        });
+
         // Add to user's favorites as well
         if (currentUser) {
           const favs = currentUser.favoriteRouteIds || [];
           if (!favs.includes(newRoute.id)) {
             const updatedUser = { ...currentUser, favoriteRouteIds: [...favs, newRoute.id] };
             onUpdateCurrentUser(updatedUser);
+            UsersSyncService.saveUser(updatedUser).catch(console.warn);
+            CloudSqlDbService.saveUser(updatedUser).catch(console.warn);
           }
         }
 
-        showNotification(`GPX трек "${parsed.name}" (${parsed.totalDistanceKm} км) успешно импортирован!`);
+        showNotification(`Личный GPX трек "${parsed.name}" (${parsed.totalDistanceKm} км) загружен! Он сохранен как приватный (видите только вы). Нажмите «Поделиться», если захотите опубликовать его.`);
         confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
       } catch (err: any) {
         showNotification(err.message || 'Ошибка чтения GPX файла.', 'error');
@@ -435,22 +712,28 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
 
   const handleWithdrawApplication = (tripId: string) => {
     if (!currentUser) return;
-    if (window.confirm('Отозвать вашу заявку на участие в этом походе?')) {
-      const targetTrip = trips.find((t) => t.id === tripId);
-      if (targetTrip) {
-        const updatedTrip: CompanionTrip = {
-          ...targetTrip,
-          applications: (targetTrip.applications || []).filter(
-            (a) => a.userId !== currentUser.id && a.applicantName.toLowerCase() !== currentUser.name.toLowerCase()
-          )
-        };
-        setTrips((prev) => prev.map((t) => (t.id === tripId ? updatedTrip : t)));
-        TripsSyncService.saveTrip(updatedTrip).catch((err) => {
-          console.warn('Failed to sync trip application withdrawal to Firestore:', err);
-        });
+    askConfirmation({
+      title: 'Отозвать заявку?',
+      message: 'Вы уверены, что хотите отозвать вашу заявку на участие в этом походе?',
+      confirmText: 'Отозвать заявку',
+      confirmVariant: 'danger',
+      onConfirm: () => {
+        const targetTrip = trips.find((t) => t.id === tripId);
+        if (targetTrip) {
+          const updatedTrip: CompanionTrip = {
+            ...targetTrip,
+            applications: (targetTrip.applications || []).filter(
+              (a) => a.userId !== currentUser.id && a.applicantName.toLowerCase() !== currentUser.name.toLowerCase()
+            )
+          };
+          setTrips((prev) => prev.map((t) => (t.id === tripId ? updatedTrip : t)));
+          TripsSyncService.saveTrip(updatedTrip).catch((err) => {
+            console.warn('Failed to sync trip application withdrawal to Firestore:', err);
+          });
+        }
+        showNotification('Заявка успешно отозвана.');
       }
-      showNotification('Заявка успешно отозвана.');
-    }
+    });
   };
 
   const handleCabinetAcceptApp = (trip: CompanionTrip, app: TripApplication) => {
@@ -523,8 +806,14 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
     );
   }
 
-  // Favorite routes
+  // Favorite routes & User's Custom/Personal Routes
   const favoriteRoutes = routes.filter((r) => currentUser.favoriteRouteIds?.includes(r.id));
+  const myCustomRoutes = routes.filter((r) => {
+    if (!currentUser) return false;
+    const authorMatches = (r.authorId && r.authorId === currentUser.id) ||
+      (r.authorEmail && r.authorEmail.toLowerCase() === currentUser.email.toLowerCase());
+    return r.isPersonal || authorMatches;
+  });
 
   // --- Handlers for Routes ---
   const handleOpenNewRoute = () => {
@@ -600,67 +889,20 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
   };
 
   const handleDeleteRoute = (id: string, name: string) => {
-    if (window.confirm(`Вы уверены, что хотите удалить маршрут "${name}" с сайта?`)) {
-      setRoutes((prev) => prev.filter((r) => r.id !== id));
-      RoutesSyncService.removeRoute(id).catch((err) => {
-        console.warn('Failed to remove route from Firestore:', err);
-      });
-      showNotification(`Маршрут "${name}" удален.`, 'error');
-    }
-  };
-
-  // --- Handlers for Hydro Stations ---
-  const handleOpenNewHydro = () => {
-    const template: HydroStation = {
-      id: `hydro-${Date.now()}`,
-      name: 'Гидропост р. Новая',
-      river: 'Новая',
-      region: 'ХМАО',
-      lat: 61.0,
-      lng: 69.0,
-      currentLevelCm: 250,
-      change24hCm: 5,
-      dangerLevelCm: 500,
-      floodLevelCm: 380,
-      normalLevelCm: 200,
-      waterTempC: 14,
-      iceCondition: 'Чистая вода, навигация открыта',
-      lastUpdated: 'Сегодня в 08:00',
-      historicalTrend: [
-        { date: '15.08', level: 245 },
-        { date: '16.08', level: 248 },
-        { date: '17.08', level: 250 }
-      ]
-    };
-    setEditingHydro(template);
-    setIsNewHydro(true);
-  };
-
-  const handleSaveHydro = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingHydro) return;
-
-    if (isNewHydro) {
-      setHydroStations((prev) => [editingHydro, ...prev]);
-      showNotification(`Гидропост "${editingHydro.name}" добавлен!`);
-    } else {
-      setHydroStations((prev) => prev.map((h) => (h.id === editingHydro.id ? editingHydro : h)));
-      showNotification(`Данные гидропоста "${editingHydro.name}" обновлены!`);
-    }
-    HydroSyncService.saveHydroStation(editingHydro).catch((err) => {
-      console.warn('Failed to sync hydro station to Firestore:', err);
+    askConfirmation({
+      title: 'Удалить маршрут?',
+      message: `Вы уверены, что хотите удалить маршрут "${name}" с сайта?`,
+      confirmText: 'Да, удалить',
+      confirmVariant: 'danger',
+      onConfirm: () => {
+        recordRouteDeletion(id);
+        setRoutes((prev) => prev.filter((r) => r.id !== id));
+        RoutesSyncService.removeRoute(id).catch((err) => {
+          console.warn('Failed to remove route from Firestore:', err);
+        });
+        showNotification(`Маршрут "${name}" удален.`, 'error');
+      }
     });
-    setEditingHydro(null);
-  };
-
-  const handleDeleteHydro = (id: string, name: string) => {
-    if (window.confirm(`Удалить гидропост "${name}"?`)) {
-      setHydroStations((prev) => prev.filter((h) => h.id !== id));
-      HydroSyncService.removeHydroStation(id).catch((err) => {
-        console.warn('Failed to remove hydro station from Firestore:', err);
-      });
-      showNotification(`Гидропост "${name}" удален.`, 'error');
-    }
   };
 
   // --- Handlers for Articles ---
@@ -702,35 +944,98 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
   const handleSaveArticle = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingArticle) return;
-
-    if (isNewArticle) {
-      setArticles((prev) => [editingArticle, ...prev]);
-      showNotification(`Статья "${editingArticle.title}" опубликована!`);
-    } else {
-      setArticles((prev) => prev.map((a) => (a.id === editingArticle.id ? editingArticle : a)));
-      showNotification(`Статья "${editingArticle.title}" сохранена!`);
-    }
+    setIsSavingArticle(true);
 
     try {
-      await ArticlesSyncService.saveArticle(editingArticle);
-    } catch (err) {
-      console.error('Firestore save article error:', err);
-    }
+      // Compress cover image if it is base64 data-url
+      let compressedCover = editingArticle.coverImage;
+      if (compressedCover && compressedCover.startsWith('data:image/')) {
+        compressedCover = await compressDataUrl(compressedCover, 1000, 750, 0.70);
+      }
 
-    setEditingArticle(null);
-    confetti({ particleCount: 45, spread: 60, origin: { y: 0.6 } });
+      // Compress gallery images if any are base64
+      let compressedGallery = editingArticle.gallery || [];
+      if (compressedGallery.length > 0) {
+        compressedGallery = await Promise.all(
+          compressedGallery.map(async (img) => {
+            if (img && img.startsWith('data:image/')) {
+              return await compressDataUrl(img, 1000, 750, 0.70);
+            }
+            return img;
+          })
+        );
+      }
+
+      const articleToSave: ArticleReport = {
+        ...editingArticle,
+        title: editingArticle.title.trim(),
+        summary: editingArticle.summary.trim(),
+        riverName: editingArticle.riverName.trim(),
+        author: editingArticle.author.trim() || (currentUser?.name || 'Администратор'),
+        coverImage: compressedCover,
+        gallery: compressedGallery
+      };
+
+      let updatedArticlesList: ArticleReport[] = [];
+      if (isNewArticle) {
+        updatedArticlesList = [articleToSave, ...articles.filter((a) => a.id !== articleToSave.id)];
+      } else {
+        updatedArticlesList = articles.map((a) => (a.id === articleToSave.id ? articleToSave : a));
+      }
+
+      // 1. Immediately update in-memory state
+      setArticles(updatedArticlesList);
+
+      // 2. Immediately cache in localStorage
+      try {
+        localStorage.setItem('splav86_custom_articles', JSON.stringify(updatedArticlesList));
+      } catch (lsErr) {
+        console.warn('localStorage quota save note:', lsErr);
+      }
+
+      // 3. Save to Firestore & CloudSQL concurrently
+      await Promise.allSettled([
+        ArticlesSyncService.saveArticle(articleToSave),
+        CloudSqlDbService.saveArticle(articleToSave)
+      ]);
+
+      showNotification(`Статья "${articleToSave.title}" успешно сохранена и синхронизирована!`);
+    } catch (err) {
+      console.error('Save article error:', err);
+      showNotification('Статья сохранена локально', 'success');
+    } finally {
+      setIsSavingArticle(false);
+      handleCloseArticleEditor();
+      confetti({ particleCount: 45, spread: 60, origin: { y: 0.6 } });
+    }
   };
 
   const handleDeleteArticle = async (id: string, title: string) => {
-    if (window.confirm(`Удалить статью "${title}"?`)) {
-      setArticles((prev) => prev.filter((a) => a.id !== id));
-      showNotification(`Статья "${title}" удалена.`, 'error');
-      try {
-        await ArticlesSyncService.removeArticle(id);
-      } catch (err) {
-        console.error('Firestore remove article error:', err);
+    askConfirmation({
+      title: 'Удалить статью?',
+      message: `Вы уверены, что хотите удалить статью "${title}"?`,
+      confirmText: 'Да, удалить',
+      confirmVariant: 'danger',
+      onConfirm: async () => {
+        recordArticleDeletion(id);
+        const updated = articles.filter((a) => a.id !== id);
+        setArticles(updated);
+        try {
+          localStorage.setItem('splav86_custom_articles', JSON.stringify(updated));
+        } catch (e) {
+          console.error(e);
+        }
+        showNotification(`Статья "${title}" удалена.`, 'error');
+        try {
+          await Promise.allSettled([
+            ArticlesSyncService.removeArticle(id),
+            CloudSqlDbService.deleteArticle(id)
+          ]);
+        } catch (err) {
+          console.error('Remove article error:', err);
+        }
       }
-    }
+    });
   };
 
   // --- Handlers for Database Backup ---
@@ -739,9 +1044,10 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
       version: '1.0.0',
       exportDate: new Date().toISOString(),
       routes,
-      hydroStations,
       articles,
       trips,
+      faqData: currentFaqData,
+      notesConfig: currentNotesConfig,
       registeredUsers
     };
 
@@ -764,9 +1070,16 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
       try {
         const parsed = JSON.parse(event.target?.result as string);
         if (parsed.routes && Array.isArray(parsed.routes)) setRoutes(parsed.routes);
-        if (parsed.hydroStations && Array.isArray(parsed.hydroStations)) setHydroStations(parsed.hydroStations);
         if (parsed.articles && Array.isArray(parsed.articles)) setArticles(parsed.articles);
         if (parsed.trips && Array.isArray(parsed.trips)) setTrips(parsed.trips);
+        if (parsed.faqData && parsed.faqData.safetyGuides) {
+          handleSetFaqData(parsed.faqData);
+          FaqSyncService.saveFaq(parsed.faqData).catch(console.warn);
+        }
+        if (parsed.notesConfig && parsed.notesConfig.notes) {
+          handleSetNotesConfig(parsed.notesConfig);
+          TravelNotesSyncService.saveNotesConfig(parsed.notesConfig).catch(console.warn);
+        }
 
         showNotification('База данных успешно восстановлена!');
         confetti({ particleCount: 60, spread: 60, origin: { y: 0.6 } });
@@ -779,40 +1092,75 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-6 space-y-6">
+      {/* Hidden GPX input for cabinet (available on all tabs for regular users and admins) */}
+      <input
+        type="file"
+        ref={cabinetGpxFileInputRef}
+        accept=".gpx,.kml,.xml"
+        onChange={(e) => {
+          if (e.target.files && e.target.files.length > 0) {
+            handleCabinetGpxUpload(e.target.files[0]);
+            e.target.value = '';
+          }
+        }}
+        className="hidden"
+      />
       
       {/* User Header Profile Card */}
       <div className="bg-white p-5 sm:p-6 rounded-[28px] border border-[#E5E0D8] shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-5">
         
         <div className="flex items-center gap-4">
-          <img
-            src={currentUser.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80'}
-            alt={currentUser.name}
-            className="w-14 h-14 rounded-2xl object-cover border-2 border-[#E8F1E7]"
-          />
+          <div className="relative">
+            <img
+              src={currentUser.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80'}
+              alt={currentUser.name}
+              className="w-16 h-16 rounded-2xl object-cover border-2 border-[#E8F1E7] shadow-sm"
+            />
+            {currentUser.isReadyForExpeditions !== false && (
+              <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 border-2 border-white rounded-full" title="Готов к экспедициям" />
+            )}
+          </div>
 
           <div>
-            <h1 className="text-lg sm:text-xl font-black text-[#1A1F1A]">{currentUser.name}</h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-lg sm:text-xl font-black text-[#1A1F1A]">{currentUser.name}</h1>
+              {currentUser.callsign && (
+                <span className="px-2 py-0.5 rounded-lg bg-[#E8F1E7] text-[#2D5A27] text-xs font-bold font-mono border border-[#CDE0CC]">
+                  «{currentUser.callsign}»
+                </span>
+              )}
+              {currentUser.role === 'admin' && (
+                <span className="px-2 py-0.5 rounded-lg bg-[#FEF3C7] text-[#92400E] text-[10px] font-black uppercase">
+                  Администратор
+                </span>
+              )}
+            </div>
+
             <div className="text-xs text-[#6B665F] mt-1 flex items-center gap-3 flex-wrap">
               <span>✉️ {currentUser.email}</span>
-              <span>📞 {currentUser.phone}</span>
+              {currentUser.phone && <span>📞 {currentUser.phone}</span>}
               <span>📍 {currentUser.city || 'Югра'}</span>
+              <span className="text-[#2D5A27] font-semibold">🌊 {currentUser.experienceLevel}</span>
             </div>
           </div>
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2 self-start md:self-auto">
-          <button
-            onClick={handleOpenEditProfile}
-            className="px-3.5 py-2 bg-[#E8F1E7] hover:bg-[#D4E8D2] text-[#2D5A27] font-bold text-xs rounded-xl border border-[#CDE0CC] transition-all flex items-center gap-1.5 shadow-xs"
-          >
-            <Edit3 className="w-3.5 h-3.5" />
-            <span>Редактировать профиль</span>
-          </button>
+        <div className="flex items-center gap-2 self-start md:self-auto flex-wrap">
+          {isAdmin && (
+            <button
+              onClick={() => setActiveCabinetTab('sync_history')}
+              className="px-3 py-2 bg-[#E8F1E7] hover:bg-[#D5E8D3] text-[#2D5A27] font-bold text-xs rounded-xl border border-[#CDE0CC] transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              title="Панель синхронизации (для администраторов)"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Синхронизация: В сети</span>
+            </button>
+          )}
 
           <button
             onClick={onLogout}
-            className="px-3.5 py-2 bg-[#F9F7F4] hover:bg-[#FDE8E8] text-[#6B665F] hover:text-[#E54B4B] font-bold text-xs rounded-xl border border-[#E5E0D8] transition-colors flex items-center gap-1.5"
+            className="px-3.5 py-2 bg-[#F9F7F4] hover:bg-[#FDE8E8] text-[#6B665F] hover:text-[#E54B4B] font-bold text-xs rounded-xl border border-[#E5E0D8] transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
           >
             <LogOut className="w-3.5 h-3.5" />
             <span>Выйти</span>
@@ -821,95 +1169,208 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
 
       </div>
 
-      {/* Tabs navigation */}
-      <div className="flex items-center gap-1.5 bg-white p-1.5 rounded-2xl border border-[#E5E0D8] shadow-sm overflow-x-auto">
+      {/* Tabs navigation: Structured grid / vertical list of sections */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 bg-white p-2.5 sm:p-3 rounded-2xl border border-[#E5E0D8] shadow-xs">
         <button
           onClick={() => setActiveCabinetTab('profile')}
-          className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shrink-0 ${
+          className={`px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-between gap-2 cursor-pointer ${
             activeCabinetTab === 'profile'
-              ? 'bg-[#2D5A27] text-white shadow-sm'
-              : 'text-[#6B665F] hover:text-[#2D5A27]'
+              ? 'bg-[#2D5A27] text-white shadow-xs'
+              : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4] border border-[#E5E0D8]/60 sm:border-transparent'
           }`}
         >
-          <User className="w-4 h-4" />
-          Мой профиль
+          <div className="flex items-center gap-2">
+            <User className="w-4 h-4 shrink-0" />
+            <span>Мой профиль</span>
+          </div>
+          <span className="text-[10px] opacity-70 font-normal hidden sm:inline">Личные данные</span>
         </button>
+
+        {/* 2. ALL USERS APPLICATIONS TAB */}
+        {(() => {
+          const userPendingCount = trips.reduce((acc, trip) => {
+            const isMyTrip = (trip.organizer.userId && trip.organizer.userId === currentUser?.id) ||
+              (currentUser?.name && trip.organizer.name.toLowerCase().includes(currentUser.name.toLowerCase()));
+            if (isMyTrip || isAdmin) {
+              const pending = (trip.applications || []).filter(a => a.status === 'pending').length;
+              return acc + pending;
+            }
+            return acc;
+          }, 0);
+
+          return (
+            <button
+              onClick={() => setActiveCabinetTab('applications')}
+              className={`px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                activeCabinetTab === 'applications'
+                  ? 'bg-[#2D5A27] text-white shadow-xs'
+                  : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4] border border-[#E5E0D8]/60 sm:border-transparent'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 shrink-0" />
+                <span>Заявки на сплавы</span>
+              </div>
+              {userPendingCount > 0 && (
+                <span className="px-2 py-0.5 bg-[#E54B4B] text-white rounded-full text-[10px] font-black animate-pulse">
+                  +{userPendingCount}
+                </span>
+              )}
+            </button>
+          );
+        })()}
 
         {isAdmin && (
           <>
             <button
-              onClick={() => setActiveCabinetTab('routes')}
-              className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shrink-0 ${
-                activeCabinetTab === 'routes'
-                  ? 'bg-[#2D5A27] text-white shadow-sm'
-                  : 'text-[#6B665F] hover:text-[#2D5A27]'
+              onClick={() => setActiveCabinetTab('sync_history')}
+              className={`px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                activeCabinetTab === 'sync_history'
+                  ? 'bg-[#2D5A27] text-white shadow-xs'
+                  : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4] border border-[#E5E0D8]/60 sm:border-transparent'
               }`}
             >
-              <Compass className="w-4 h-4" />
-              Управление реками ({routes.length})
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span>История синхронизации</span>
+              </div>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
             </button>
 
             <button
-              onClick={() => setActiveCabinetTab('hydro')}
-              className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shrink-0 ${
-                activeCabinetTab === 'hydro'
-                  ? 'bg-[#2D5A27] text-white shadow-sm'
-                  : 'text-[#6B665F] hover:text-[#2D5A27]'
+              onClick={() => setActiveCabinetTab('routes')}
+              className={`px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                activeCabinetTab === 'routes'
+                  ? 'bg-[#2D5A27] text-white shadow-xs'
+                  : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4] border border-[#E5E0D8]/60 sm:border-transparent'
               }`}
             >
-              <Droplets className="w-4 h-4" />
-              Гидропосты ({hydroStations.length})
+              <div className="flex items-center gap-2">
+                <Compass className="w-4 h-4 shrink-0" />
+                <span>Управление реками</span>
+              </div>
+              <span className="text-[10px] opacity-80 px-1.5 py-0.5 rounded-full bg-stone-100 text-stone-700">
+                {routes.length}
+              </span>
             </button>
 
             <button
               onClick={() => setActiveCabinetTab('articles')}
-              className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shrink-0 ${
+              className={`px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-between gap-2 cursor-pointer ${
                 activeCabinetTab === 'articles'
-                  ? 'bg-[#2D5A27] text-white shadow-sm'
-                  : 'text-[#6B665F] hover:text-[#2D5A27]'
+                  ? 'bg-[#2D5A27] text-white shadow-xs'
+                  : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4] border border-[#E5E0D8]/60 sm:border-transparent'
               }`}
             >
-              <BookOpen className="w-4 h-4" />
-              Статьи и отчеты ({articles.length})
+              <div className="flex items-center gap-2">
+                <BookOpen className="w-4 h-4 shrink-0" />
+                <span>Статьи и отчеты</span>
+              </div>
+              <span className="text-[10px] opacity-80 px-1.5 py-0.5 rounded-full bg-stone-100 text-stone-700">
+                {articles.length}
+              </span>
             </button>
 
             <button
               onClick={() => setActiveCabinetTab('trips')}
-              className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shrink-0 ${
+              className={`px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-between gap-2 cursor-pointer ${
                 activeCabinetTab === 'trips'
-                  ? 'bg-[#2D5A27] text-white shadow-sm'
-                  : 'text-[#6B665F] hover:text-[#2D5A27]'
+                  ? 'bg-[#2D5A27] text-white shadow-xs'
+                  : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4] border border-[#E5E0D8]/60 sm:border-transparent'
               }`}
             >
-              <Users className="w-4 h-4" />
-              Все походы ({trips.length})
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 shrink-0" />
+                <span>Все походы</span>
+              </div>
+              <span className="text-[10px] opacity-80 px-1.5 py-0.5 rounded-full bg-stone-100 text-stone-700">
+                {trips.length}
+              </span>
             </button>
 
-            {/* Only Super Admin can manage Admins */}
-            {isSuperAdmin && (
+            <button
+              onClick={() => setActiveCabinetTab('faq')}
+              className={`px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                activeCabinetTab === 'faq'
+                  ? 'bg-[#2D5A27] text-white shadow-xs'
+                  : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4] border border-[#E5E0D8]/60 sm:border-transparent'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <HelpCircle className="w-4 h-4 shrink-0" />
+                <span>Редактор FAQ</span>
+              </div>
+              <span className="text-[10px] opacity-80 px-1.5 py-0.5 rounded-full bg-stone-100 text-stone-700">
+                {(currentFaqData.faqQuestions || []).length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setActiveCabinetTab('travel_notes')}
+              className={`px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                activeCabinetTab === 'travel_notes'
+                  ? 'bg-[#2D5A27] text-white shadow-xs'
+                  : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4] border border-[#E5E0D8]/60 sm:border-transparent'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Star className="w-4 h-4 text-amber-500 shrink-0" />
+                <span>Заметки и отзывы</span>
+              </div>
+              <span className="text-[10px] opacity-80 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-800">
+                { (currentNotesConfig.notes || []).length + (currentNotesConfig.riverReviews || []).length + (currentNotesConfig.crewReviews || []).length }
+              </span>
+            </button>
+
+            {/* Admins & SuperAdmin can view participants directory & access control */}
+            {isAdmin && (
               <button
                 onClick={() => setActiveCabinetTab('users')}
-                className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shrink-0 ${
+                className={`px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-between gap-2 cursor-pointer ${
                   activeCabinetTab === 'users'
-                    ? 'bg-[#E54B4B] text-white shadow-sm'
-                    : 'text-[#E54B4B] hover:bg-[#FDE8E8]'
+                    ? 'bg-[#E54B4B] text-white shadow-xs'
+                    : 'text-[#E54B4B] hover:bg-[#FDE8E8] border border-[#F8B4B4]/60 sm:border-transparent'
                 }`}
               >
-                <Crown className="w-4 h-4" />
-                Администраторы и пользователи
+                <div className="flex items-center gap-2">
+                  <Crown className="w-4 h-4 shrink-0" />
+                  <span>Карточки участников</span>
+                </div>
+                <span className="text-[10px] opacity-80 px-1.5 py-0.5 rounded-full bg-red-50 text-[#E54B4B]">
+                  {uniqueUsers.length}
+                </span>
               </button>
             )}
 
             <button
               onClick={() => setActiveCabinetTab('backup')}
-              className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shrink-0 ${
+              className={`px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-between gap-2 cursor-pointer ${
                 activeCabinetTab === 'backup'
-                  ? 'bg-[#2D5A27] text-white shadow-sm'
-                  : 'text-[#6B665F] hover:text-[#2D5A27]'
+                  ? 'bg-[#2D5A27] text-white shadow-xs'
+                  : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4] border border-[#E5E0D8]/60 sm:border-transparent'
               }`}
             >
-              <FileJson className="w-4 h-4" />
-              Бэкап базы
+              <div className="flex items-center gap-2">
+                <FileJson className="w-4 h-4 shrink-0" />
+                <span>Бэкап базы</span>
+              </div>
+            </button>
+
+            <button
+              onClick={() => setActiveCabinetTab('telegram')}
+              className={`px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                activeCabinetTab === 'telegram'
+                  ? 'bg-[#0088cc] text-white shadow-xs'
+                  : 'text-[#0088cc] hover:bg-sky-50 border border-sky-200/60 sm:border-transparent'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Send className="w-4 h-4 shrink-0 text-[#0088cc]" />
+                <span>Telegram Mini App</span>
+              </div>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-100 text-[#0088cc] font-bold">
+                @SSplav86_bot
+              </span>
             </button>
           </>
         )}
@@ -930,6 +1391,167 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
       {/* 1. USER PROFILE & SAVED ROUTES */}
       {activeCabinetTab === 'profile' && (
         <div className="space-y-6">
+          
+          {/* Tourist Dossier Overview Card */}
+          <div className="bg-gradient-to-br from-white to-[#F9F7F4] border border-[#E5E0D8] rounded-[28px] p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-[#E8F1E7] text-[#2D5A27]">
+                  <Compass className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-[#1A1F1A]">
+                    Визитная карточка водного туриста
+                  </h2>
+                  <p className="text-xs text-[#6B665F]">
+                    Так вас видят капитаны и участники других походов при просмотре экипажа
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewingUserModal(currentUser)}
+                  className="px-3.5 py-1.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold text-xs rounded-xl shadow-2xs transition-all flex items-center gap-1.5"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Открыть визитку</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenEditProfile}
+                  className="px-3 py-1.5 bg-white hover:bg-[#F9F7F4] text-[#2D332D] font-bold text-xs rounded-xl border border-[#E5E0D8] transition-all flex items-center gap-1"
+                >
+                  <Edit3 className="w-3.5 h-3.5 text-[#8B7E6D]" />
+                  <span>Редактировать</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-2">
+              {/* Fleet */}
+              <div className="bg-white p-3.5 rounded-2xl border border-[#EEEBE6] space-y-1.5">
+                <span className="text-[11px] font-bold text-[#8B7E6D] flex items-center gap-1">
+                  <Anchor className="w-3.5 h-3.5 text-[#2D5A27]" />
+                  Личный флот
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {currentUser.vesselsOwned && currentUser.vesselsOwned.length > 0 ? (
+                    currentUser.vesselsOwned.map((v) => (
+                      <span key={v} className="px-2 py-0.5 bg-[#F9F7F4] border border-[#E5E0D8] text-[11px] font-medium rounded-lg text-[#2D332D]">
+                        {v === 'catamaran' ? '⛵ Катамаран' : v === 'kayak' ? '🛶 Каяк/Байдарка' : v === 'packraft' ? '🎒 Пакрафт' : v === 'sup' ? '🏄 SUP' : v === 'motorboat' ? '🚤 Моторка' : '🛟 Рафт'}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-[11px] text-[#8B7E6D] italic">Не указан</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Skills / Badges */}
+              <div className="bg-white p-3.5 rounded-2xl border border-[#EEEBE6] space-y-1.5">
+                <span className="text-[11px] font-bold text-[#8B7E6D] flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                  Роли & Навыки
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {currentUser.badges && currentUser.badges.length > 0 ? (
+                    currentUser.badges.map((b) => (
+                      <span key={b} className="px-2 py-0.5 bg-[#FEF3C7]/40 border border-[#FDE68A] text-[10px] font-bold rounded-lg text-[#92400E]">
+                        {b}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-[11px] text-[#8B7E6D] italic">Не выбраны</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Favorite Rivers */}
+              <div className="bg-white p-3.5 rounded-2xl border border-[#EEEBE6] space-y-1.5">
+                <span className="text-[11px] font-bold text-[#8B7E6D] flex items-center gap-1">
+                  <Heart className="w-3.5 h-3.5 text-rose-500" />
+                  Любимые реки
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {currentUser.favoriteRivers && currentUser.favoriteRivers.length > 0 ? (
+                    currentUser.favoriteRivers.map((r) => (
+                      <span key={r} className="px-2 py-0.5 bg-[#E8F1E7] border border-[#CDE0CC] text-[11px] font-medium rounded-lg text-[#2D5A27]">
+                        р. {r}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-[11px] text-[#8B7E6D] italic">Не указаны</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Rating & Reviews from Crew */}
+              {(() => {
+                const myReviews = (currentNotesConfig?.crewReviews || []).filter((r) => {
+                  const targetId = (r.targetUserId || '').trim().toLowerCase();
+                  const userId = (currentUser.id || '').trim().toLowerCase();
+                  const userEmail = (currentUser.email || '').trim().toLowerCase();
+                  const targetName = (r.targetUserName || '').trim().toLowerCase();
+                  const userName = (currentUser.name || '').trim().toLowerCase();
+                  const userCallsign = (currentUser.callsign || '').trim().toLowerCase();
+
+                  return (
+                    (targetId && targetId === userId) ||
+                    (targetId && userEmail && targetId === userEmail) ||
+                    (targetName && userName && (targetName === userName || userName.includes(targetName) || targetName.includes(userName))) ||
+                    (targetName && userCallsign && (targetName === userCallsign || targetName.includes(userCallsign))) ||
+                    (targetId && userCallsign && targetId === userCallsign)
+                  );
+                });
+                const myAvg = myReviews.length > 0
+                  ? (myReviews.reduce((sum, r) => sum + r.ratingOverall, 0) / myReviews.length).toFixed(1)
+                  : null;
+
+                return (
+                  <div
+                    onClick={() => setViewingUserModal(currentUser)}
+                    className="bg-white p-3.5 rounded-2xl border border-[#EEEBE6] space-y-1.5 cursor-pointer hover:border-[#2D5A27] transition-all group"
+                  >
+                    <span className="text-[11px] font-bold text-[#8B7E6D] flex items-center justify-between">
+                      <span className="flex items-center gap-1">
+                        <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-400" />
+                        Рейтинг экипажа
+                      </span>
+                      <span className="text-[10px] text-[#2D5A27] group-hover:underline">Визитка →</span>
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {myAvg ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-black text-[#1A1F1A]">{myAvg}</span>
+                          <div className="flex items-center text-amber-400">
+                            {[1, 2, 3, 4, 5].map((s) => (
+                              <Star
+                                key={s}
+                                className={`w-3 h-3 ${
+                                  s <= Math.round(Number(myAvg)) ? 'fill-amber-400 text-amber-400' : 'text-gray-200'
+                                }`}
+                              />
+                            ))}
+                          </div>
+                          <span className="text-[11px] text-[#8B7E6D] font-bold">({myReviews.length})</span>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-[#8B7E6D] italic">Нет отзывов</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {currentUser.bio && (
+              <div className="bg-white p-3 rounded-2xl border border-[#EEEBE6] text-xs text-[#4A443E] italic">
+                «{currentUser.bio}»
+              </div>
+            )}
+          </div>
           
           {/* User's Expeditions & Applications */}
           <div className="bg-white border border-[#E5E0D8] rounded-[28px] p-6 shadow-sm space-y-4">
@@ -1105,56 +1727,304 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
             })()}
           </div>
 
+          {/* My Uploaded & Custom GPX Tracks Section */}
+          <div className="bg-white border border-[#E5E0D8] rounded-[28px] p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-[#1A1F1A] flex items-center gap-2">
+                  <Navigation2 className="w-4 h-4 text-[#2D5A27]" />
+                  Мои авторские и загруженные GPX треки ({myCustomRoutes.length})
+                </h2>
+                <p className="text-xs text-[#6B665F] mt-0.5">
+                  Ваши персональные водные маршруты. Вы можете редактировать их для себя или открыть общий доступ для всего сообщества.
+                </p>
+              </div>
+
+              {myCustomRoutes.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => cabinetGpxFileInputRef.current?.click()}
+                  className="px-3.5 py-2 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold text-xs rounded-xl flex items-center gap-2 shadow-xs transition-all self-start sm:self-auto shrink-0"
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  <span>Выбрать GPX файл на устройстве</span>
+                </button>
+              )}
+            </div>
+
+            {/* Privacy note banner */}
+            <div className="p-3 bg-[#F9F7F4] border border-[#EBE7DF] rounded-2xl flex items-start gap-2.5 text-xs text-[#5C554E]">
+              <Lock className="w-4 h-4 text-[#8B7E6D] shrink-0 mt-0.5" />
+              <div className="leading-relaxed">
+                <span className="font-bold text-[#2D332D]">Приватность по умолчанию:</span> Все загруженные треки изначально сохраняются со статусом <span className="font-semibold text-[#8B7E6D]">«Личный 🔒»</span> — их видите и редактируете исключительно вы. Чтобы добавить маршрут в общий каталог Югры для всех туристов, просто нажмите кнопку <span className="font-semibold text-[#2D5A27]">«Поделиться со всеми 🌐»</span>.
+              </div>
+            </div>
+
+            {myCustomRoutes.length === 0 ? (
+              <div className="text-center py-8 px-4 border-2 border-dashed border-[#E5E0D8] rounded-2xl bg-[#FAFAF8] space-y-2">
+                <Compass className="w-8 h-8 text-[#8B7E6D] mx-auto opacity-70" />
+                <p className="text-sm font-bold text-[#2D332D]">У вас пока нет загруженных личных треков</p>
+                <p className="text-xs text-[#6B665F] max-w-md mx-auto">
+                  Импортируйте трек со своего GPS навигатора (.gpx, .kml). Он появится в вашем кабинете, построит график высот и будет готов к планированию похода.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => cabinetGpxFileInputRef.current?.click()}
+                  className="mt-2 px-4 py-2 bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] font-bold text-xs rounded-xl inline-flex items-center gap-1.5 transition-all"
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  <span>Выбрать GPX файл на устройстве</span>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {myCustomRoutes.map((route) => {
+                  const isPublic = route.isPublic === true;
+                  return (
+                    <div
+                      key={route.id}
+                      className={`border rounded-[24px] p-4 flex flex-col justify-between space-y-3 transition-all ${
+                        isPublic
+                          ? 'bg-[#F4F9F4] border-[#CDE0CC] shadow-xs'
+                          : 'bg-[#F9F7F4] border-[#EEEBE6]'
+                      }`}
+                    >
+                      <div>
+                        {/* Status Header */}
+                        <div className="flex items-center justify-between gap-1 mb-2">
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                              isPublic
+                                ? 'bg-[#2D5A27] text-white'
+                                : 'bg-[#EAE5DC] text-[#6B665F]'
+                            }`}
+                          >
+                            {isPublic ? (
+                              <>
+                                <Globe className="w-3 h-3" />
+                                <span>Опубликован (виден всем)</span>
+                              </>
+                            ) : (
+                              <>
+                                <Lock className="w-3 h-3" />
+                                <span>Личный трек (только вы)</span>
+                              </>
+                            )}
+                          </span>
+
+                          <span className="text-xs font-bold text-[#2D5A27]">
+                            {route.lengthKm} км
+                          </span>
+                        </div>
+
+                        <h3 className="text-sm font-bold text-[#1A1F1A] line-clamp-1">{route.name}</h3>
+                        <p className="text-xs text-[#6B665F] line-clamp-2 mt-1 leading-relaxed">
+                          {route.shortDesc || route.description}
+                        </p>
+
+                        <div className="flex items-center gap-2 mt-2 text-[11px] text-[#8B7E6D]">
+                          <span>📍 {route.region}</span>
+                          <span>•</span>
+                          <span>⛰️ {route.elevationGainM || 0} м</span>
+                          <span>•</span>
+                          <span>🚩 {route.pois?.length || 2} точек</span>
+                        </div>
+                      </div>
+
+                      {/* Controls & Actions */}
+                      <div className="space-y-2 pt-3 border-t border-[#E5E0D8]">
+                        {/* Publish / Private Toggle Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleRoutePublic(route.id)}
+                          className={`w-full py-1.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all ${
+                            isPublic
+                              ? 'bg-[#FFF2F2] hover:bg-[#FFE5E5] text-[#E54B4B] border border-[#F8C8C8]'
+                              : 'bg-[#2D5A27] hover:bg-[#3D7136] text-white shadow-xs'
+                          }`}
+                        >
+                          {isPublic ? (
+                            <>
+                              <Lock className="w-3.5 h-3.5" />
+                              <span>Скрыть (сделать личным)</span>
+                            </>
+                          ) : (
+                            <>
+                              <Share2 className="w-3.5 h-3.5" />
+                              <span>Поделиться со всеми (опубликовать)</span>
+                            </>
+                          )}
+                        </button>
+
+                        <div className="flex items-center justify-between gap-1 text-xs">
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (onOpenPassportEditor) {
+                                  onOpenPassportEditor(route);
+                                } else {
+                                  onSelectRoute(route);
+                                  onOpenRouteDetails(route);
+                                }
+                              }}
+                              className="px-2.5 py-1.5 bg-white hover:bg-[#F2EFE9] text-[#2D332D] font-bold rounded-lg border border-[#E5E0D8] flex items-center gap-1"
+                              title="Редактировать описание, стоянки, фотографии"
+                            >
+                              <Edit3 className="w-3 h-3 text-[#2D5A27]" />
+                              <span>Редактировать</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadGpx(route)}
+                              className="p-1.5 bg-white hover:bg-[#F2EFE9] text-[#2D332D] rounded-lg border border-[#E5E0D8]"
+                              title="Скачать GPX трек"
+                            >
+                              <FileDown className="w-3.5 h-3.5 text-[#2D5A27]" />
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onSelectRoute(route);
+                                onOpenRouteDetails(route);
+                              }}
+                              className="px-2.5 py-1.5 bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] font-bold rounded-lg"
+                            >
+                              Лоция
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteMyRoute(route.id)}
+                              className="p-1.5 text-[#8B7E6D] hover:text-[#E54B4B] hover:bg-[#FFF2F2] rounded-lg transition-colors"
+                              title="Удалить личный трек"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           <div className="bg-white border border-[#E5E0D8] rounded-[28px] p-6 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <h2 className="text-base font-bold text-[#1A1F1A] flex items-center gap-2">
-                <Heart className="w-4 h-4 text-[#E54B4B]" />
+                <Heart className="w-4 h-4 text-[#E54B4B] fill-[#E54B4B]" />
                 Избранные реки и запланированные сплавы ({favoriteRoutes.length})
               </h2>
-
-              <button
-                type="button"
-                onClick={() => cabinetGpxFileInputRef.current?.click()}
-                className="px-3 py-1.5 bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] font-bold text-xs rounded-xl flex items-center gap-1.5 transition-all self-start sm:self-auto"
-              >
-                <UploadCloud className="w-4 h-4" />
-                <span>Загрузить свой GPX трек</span>
-              </button>
+              {favoriteRoutes.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    askConfirmation({
+                      title: 'Очистить избранное?',
+                      message: 'Вы действительно хотите удалить все сохраненные реки и сплавы из списка избранного?',
+                      confirmText: 'Да, очистить',
+                      confirmVariant: 'danger',
+                      onConfirm: () => {
+                        const updatedUser: AppUser = {
+                          ...currentUser,
+                          favoriteRouteIds: []
+                        };
+                        onUpdateCurrentUser(updatedUser);
+                        UsersSyncService.saveUser(updatedUser).catch(console.warn);
+                        CloudSqlDbService.saveUser(updatedUser).catch(console.warn);
+                        showNotification('Список избранных рек очищен.');
+                      }
+                    });
+                  }}
+                  className="text-xs text-[#8B7E6D] hover:text-[#E54B4B] font-bold transition-colors cursor-pointer self-start sm:self-auto flex items-center gap-1 hover:underline"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Очистить всё избранное</span>
+                </button>
+              )}
             </div>
 
             {favoriteRoutes.length === 0 ? (
               <p className="text-xs text-[#6B665F]">
-                У вас пока нет сохраненных рек. Выберите маршруты в разделе «Карта и реки» или импортируйте свой GPX трек с навигатора.
+                У вас пока нет сохраненных рек. Выберите маршруты в каталоге или откройте лоцию любой реки и нажмите «В избранное».
               </p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {favoriteRoutes.map((route) => (
                   <div
                     key={route.id}
-                    className="bg-[#F9F7F4] border border-[#EEEBE6] rounded-[24px] p-4 flex flex-col justify-between space-y-3"
+                    className="bg-[#F9F7F4] border border-[#EEEBE6] hover:border-[#D6CFBE] rounded-[24px] p-4 flex flex-col justify-between space-y-3 transition-all group shadow-2xs"
                   >
                     <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#E8F1E7] text-[#2D5A27]">
+                      <div className="flex items-center justify-between mb-1.5 gap-2">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#E8F1E7] text-[#2D5A27] truncate">
                           {route.region} • ФСТР {route.fstrCategory}
                         </span>
-                        <span className="text-xs font-bold text-[#2D5A27]">{route.lengthKm} км</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-xs font-bold text-[#2D5A27]">{route.lengthKm} км</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const nextFavs = (currentUser.favoriteRouteIds || []).filter((id) => id !== route.id);
+                              const updatedUser: AppUser = {
+                                ...currentUser,
+                                favoriteRouteIds: nextFavs
+                              };
+                              onUpdateCurrentUser(updatedUser);
+                              UsersSyncService.saveUser(updatedUser).catch(console.warn);
+                              CloudSqlDbService.saveUser(updatedUser).catch(console.warn);
+                              showNotification(`«${route.name}» удалена из избранного.`);
+                            }}
+                            className="p-1 text-[#E54B4B] hover:text-[#B91C1C] hover:bg-[#FDE8E8] rounded-lg transition-colors cursor-pointer"
+                            title="Удалить из избранного"
+                          >
+                            <Heart className="w-4 h-4 fill-[#E54B4B] text-[#E54B4B]" />
+                          </button>
+                        </div>
                       </div>
-                      <h3 className="text-sm font-bold text-[#1A1F1A] mt-1">{route.name}</h3>
-                      <p className="text-xs text-[#6B665F] line-clamp-2 mt-1">{route.shortDesc}</p>
+                      <h3 className="text-sm font-bold text-[#1A1F1A] mt-1 leading-snug">{route.name}</h3>
+                      <p className="text-xs text-[#6B665F] line-clamp-2 mt-1 leading-relaxed">{route.shortDesc}</p>
                     </div>
 
-                    <div className="flex items-center justify-between pt-2 border-t border-[#E5E0D8] text-xs">
-                      <span className="text-[#8B7E6D]">⏱ {route.durationDays} дн. сплава</span>
-                      <button
-                        onClick={() => {
-                          onSelectRoute(route);
-                          onOpenRouteDetails(route);
-                        }}
-                        className="px-3 py-1 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold rounded-lg"
-                      >
-                        Лоция
-                      </button>
+                    <div className="flex items-center justify-between pt-2.5 border-t border-[#E5E0D8] text-xs">
+                      <span className="text-[#8B7E6D] font-medium">⏱ {route.durationDays} дн. сплава</span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextFavs = (currentUser.favoriteRouteIds || []).filter((id) => id !== route.id);
+                            const updatedUser: AppUser = {
+                              ...currentUser,
+                              favoriteRouteIds: nextFavs
+                            };
+                            onUpdateCurrentUser(updatedUser);
+                            UsersSyncService.saveUser(updatedUser).catch(console.warn);
+                            CloudSqlDbService.saveUser(updatedUser).catch(console.warn);
+                            showNotification(`«${route.name}» удалена из избранного.`);
+                          }}
+                          className="px-2.5 py-1 text-[#8B7E6D] hover:text-[#E54B4B] hover:bg-[#FDE8E8] font-bold text-xs rounded-xl border border-[#E5E0D8] transition-colors cursor-pointer"
+                          title="Убрать реку из избранного"
+                        >
+                          Убрать
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSelectRoute(route);
+                            onOpenRouteDetails(route);
+                          }}
+                          className="px-3 py-1 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold text-xs rounded-xl transition-all shadow-2xs cursor-pointer"
+                        >
+                          Лоция
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1179,6 +2049,347 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
         </div>
       )}
 
+      {/* 2. DEDICATED APPLICATIONS & EXPEDITIONS CABINET TAB */}
+      {activeCabinetTab === 'applications' && (
+        <div className="space-y-6">
+          
+          {/* Telegram Notifications Info Banner */}
+          <div className="bg-gradient-to-r from-[#2AABEE]/10 via-[#2D5A27]/10 to-white border border-[#2AABEE]/30 rounded-[28px] p-5 sm:p-6 shadow-sm space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-[#2AABEE] text-white flex items-center justify-center shrink-0 shadow-sm">
+                  <Send className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#1A1F1A] flex items-center gap-2">
+                    Telegram-уведомления о заявках
+                    <span className="px-2 py-0.5 rounded-full bg-[#2AABEE]/20 text-[#0088cc] text-[10px] font-bold">
+                      Мгновенно
+                    </span>
+                  </h3>
+                  <p className="text-xs text-[#4A443E] mt-0.5">
+                    Когда турист подает заявку в ваш поход, вам мгновенно приходит персональное уведомление в Telegram с именем, судном, телефоном и опытом туриста.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                {currentUser?.telegram ? (
+                  <div className="flex items-center gap-2">
+                    <span className="px-3 py-1.5 bg-[#E8F1E7] border border-[#CDE0CC] rounded-xl text-xs font-bold text-[#2D5A27] flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-[#2D5A27]" />
+                      @{currentUser.telegram.replace(/^https?:\/\/t\.me\//, '').replace(/^@/, '')}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileEditTab('contacts');
+                        setIsEditingProfile(true);
+                      }}
+                      className="px-3 py-1.5 bg-white border border-[#E5E0D8] hover:bg-[#F9F7F4] text-[#4A443E] text-xs font-bold rounded-xl transition-all"
+                    >
+                      Изменить
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileEditTab('contacts');
+                      setIsEditingProfile(true);
+                    }}
+                    className="px-4 py-2 bg-[#2AABEE] hover:bg-[#229ED9] text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Указать Telegram в визитке</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* INCOMING APPLICATIONS SECTION (FOR CAPTAINS) */}
+          {(() => {
+            const myOrganizedTrips = trips.filter(t => 
+              (t.organizer.userId && t.organizer.userId === currentUser?.id) ||
+              (currentUser?.name && t.organizer.name.toLowerCase().includes(currentUser.name.toLowerCase())) ||
+              isAdmin
+            );
+
+            return (
+              <div className="bg-white border border-[#E5E0D8] rounded-[28px] p-5 sm:p-6 shadow-sm space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#E5E0D8]">
+                  <div>
+                    <h2 className="text-base font-bold text-[#1A1F1A] flex items-center gap-2">
+                      <Award className="w-5 h-5 text-[#2D5A27]" />
+                      Заявки в организованные мной походы ({myOrganizedTrips.length} {myOrganizedTrips.length === 1 ? 'поход' : 'походов'})
+                    </h2>
+                    <p className="text-xs text-[#6B665F] mt-0.5">
+                      Здесь вы можете рассматривать входящие заявки от туристов, принимать их в экипаж или связываться с ними в Telegram
+                    </p>
+                  </div>
+                </div>
+
+                {myOrganizedTrips.length === 0 ? (
+                  <div className="p-8 text-center bg-[#F9F7F4] rounded-2xl border border-[#EEEBE6] space-y-2">
+                    <Compass className="w-8 h-8 text-[#8B7E6D] mx-auto opacity-60" />
+                    <p className="text-xs font-bold text-[#1A1F1A]">Вы пока не создали ни одного похода</p>
+                    <p className="text-[11px] text-[#6B665F]">
+                      Перейдите во вкладку «Попутчики» и нажмите «+ Создать поход», чтобы набрать команду!
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {myOrganizedTrips.map(trip => {
+                      const allApps = trip.applications || [];
+                      const pendingApps = allApps.filter(a => a.status === 'pending');
+                      const acceptedApps = allApps.filter(a => a.status === 'accepted');
+                      const declinedApps = allApps.filter(a => a.status === 'declined');
+
+                      return (
+                        <div key={trip.id} className="bg-[#FAF8F5] border border-[#E5E0D8] rounded-2xl p-4 sm:p-5 space-y-4">
+                          {/* Trip header */}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#E5E0D8]">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="px-2 py-0.5 bg-[#2D5A27] text-white text-[10px] font-bold rounded-md">
+                                  {trip.region}
+                                </span>
+                                <h3 className="text-sm font-bold text-[#1A1F1A]">{trip.title}</h3>
+                              </div>
+                              <p className="text-xs text-[#6B665F] mt-1">
+                                🌊 р. <strong>{trip.riverName}</strong> • 📅 {trip.startDate} — {trip.endDate} • 👥 Экипаж: <strong>{trip.bookedSeats} из {trip.totalSeats}</strong> мест
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditTrip(trip)}
+                                className="px-3 py-1.5 bg-white border border-[#E5E0D8] hover:bg-[#F2EFE9] text-[#2D332D] text-xs font-bold rounded-xl flex items-center gap-1 transition-all"
+                              >
+                                <Edit3 className="w-3.5 h-3.5 text-[#2D5A27]" />
+                                <span>Настройки похода</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Applications list */}
+                          {allApps.length === 0 ? (
+                            <div className="py-4 text-center text-xs text-[#8B7E6D] bg-white rounded-xl border border-dashed border-[#E5E0D8]">
+                              Заявок в этот поход пока не поступало.
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {allApps.map(app => {
+                                const cleanTg = (app.notes || '').match(/@([a-zA-Z0-9_]+)/)?.[1] || '';
+                                return (
+                                  <div
+                                    key={app.id}
+                                    className={`bg-white border rounded-2xl p-3.5 space-y-2.5 shadow-2xs ${
+                                      app.status === 'pending' ? 'border-[#FDE68A] ring-2 ring-[#FEF3C7]' :
+                                      app.status === 'accepted' ? 'border-[#CDE0CC]' : 'border-[#F8C8C8] opacity-75'
+                                    }`}
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="flex items-center gap-2.5">
+                                        <img
+                                          src={app.applicantAvatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80'}
+                                          alt={app.applicantName}
+                                          className="w-10 h-10 rounded-xl object-cover border border-[#E5E0D8]"
+                                        />
+                                        <div>
+                                          <h4 className="text-xs font-bold text-[#1A1F1A]">{app.applicantName}</h4>
+                                          <p className="text-[10px] text-[#8B7E6D]">Подано: {app.appliedAt}</p>
+                                        </div>
+                                      </div>
+
+                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                        app.status === 'pending' ? 'bg-[#FEF3C7] text-[#B45309]' :
+                                        app.status === 'accepted' ? 'bg-[#E8F1E7] text-[#2D5A27]' :
+                                        'bg-[#FDE8E8] text-[#E54B4B]'
+                                      }`}>
+                                        {app.status === 'pending' ? '⏳ На рассмотрении' :
+                                         app.status === 'accepted' ? '✅ Принят в экипаж' : '❌ Отклонен'}
+                                      </span>
+                                    </div>
+
+                                    <div className="bg-[#F9F7F4] p-2.5 rounded-xl text-[11px] text-[#4A443E] space-y-1">
+                                      <div className="flex items-center justify-between">
+                                        <span>Судно: <strong>{app.vesselType ? app.vesselType.toUpperCase() : 'Свое'}</strong></span>
+                                        <span>Опыт: <strong>{app.experienceLevel}</strong></span>
+                                      </div>
+                                      {app.applicantPhone && (
+                                        <div className="flex items-center gap-1 text-[#2D5A27] font-medium">
+                                          <span>📞 {app.applicantPhone}</span>
+                                        </div>
+                                      )}
+                                      {app.notes && (
+                                        <p className="text-[10px] text-[#6B665F] italic pt-1 border-t border-[#EAE7E2]">
+                                          «{app.notes}»
+                                        </p>
+                                      )}
+                                    </div>
+
+                                    {/* Action Buttons */}
+                                    <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 pt-2 border-t border-[#E5E0D8]/60">
+                                      <div className="flex items-center gap-1.5">
+                                        {app.applicantPhone && (
+                                          <a
+                                            href={`tel:${app.applicantPhone}`}
+                                            className="px-3 py-1.5 bg-[#F2EFE9] hover:bg-[#E5E0D8] text-[#2D332D] text-xs font-bold rounded-xl transition-all flex items-center gap-1.5"
+                                          >
+                                            <Phone className="w-3.5 h-3.5 text-[#2D5A27]" />
+                                            <span>Позвонить</span>
+                                          </a>
+                                        )}
+                                      </div>
+
+                                      {app.status === 'pending' && (
+                                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleCabinetAcceptApp(trip, app)}
+                                            className="flex-1 sm:flex-initial px-3.5 py-1.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white text-xs font-bold rounded-xl shadow-2xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                                          >
+                                            <UserCheck className="w-3.5 h-3.5" />
+                                            <span>Принять в экипаж</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleCabinetDeclineApp(trip, app.id)}
+                                            className="px-3 py-1.5 bg-white hover:bg-[#FDE8E8] text-[#E54B4B] text-xs font-bold rounded-xl border border-[#F8B4B4] transition-all cursor-pointer flex items-center justify-center"
+                                            title="Отклонить заявку"
+                                          >
+                                            <UserX className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* OUTGOING APPLICATIONS (WHERE CURRENT USER APPLIED AS A PARTICIPANT) */}
+          {(() => {
+            const myAppliedTrips = trips.filter(t => 
+              (t.applications || []).some(a => 
+                (a.userId && a.userId === currentUser?.id) || 
+                (currentUser?.name && a.applicantName && a.applicantName.toLowerCase() === currentUser.name.toLowerCase()) ||
+                (currentUser?.phone && a.applicantPhone === currentUser.phone)
+              )
+            );
+
+            return (
+              <div className="bg-white border border-[#E5E0D8] rounded-[28px] p-5 sm:p-6 shadow-sm space-y-4">
+                <div className="pb-3 border-b border-[#E5E0D8]">
+                  <h2 className="text-base font-bold text-[#1A1F1A] flex items-center gap-2">
+                    <Compass className="w-5 h-5 text-[#2D5A27]" />
+                    Мои поданные заявки на сплавы ({myAppliedTrips.length})
+                  </h2>
+                  <p className="text-xs text-[#6B665F] mt-0.5">
+                    Статус ваших заявок на участие в сборных походах других капитанов
+                  </p>
+                </div>
+
+                {myAppliedTrips.length === 0 ? (
+                  <div className="p-8 text-center bg-[#F9F7F4] rounded-2xl border border-[#EEEBE6] space-y-1">
+                    <p className="text-xs font-bold text-[#1A1F1A]">Вы пока не подавали заявок в походы</p>
+                    <p className="text-[11px] text-[#6B665F]">
+                      Откройте раздел «Попутчики» на главном экране и нажмите кнопку «Подать заявку» на понравившемся маршруте!
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    {myAppliedTrips.map(trip => {
+                      const myApp = (trip.applications || []).find(a => 
+                        (a.userId && a.userId === currentUser?.id) || 
+                        (currentUser?.name && a.applicantName && a.applicantName.toLowerCase() === currentUser.name.toLowerCase()) ||
+                        (currentUser?.phone && a.applicantPhone === currentUser.phone)
+                      );
+                      const isPending = myApp?.status === 'pending';
+                      const isAccepted = myApp?.status === 'accepted';
+                      const captainTg = (trip.organizer.telegram || trip.groupChatLink || '').replace(/^https?:\/\/t\.me\//, '').replace(/^@/, '').trim();
+
+                      return (
+                        <div
+                          key={trip.id}
+                          className={`bg-[#FAF8F5] border rounded-2xl p-4 space-y-3 ${
+                            isAccepted ? 'border-[#CDE0CC] bg-[#E8F1E7]/30' :
+                            isPending ? 'border-[#FDE68A] bg-[#FEF3C7]/20' :
+                            'border-[#F8C8C8]'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <span className="text-[10px] font-bold text-[#2D5A27] px-2 py-0.5 bg-[#E8F1E7] rounded-md">
+                                р. {trip.riverName} ({trip.region})
+                              </span>
+                              <h4 className="text-xs font-bold text-[#1A1F1A] mt-1">{trip.title}</h4>
+                            </div>
+
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                              isAccepted ? 'bg-[#2D5A27] text-white' :
+                              isPending ? 'bg-[#FEF3C7] text-[#B45309] border border-[#FDE68A]' :
+                              'bg-[#FDE8E8] text-[#E54B4B]'
+                            }`}>
+                              {isAccepted ? '✓ Вы в экипаже' : isPending ? '⏳ На рассмотрении' : 'Отклонено'}
+                            </span>
+                          </div>
+
+                          <div className="text-[11px] text-[#4A443E] bg-white p-2.5 rounded-xl border border-[#E5E0D8] space-y-1">
+                            <p>📅 Сроки: <strong>{trip.startDate} — {trip.endDate}</strong></p>
+                            <p>Капитан: <strong>{trip.organizer.name}</strong> {trip.organizer.phone && `(${trip.organizer.phone})`}</p>
+                            {myApp && <p className="text-[#6B665F]">Ваше судно: {myApp.vesselType ? myApp.vesselType.toUpperCase() : 'SUP/Байдарка'}</p>}
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 pt-1">
+                            {captainTg ? (
+                              <a
+                                href={`https://t.me/${captainTg}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-3 py-1.5 bg-[#2AABEE] hover:bg-[#229ED9] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-all"
+                              >
+                                <Send className="w-3 h-3" />
+                                <span>Написать капитану @{captainTg}</span>
+                              </a>
+                            ) : (
+                              <div />
+                            )}
+
+                            {isPending && (
+                              <button
+                                type="button"
+                                onClick={() => handleWithdrawApplication(trip.id)}
+                                className="text-xs text-[#E54B4B] hover:underline font-bold"
+                              >
+                                Отозвать заявку
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+        </div>
+      )}
+
       {/* 2. SUPER ADMIN: USER & ADMIN ROLES MANAGEMENT */}
       {activeCabinetTab === 'users' && isSuperAdmin && (
         <div className="space-y-4">
@@ -1186,24 +2397,59 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
             <div>
               <h2 className="text-base font-bold text-[#1A1F1A] flex items-center gap-2">
                 <Crown className="w-5 h-5 text-[#E54B4B]" />
-                Управление администраторами и пользователями ({registeredUsers.length})
+                Управление администраторами и пользователями ({uniqueUsers.length})
               </h2>
               <p className="text-xs text-[#6B665F] mt-1">
                 Главные администраторы (<span className="font-mono font-bold text-[#E54B4B]">zuubra1985@gmail.com</span> / <span className="font-mono font-bold text-[#E54B4B]">novichek2@narod.ru</span>) имеют полный доступ к назначению и управлению правами.
               </p>
             </div>
+
+            {onClearAllUserCards && (
+              <button
+                type="button"
+                onClick={() => {
+                  askConfirmation({
+                    title: 'Очистить карточки всех участников?',
+                    message: 'Сбросить снаряжение, флот, реки, контакты и отзывы у всех зарегистрированных участников? Это действие необратимо.',
+                    confirmText: 'Да, очистить карточки',
+                    confirmVariant: 'danger',
+                    onConfirm: () => {
+                      onClearAllUserCards();
+                      showNotification('Карточки всех участников и отзывы успешно очищены.');
+                    }
+                  });
+                }}
+                className="px-4 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold text-xs rounded-xl flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs transition-all"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-amber-700" />
+                Очистить карточки всех участников
+              </button>
+            )}
           </div>
 
           <div className="bg-white border border-[#E5E0D8] rounded-[28px] overflow-hidden shadow-sm">
             <div className="divide-y divide-[#E5E0D8]">
-              {registeredUsers.map((user) => {
+              {uniqueUsers.map((user) => {
                 const isThisSuper = user.email.toLowerCase() === 'zuubra1985@gmail.com' || user.email.toLowerCase() === 'novichek2@narod.ru' || user.role === 'superadmin';
 
                 return (
                   <div key={user.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-[#F9F7F4]">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-[#E8F1E7] text-[#2D5A27] flex items-center justify-center font-bold text-sm">
-                        {user.name.slice(0, 1)}
+                      <div className="relative shrink-0">
+                        {user.avatar ? (
+                          <img
+                            src={user.avatar}
+                            alt={user.name}
+                            className="w-10 h-10 rounded-full object-cover border border-[#CDE0CC]"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-[#E8F1E7] text-[#2D5A27] flex items-center justify-center font-bold text-sm">
+                            {user.name ? user.name.slice(0, 1).toUpperCase() : 'У'}
+                          </div>
+                        )}
+                        {user.isReadyForExpeditions !== false && (
+                          <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full" />
+                        )}
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
@@ -1251,10 +2497,16 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
 
                         <button
                           onClick={() => {
-                            if (window.confirm(`Удалить аккаунт ${user.name}?`)) {
-                              onDeleteUser(user.id);
-                              showNotification(`Аккаунт ${user.name} удален.`);
-                            }
+                            askConfirmation({
+                              title: 'Удалить аккаунт?',
+                              message: `Удалить аккаунт ${user.name} (${user.email})?`,
+                              confirmText: 'Да, удалить',
+                              confirmVariant: 'danger',
+                              onConfirm: () => {
+                                onDeleteUser(user.id);
+                                showNotification(`Аккаунт ${user.name} удален.`);
+                              }
+                            });
                           }}
                           className="p-1.5 text-[#8B7E6D] hover:text-[#E54B4B] rounded-lg"
                           title="Удалить аккаунт"
@@ -1274,19 +2526,6 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
       {/* 3. ROUTES ADMIN */}
       {activeCabinetTab === 'routes' && isAdmin && (
         <div className="space-y-4">
-          {/* Hidden GPX input for cabinet */}
-          <input
-            type="file"
-            ref={cabinetGpxFileInputRef}
-            accept=".gpx,.kml,.xml"
-            onChange={(e) => {
-              if (e.target.files && e.target.files.length > 0) {
-                handleCabinetGpxUpload(e.target.files[0]);
-              }
-            }}
-            className="hidden"
-          />
-
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <h2 className="text-base font-bold text-[#1A1F1A]">Каталог водных маршрутов ({routes.length})</h2>
             <div className="flex items-center gap-2">
@@ -1362,74 +2601,25 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
         </div>
       )}
 
-      {/* 4. HYDRO ADMIN */}
-      {activeCabinetTab === 'hydro' && isAdmin && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-bold text-[#1A1F1A]">Гидропосты ({hydroStations.length})</h2>
-            <button
-              onClick={handleOpenNewHydro}
-              className="px-3.5 py-2 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              Добавить гидропост
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {hydroStations.map((station) => (
-              <div
-                key={station.id}
-                className="bg-white border border-[#E5E0D8] rounded-[24px] p-4 shadow-sm flex flex-col justify-between space-y-3"
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#E8F1E7] text-[#2D5A27]">
-                      {station.region} • {station.river}
-                    </span>
-                    <span className="text-xs font-black text-[#2B4C7E]">{station.currentLevelCm} см</span>
-                  </div>
-                  <h3 className="text-sm font-bold text-[#1A1F1A]">{station.name}</h3>
-                  <p className="text-xs text-[#6B665F] mt-1">Норма: {station.normalLevelCm} см | Пойма: {station.floodLevelCm} см</p>
-                </div>
-
-                <div className="pt-2 border-t border-[#E5E0D8] flex items-center justify-between text-xs">
-                  <span className="text-[#8B7E6D]">Темп: +{station.waterTempC}°C</span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => {
-                        setEditingHydro(JSON.parse(JSON.stringify(station)));
-                        setIsNewHydro(false);
-                      }}
-                      className="p-1.5 bg-[#F9F7F4] hover:bg-[#EAE7E2] text-[#2D332D] rounded-lg border border-[#E5E0D8]"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteHydro(station.id, station.name)}
-                      className="p-1.5 bg-[#FDE8E8] text-[#E54B4B] rounded-lg border border-[#F8B4B4]"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* 5. ARTICLES ADMIN */}
       {activeCabinetTab === 'articles' && isAdmin && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-bold text-[#1A1F1A]">Лоции и статьи ({articles.length})</h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-5 rounded-[24px] border border-[#E5E0D8] shadow-xs">
+            <div>
+              <h2 className="text-base font-black text-[#1A1F1A] flex items-center gap-2">
+                <BookOpen className="w-5 h-5 text-[#2D5A27]" />
+                <span>Лоции и статьи ({articles.length})</span>
+              </h2>
+              <p className="text-xs text-[#6B665F] mt-0.5">
+                Публикуйте авторские отчеты об экспедициях, фотоотчеты и описания порогов
+              </p>
+            </div>
             <button
               onClick={handleOpenNewArticle}
-              className="px-3.5 py-2 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5"
+              className="px-4 py-2.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shrink-0"
             >
               <Plus className="w-4 h-4" />
-              Написать лоцию
+              <span>Написать лоцию</span>
             </button>
           </div>
 
@@ -1437,28 +2627,75 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
             {articles.map((art) => (
               <div
                 key={art.id}
-                className="bg-white border border-[#E5E0D8] rounded-[24px] p-4 shadow-sm flex flex-col justify-between space-y-3"
+                className="bg-white border border-[#E5E0D8] rounded-[24px] overflow-hidden shadow-xs hover:shadow-md transition-all flex flex-col justify-between"
               >
                 <div>
-                  <h3 className="text-sm font-bold text-[#1A1F1A] line-clamp-1">{art.title}</h3>
-                  <p className="text-xs text-[#6B665F] line-clamp-2 mt-1">{art.summary}</p>
+                  {art.coverImage ? (
+                    <div className="relative h-36 w-full bg-stone-100 overflow-hidden">
+                      <img
+                        src={art.coverImage}
+                        alt={art.title}
+                        className="w-full h-full object-cover transition-transform hover:scale-105 duration-300"
+                      />
+                      <div className="absolute top-2 left-2 flex gap-1 flex-wrap">
+                        {art.riverName && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-black/60 text-white backdrop-blur-xs">
+                            р. {art.riverName}
+                          </span>
+                        )}
+                        {art.region && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-[#2D5A27]/80 text-white backdrop-blur-xs">
+                            {art.region}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="h-20 bg-[#F5F2ED] border-b border-[#E5E0D8] flex items-center justify-between px-4">
+                      <div className="flex items-center gap-1.5">
+                        {art.riverName && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-[#E8F1E7] text-[#2D5A27] border border-[#CDE0CC]">
+                            р. {art.riverName}
+                          </span>
+                        )}
+                        {art.region && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-stone-200 text-stone-700">
+                            {art.region}
+                          </span>
+                        )}
+                      </div>
+                      <BookOpen className="w-5 h-5 text-[#8B7E6D]/40" />
+                    </div>
+                  )}
+
+                  <div className="p-4 space-y-2">
+                    <h3 className="text-sm font-bold text-[#1A1F1A] line-clamp-2 leading-snug">{art.title}</h3>
+                    {art.summary && (
+                      <p className="text-xs text-[#6B665F] line-clamp-2">{art.summary}</p>
+                    )}
+                  </div>
                 </div>
 
-                <div className="pt-2 border-t border-[#E5E0D8] flex items-center justify-between text-xs">
-                  <span className="text-[#8B7E6D]">{art.author}</span>
-                  <div className="flex items-center gap-1">
+                <div className="p-4 pt-2 border-t border-[#E5E0D8]/60 flex items-center justify-between text-xs bg-[#FAF8F5]">
+                  <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                    <span className="text-[#8B7E6D] text-[11px] truncate">{art.author}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       onClick={() => {
                         setEditingArticle(JSON.parse(JSON.stringify(art)));
                         setIsNewArticle(false);
                       }}
-                      className="p-1.5 bg-[#F9F7F4] text-[#2D332D] rounded-lg border border-[#E5E0D8]"
+                      className="px-2.5 py-1.5 bg-white hover:bg-[#F9F7F4] text-[#2D5A27] rounded-xl border border-[#E5E0D8] transition-all flex items-center gap-1 font-bold text-[11px] cursor-pointer"
+                      title="Редактировать статью"
                     >
-                      <Edit3 className="w-3.5 h-3.5" />
+                      <Edit3 className="w-3 h-3" />
+                      <span>Изменить</span>
                     </button>
                     <button
                       onClick={() => handleDeleteArticle(art.id, art.title)}
-                      className="p-1.5 bg-[#FDE8E8] text-[#E54B4B] rounded-lg border border-[#F8B4B4]"
+                      className="p-1.5 bg-[#FDE8E8] hover:bg-[#FCD2D2] text-[#E54B4B] rounded-xl border border-[#F8B4B4] transition-all cursor-pointer"
+                      title="Удалить статью"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -1556,13 +2793,232 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
         </div>
       )}
 
+      {/* 6. FAQ & SAFETY ADMIN */}
+      {activeCabinetTab === 'faq' && isAdmin && (
+        <FaqAdminSection
+          faqData={currentFaqData}
+          setFaqData={handleSetFaqData}
+          showNotification={showNotification}
+        />
+      )}
+
+      {/* 6.5. TRAVEL NOTES, REVIEWS & LOGBOOK ADMIN */}
+      {activeCabinetTab === 'travel_notes' && isAdmin && (
+        <TravelNotesAdminSection
+          notesConfig={currentNotesConfig}
+          setNotesConfig={handleSetNotesConfig}
+          currentUser={currentUser}
+          routes={routes}
+          registeredUsers={registeredUsers}
+          showNotification={showNotification}
+        />
+      )}
+
+      {/* 6.8. USERS & PARTICIPANT CARDS DIRECTORY (ADMIN & SUPER ADMIN) */}
+      {activeCabinetTab === 'users' && isAdmin && (
+        <div className="bg-white border border-[#E5E0D8] rounded-[28px] p-6 shadow-sm space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <Crown className="w-5 h-5 text-[#E54B4B]" />
+                <h2 className="text-base font-black text-[#1A1F1A]">
+                  Карточки участников сообщества & Управление доступом
+                </h2>
+              </div>
+              <p className="text-xs text-[#6B665F] mt-1">
+                Всего зарегистрировано туристов: <strong>{uniqueUsers.length}</strong>. Нажмите на любого туриста, чтобы открыть его визитку или изменить права.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {uniqueUsers.map((u) => {
+              const isTargetAdmin = u.role === 'admin';
+              const isTargetSuperAdmin = u.email?.toLowerCase() === 'zuubra1985@gmail.com' || u.role === 'superadmin';
+              const isMe = u.id === currentUser.id;
+
+              return (
+                <div
+                  key={u.id}
+                  className="bg-[#F9F7F4] border border-[#E5E0D8] hover:border-[#2D5A27] rounded-2xl p-4 space-y-3.5 transition-all flex flex-col justify-between"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div
+                        onClick={() => setViewingUserModal(u)}
+                        className="flex items-center gap-3 cursor-pointer group"
+                      >
+                        <div className="relative">
+                          <img
+                            src={u.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80'}
+                            alt={u.name}
+                            className="w-12 h-12 rounded-xl object-cover border border-[#CDE0CC] group-hover:scale-105 transition-transform"
+                          />
+                          {u.isReadyForExpeditions !== false && (
+                            <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-white rounded-full" />
+                          )}
+                        </div>
+
+                        <div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <h4 className="text-xs font-black text-[#1A1F1A] group-hover:text-[#2D5A27] transition-colors">
+                              {u.name}
+                            </h4>
+                            {u.callsign && (
+                              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#E8F1E7] text-[#2D5A27] font-bold">
+                                «{u.callsign}»
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-[#6B665F]">📍 {u.city || 'Югра'}</p>
+                        </div>
+                      </div>
+
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                          isTargetSuperAdmin
+                            ? 'bg-[#FDE8E8] text-[#E54B4B]'
+                            : isTargetAdmin
+                            ? 'bg-[#FEF3C7] text-[#92400E]'
+                            : 'bg-[#E8F1E7] text-[#2D5A27]'
+                        }`}
+                      >
+                        {isTargetSuperAdmin ? 'Главный админ' : isTargetAdmin ? 'Админ' : 'Турист'}
+                      </span>
+                    </div>
+
+                    <div className="bg-white p-2.5 rounded-xl border border-[#EEEBE6] text-[11px] space-y-1">
+                      <div className="text-[#6B665F] truncate">✉️ {u.email}</div>
+                      {u.phone && <div className="text-[#6B665F]">📞 {u.phone}</div>}
+                      <div className="text-[#2D5A27] font-medium truncate">🌊 {u.experienceLevel}</div>
+                      {u.fstrRank && <div className="text-[#92400E] font-medium truncate">🏆 {u.fstrRank}</div>}
+
+                      {/* Crew Reviews Rating Badge */}
+                      {(() => {
+                        const uReviews = (currentNotesConfig?.crewReviews || []).filter((r) => {
+                          const targetId = (r.targetUserId || '').trim().toLowerCase();
+                          const userId = (u.id || '').trim().toLowerCase();
+                          const userEmail = (u.email || '').trim().toLowerCase();
+                          const targetName = (r.targetUserName || '').trim().toLowerCase();
+                          const userName = (u.name || '').trim().toLowerCase();
+                          const userCallsign = (u.callsign || '').trim().toLowerCase();
+
+                          return (
+                            (targetId && targetId === userId) ||
+                            (targetId && userEmail && targetId === userEmail) ||
+                            (targetName && userName && (targetName === userName || userName.includes(targetName) || targetName.includes(userName))) ||
+                            (targetName && userCallsign && (targetName === userCallsign || targetName.includes(userCallsign))) ||
+                            (targetId && userCallsign && targetId === userCallsign)
+                          );
+                        });
+                        const uAvg = uReviews.length > 0
+                          ? (uReviews.reduce((sum, r) => sum + r.ratingOverall, 0) / uReviews.length).toFixed(1)
+                          : null;
+
+                        if (!uAvg) return null;
+                        return (
+                          <div className="pt-1 flex items-center justify-between border-t border-[#EEEBE6] mt-1">
+                            <span className="text-[10px] text-[#8B7E6D]">Рейтинг экипажа:</span>
+                            <div className="flex items-center gap-1 text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200">
+                              <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                              <span>{uAvg}</span>
+                              <span className="text-[10px] text-amber-600 font-normal">({uReviews.length})</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {/* Badges preview */}
+                    {u.badges && u.badges.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {u.badges.slice(0, 3).map((b) => (
+                          <span key={b} className="text-[9px] px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-md font-bold">
+                            {b}
+                          </span>
+                        ))}
+                        {u.badges.length > 3 && (
+                          <span className="text-[9px] px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded-md font-bold">
+                            +{u.badges.length - 3}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="pt-2 border-t border-[#E5E0D8] flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setViewingUserModal(u)}
+                      className="px-3 py-1.5 bg-[#E8F1E7] hover:bg-[#D4E8D2] text-[#2D5A27] text-xs font-bold rounded-xl flex items-center gap-1 transition-all"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Визитка</span>
+                    </button>
+
+                    {!isTargetSuperAdmin && !isMe && (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newRole = isTargetAdmin ? 'user' : 'admin';
+                            askConfirmation({
+                              title: 'Изменение роли',
+                              message: `Изменить роль пользователя ${u.name} на "${newRole === 'admin' ? 'Администратор' : 'Обычный турист'}"?`,
+                              confirmText: 'Применить',
+                              confirmVariant: 'primary',
+                              onConfirm: () => {
+                                onUpdateUserRole(u.id, newRole as UserRole);
+                                showNotification(`Роль пользователя ${u.name} изменена на ${newRole === 'admin' ? 'Администратор' : 'Турист'}!`);
+                              }
+                            });
+                          }}
+                          className={`px-2.5 py-1.5 text-xs font-bold rounded-xl border transition-all ${
+                            isTargetAdmin
+                              ? 'bg-[#FDE8E8] text-[#E54B4B] border-[#F8B4B4] hover:bg-[#FCD8D8]'
+                              : 'bg-white text-[#4A443E] border-[#E5E0D8] hover:bg-[#F2EFE9]'
+                          }`}
+                        >
+                          {isTargetAdmin ? 'Снять админа' : 'Сделать админом'}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            askConfirmation({
+                              title: 'Удалить участника?',
+                              message: `Удалить участника ${u.name} из базы данных?`,
+                              confirmText: 'Да, удалить',
+                              confirmVariant: 'danger',
+                              onConfirm: () => {
+                                onDeleteUser(u.id);
+                                showNotification(`Участник ${u.name} успешно удален.`);
+                              }
+                            });
+                          }}
+                          className="p-1.5 text-[#8B7E6D] hover:text-[#E54B4B] hover:bg-[#FDE8E8] rounded-xl transition-colors border border-transparent hover:border-[#F8B4B4]"
+                          title="Удалить участника"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* 7. BACKUP & JSON RESTORE */}
       {activeCabinetTab === 'backup' && isAdmin && (
         <div className="bg-white border border-[#E5E0D8] rounded-[28px] p-6 shadow-sm space-y-6">
           <div>
             <h2 className="text-base font-bold text-[#1A1F1A]">Резервное копирование и экспорт базы</h2>
             <p className="text-xs text-[#6B665F] mt-1">
-              Скачивайте резервную копию со всеми маршрутами, гидропостами и пользователями, или восстанавливайте базу.
+              Скачивайте резервную копию со всеми маршрутами, статьями и пользователями, или восстанавливайте базу.
             </p>
           </div>
 
@@ -1572,7 +3028,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
                 <Download className="w-6 h-6 text-[#2D5A27] mb-2" />
                 <h3 className="text-sm font-bold text-[#1A1F1A]">Экспорт в JSON</h3>
                 <p className="text-xs text-[#6B665F] mt-1">
-                  Скачать текущую базу данных ({routes.length} рек, {hydroStations.length} постов).
+                  Скачать текущую базу данных ({routes.length} рек, {articles.length} статей, {trips.length} походов, {(currentNotesConfig.notes || []).length} заметок, {(currentNotesConfig.riverReviews || []).length + (currentNotesConfig.crewReviews || []).length} отзывов).
                 </p>
               </div>
               <button
@@ -1598,23 +3054,50 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
             <div className="bg-[#FDF2F2] p-5 rounded-2xl border border-[#F8B4B4] space-y-3 flex flex-col justify-between">
               <div>
                 <RefreshCw className="w-6 h-6 text-[#E54B4B] mb-2" />
-                <h3 className="text-sm font-bold text-[#E54B4B]">Сброс к исходным данным</h3>
-                <p className="text-xs text-[#7F1D1D] mt-1">Восстановить заводскую базу рек Югры и Ямала.</p>
+                <h3 className="text-sm font-bold text-[#E54B4B]">Очистка базы (Чистый старт)</h3>
+                <p className="text-xs text-[#7F1D1D] mt-1">Очистить все статьи, реки, походы и заметки перед публикацией.</p>
               </div>
               <button
                 onClick={() => {
-                  if (window.confirm('Сбросить все данные к исходным?')) {
-                    onResetToDefaults();
-                    showNotification('База сброшена к исходным данным.');
-                  }
+                  askConfirmation({
+                    title: 'Очистить всю базу данных?',
+                    message: 'Полностью очистить все статьи, карты, паспорта рек, походы и заметки? База данных будет абсолютно чистой для последующего наполнения контентом администратором.',
+                    confirmText: 'Да, очистить всё',
+                    confirmVariant: 'danger',
+                    onConfirm: () => {
+                      onResetToDefaults();
+                      showNotification('База данных полностью очищена. Сайт готов к первичному наполнению!');
+                    }
+                  });
                 }}
-                className="w-full py-2.5 bg-[#E54B4B] text-white font-bold text-xs rounded-xl shadow-sm"
+                className="w-full py-2.5 bg-[#E54B4B] text-white font-bold text-xs rounded-xl shadow-sm cursor-pointer"
               >
-                Сбросить
+                Очистить базу
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* 8. SYNC HISTORY & STATUS SECTION */}
+      {activeCabinetTab === 'sync_history' && isAdmin && (
+        <SyncHistorySection
+          currentUser={currentUser}
+          routes={routes}
+          trips={trips}
+          articles={articles}
+          registeredUsers={registeredUsers}
+          faqData={currentFaqData}
+          notesConfig={currentNotesConfig}
+          showNotification={showNotification}
+        />
+      )}
+
+      {/* 9. TELEGRAM MINI APP SECTION */}
+      {activeCabinetTab === 'telegram' && (
+        <TelegramMiniAppSection
+          onShowNotification={showNotification}
+        />
       )}
 
       {/* ---------------------------------------------------- */}
@@ -1742,128 +3225,30 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
       )}
 
       {/* ---------------------------------------------------- */}
-      {/* EDIT / CREATE HYDRO MODAL */}
-      {/* ---------------------------------------------------- */}
-      {editingHydro && (
-        <div className="fixed inset-0 z-[2900] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 overflow-y-auto">
-          <div className="bg-white border border-[#E5E0D8] rounded-[28px] max-w-lg w-full p-6 space-y-4 shadow-2xl my-auto text-[#2D332D]">
-            <div className="flex items-center justify-between pb-3 border-b border-[#E5E0D8]">
-              <h3 className="text-base font-bold text-[#1A1F1A]">
-                {isNewHydro ? 'Новый гидропост' : `Редактирование: ${editingHydro.name}`}
-              </h3>
-              <button onClick={() => setEditingHydro(null)} className="text-[#8B7E6D] hover:text-[#1A1F1A]">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveHydro} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-[#4A443E] font-medium mb-1">Название поста</label>
-                <input
-                  type="text"
-                  required
-                  value={editingHydro.name}
-                  onChange={(e) => setEditingHydro({ ...editingHydro, name: e.target.value })}
-                  className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D]"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[#4A443E] font-medium mb-1">Река</label>
-                  <input
-                    type="text"
-                    required
-                    value={editingHydro.river}
-                    onChange={(e) => setEditingHydro({ ...editingHydro, river: e.target.value })}
-                    className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[#4A443E] font-medium mb-1">Регион</label>
-                  <select
-                    value={editingHydro.region}
-                    onChange={(e) => setEditingHydro({ ...editingHydro, region: e.target.value as 'ХМАО' | 'ЯНАО' })}
-                    className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D]"
-                  >
-                    <option value="ХМАО">ХМАО</option>
-                    <option value="ЯНАО">ЯНАО</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="block text-[#4A443E] font-medium mb-1">Уровень (см)</label>
-                  <input
-                    type="number"
-                    value={editingHydro.currentLevelCm}
-                    onChange={(e) => setEditingHydro({ ...editingHydro, currentLevelCm: Number(e.target.value) })}
-                    className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[#4A443E] font-medium mb-1">Изм. 24ч (см)</label>
-                  <input
-                    type="number"
-                    value={editingHydro.change24hCm}
-                    onChange={(e) => setEditingHydro({ ...editingHydro, change24hCm: Number(e.target.value) })}
-                    className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[#4A443E] font-medium mb-1">Темп. воды °C</label>
-                  <input
-                    type="number"
-                    value={editingHydro.waterTempC}
-                    onChange={(e) => setEditingHydro({ ...editingHydro, waterTempC: Number(e.target.value) })}
-                    className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D]"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-[#E5E0D8] flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingHydro(null)}
-                  className="px-4 py-2 bg-[#F9F7F4] text-[#2D332D] rounded-xl border border-[#E5E0D8]"
-                >
-                  Отмена
-                </button>
-                <button type="submit" className="px-5 py-2 bg-[#2D5A27] text-white font-bold rounded-xl">
-                  Сохранить
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ---------------------------------------------------- */}
       {/* EDIT / CREATE ARTICLE & EXPEDITION REPORT MODAL */}
       {/* ---------------------------------------------------- */}
       {editingArticle && (
-        <div className="fixed inset-0 z-[2900] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white border border-[#E5E0D8] rounded-[28px] max-w-3xl w-full max-h-[92vh] overflow-y-auto p-5 sm:p-7 space-y-6 shadow-2xl my-auto text-[#2D332D]">
+        <div className="fixed inset-0 z-[2900] bg-black/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
+          <div className="bg-white border border-[#E5E0D8] rounded-[28px] max-w-3xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden my-auto text-[#2D332D]">
             
-            {/* Header */}
-            <div className="flex items-center justify-between pb-4 border-b border-[#E5E0D8]">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2.5 rounded-2xl bg-[#E8F1E7] text-[#2D5A27]">
+            {/* Fixed Header */}
+            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-[#E5E0D8] bg-white shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="p-2 sm:p-2.5 rounded-2xl bg-[#E8F1E7] text-[#2D5A27] shrink-0">
                   <BookOpen className="w-5 h-5" />
                 </div>
-                <div>
-                  <h3 className="text-base sm:text-lg font-black text-[#1A1F1A]">
+                <div className="min-w-0">
+                  <h3 className="text-sm sm:text-base font-black text-[#1A1F1A] truncate">
                     {isNewArticle ? 'Новая статья / Отчет об экспедиции' : `Редактирование: ${editingArticle.title}`}
                   </h3>
-                  <p className="text-xs text-[#6B665F]">
-                    Полное управление текстом, параметрами маршрута и загрузка фотоотчета с устройства
+                  <p className="text-[11px] text-[#6B665F] truncate">
+                    Полное управление текстом, параметрами маршрута и фотоотчетом
                   </p>
                 </div>
               </div>
               <button 
-                onClick={() => setEditingArticle(null)} 
-                className="p-1.5 rounded-xl text-[#8B7E6D] hover:text-[#1A1F1A] hover:bg-[#F9F7F4] transition-colors"
+                onClick={handleCloseArticleEditor} 
+                className="p-1.5 rounded-xl text-[#8B7E6D] hover:text-[#1A1F1A] hover:bg-[#F9F7F4] transition-colors cursor-pointer shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1886,7 +3271,8 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
               className="hidden"
             />
 
-            <form onSubmit={handleSaveArticle} className="space-y-6 text-xs">
+            {/* Scrollable Form Body */}
+            <form id="article-editor-form" onSubmit={handleSaveArticle} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 text-xs no-scrollbar">
               
               {/* SECTION 1: COVER PHOTO */}
               <div className="bg-[#FAF8F5] p-4 sm:p-5 rounded-2xl border border-[#E5E0D8] space-y-3">
@@ -2321,25 +3707,29 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
                 )}
               </div>
 
-              {/* Action Buttons */}
-              <div className="pt-4 border-t border-[#E5E0D8] flex items-center justify-end gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setEditingArticle(null)}
-                  className="px-4 py-2.5 bg-[#F9F7F4] hover:bg-[#EAE7E2] text-[#2D332D] font-bold rounded-xl border border-[#E5E0D8] transition-colors"
-                >
-                  Отмена
-                </button>
-                <button 
-                  type="submit" 
-                  className="px-6 py-2.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold rounded-xl shadow-md flex items-center gap-1.5 transition-all"
-                >
-                  <Save className="w-4 h-4" />
-                  {isNewArticle ? 'Опубликовать статью' : 'Сохранить изменения'}
-                </button>
-              </div>
-
             </form>
+
+            {/* Fixed Footer with Action Buttons */}
+            <div className="p-3 sm:p-4 border-t border-[#E5E0D8] bg-[#FAF8F5] shrink-0 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={isSavingArticle}
+                onClick={handleCloseArticleEditor}
+                className="px-4 py-2.5 bg-white hover:bg-[#F9F7F4] text-[#2D332D] font-bold rounded-xl border border-[#E5E0D8] transition-colors disabled:opacity-50 cursor-pointer text-xs"
+              >
+                Отмена
+              </button>
+              <button 
+                type="submit" 
+                form="article-editor-form"
+                disabled={isSavingArticle || isProcessingArticlePhoto}
+                className="px-5 py-2.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold rounded-xl shadow-md flex items-center gap-1.5 transition-all disabled:opacity-60 cursor-pointer text-xs"
+              >
+                <Save className="w-4 h-4" />
+                {isSavingArticle ? 'Сохранение...' : (isNewArticle ? 'Опубликовать статью' : 'Сохранить изменения')}
+              </button>
+            </div>
+
           </div>
         </div>
       )}
@@ -2657,182 +4047,659 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
         </div>
       )}
 
-      {/* EDIT PROFILE MODAL */}
+      {/* ---------------------------------------------------- */}
+      {/* RICH PROFILE DOSSIER & FLOTILLA EDIT MODAL */}
+      {/* ---------------------------------------------------- */}
       {isEditingProfile && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-[28px] max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-[#E5E0D8] space-y-5 my-8">
+        <div className="fixed inset-0 z-[3200] bg-black/70 backdrop-blur-md flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-[32px] max-w-2xl w-full p-5 sm:p-7 shadow-2xl border border-[#E5E0D8] space-y-5 my-auto max-h-[92vh] flex flex-col">
             
-            <div className="flex items-center justify-between border-b border-[#E5E0D8] pb-3">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-[#E8F1E7] text-[#2D5A27]">
-                  <Edit3 className="w-5 h-5" />
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-[#E5E0D8] pb-3.5 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-2xl bg-[#E8F1E7] text-[#2D5A27]">
+                  <Edit3 className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-[#1A1F1A]">Редактирование профиля</h3>
-                  <p className="text-[11px] text-[#6B665F]">Обновите ваши персональные данные и квалификацию</p>
+                  <h3 className="text-base sm:text-lg font-black text-[#1A1F1A]">
+                    Визитная карточка туриста
+                  </h3>
+                  <p className="text-xs text-[#6B665F]">
+                    Заполните информацию о себе, вашем флоте и снаряжении
+                  </p>
                 </div>
               </div>
 
               <button
                 onClick={() => setIsEditingProfile(false)}
-                className="p-1.5 rounded-full hover:bg-[#F9F7F4] text-[#6B665F]"
+                className="p-2 rounded-full hover:bg-[#F9F7F4] text-[#6B665F] transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveProfile} className="space-y-4 text-xs">
+            {/* Sub Tabs Navigation */}
+            <div className="flex items-center gap-1 bg-[#F9F7F4] p-1.5 rounded-2xl border border-[#EEEBE6] overflow-x-auto shrink-0 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setProfileEditTab('main')}
+                className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 shrink-0 ${
+                  profileEditTab === 'main' ? 'bg-[#2D5A27] text-white shadow-xs' : 'text-[#6B665F] hover:text-[#2D5A27]'
+                }`}
+              >
+                <User className="w-3.5 h-3.5" />
+                <span>Основное</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setProfileEditTab('fleet')}
+                className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 shrink-0 ${
+                  profileEditTab === 'fleet' ? 'bg-[#2D5A27] text-white shadow-xs' : 'text-[#6B665F] hover:text-[#2D5A27]'
+                }`}
+              >
+                <Anchor className="w-3.5 h-3.5" />
+                <span>Флот ({profileForm.vesselsOwned.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setProfileEditTab('gear')}
+                className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 shrink-0 ${
+                  profileEditTab === 'gear' ? 'bg-[#2D5A27] text-white shadow-xs' : 'text-[#6B665F] hover:text-[#2D5A27]'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Снаряжение ({profileForm.gearInventory.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setProfileEditTab('rivers')}
+                className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 shrink-0 ${
+                  profileEditTab === 'rivers' ? 'bg-[#2D5A27] text-white shadow-xs' : 'text-[#6B665F] hover:text-[#2D5A27]'
+                }`}
+              >
+                <Heart className="w-3.5 h-3.5" />
+                <span>Любимые реки ({profileForm.favoriteRivers.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setProfileEditTab('badges')}
+                className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 shrink-0 ${
+                  profileEditTab === 'badges' ? 'bg-[#2D5A27] text-white shadow-xs' : 'text-[#6B665F] hover:text-[#2D5A27]'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Навыки ({profileForm.badges.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setProfileEditTab('contacts')}
+                className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 shrink-0 ${
+                  profileEditTab === 'contacts' ? 'bg-[#2D5A27] text-white shadow-xs' : 'text-[#6B665F] hover:text-[#2D5A27]'
+                }`}
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>О себе & Связь</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveProfile} className="space-y-4 text-xs overflow-y-auto flex-1 pr-1">
               
-              {/* Avatar Selector with Device Upload */}
-              <div className="space-y-3 bg-[#F9F7F4] p-3.5 sm:p-4 rounded-2xl border border-[#EEEBE6]">
-                <div className="flex items-center justify-between">
-                  <label className="text-[#4A443E] font-bold text-xs">Фотография профиля</label>
-                  <span className="text-[10px] text-[#8B7E6D]">JPG, PNG, WEBP с устройства</span>
-                </div>
-
-                {/* Hidden Native File Input */}
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept="image/*"
-                  onChange={handleImageFileChange}
-                  className="hidden"
-                />
-
-                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
-                  {/* Interactive Avatar Preview */}
-                  <div
-                    onClick={() => fileInputRef.current?.click()}
-                    className="relative group cursor-pointer shrink-0"
-                    title="Нажмите, чтобы загрузить фото с устройства"
-                  >
-                    <img
-                      src={profileForm.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80'}
-                      alt="Предпросмотр"
-                      className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl object-cover border-2 border-[#2D5A27] shadow-md group-hover:opacity-80 transition-all"
-                    />
-                    <div className="absolute inset-0 bg-black/40 rounded-2xl flex flex-col items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Camera className="w-6 h-6 mb-1" />
-                      <span className="text-[9px] font-bold">Сменить</span>
+              {/* TAB 1: MAIN INFO & AVATAR */}
+              {profileEditTab === 'main' && (
+                <div className="space-y-4">
+                  {/* Avatar Selector with Device Upload */}
+                  <div className="space-y-3 bg-[#F9F7F4] p-3.5 sm:p-4 rounded-2xl border border-[#EEEBE6]">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[#4A443E] font-bold text-xs">Фотография профиля</label>
+                      <span className="text-[10px] text-[#8B7E6D]">JPG, PNG, WEBP с устройства</span>
                     </div>
-                    {isProcessingImage && (
-                      <div className="absolute inset-0 bg-black/60 rounded-2xl flex items-center justify-center text-white">
-                        <RefreshCw className="w-5 h-5 animate-spin" />
+
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      accept="image/*"
+                      onChange={handleImageFileChange}
+                      className="hidden"
+                    />
+
+                    <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
+                      {/* Interactive Avatar Preview */}
+                      <div
+                        onClick={() => fileInputRef.current?.click()}
+                        className="relative group cursor-pointer shrink-0"
+                        title="Нажмите, чтобы загрузить фото с устройства"
+                      >
+                        <img
+                          src={profileForm.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80'}
+                          alt="Предпросмотр"
+                          className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl object-cover border-2 border-[#2D5A27] shadow-md group-hover:opacity-80 transition-all"
+                        />
+                        <div className="absolute inset-0 bg-black/40 rounded-2xl flex flex-col items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Camera className="w-6 h-6 mb-1" />
+                          <span className="text-[9px] font-bold">Сменить</span>
+                        </div>
+                        {isProcessingImage && (
+                          <div className="absolute inset-0 bg-black/60 rounded-2xl flex items-center justify-center text-white">
+                            <RefreshCw className="w-5 h-5 animate-spin" />
+                          </div>
+                        )}
                       </div>
-                    )}
+
+                      {/* Actions & Presets */}
+                      <div className="flex-1 space-y-2.5 w-full">
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="w-full py-2.5 px-3 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold rounded-xl shadow-xs flex items-center justify-center gap-2 transition-all"
+                        >
+                          <UploadCloud className="w-4 h-4" />
+                          <span>Загрузить фото с устройства</span>
+                        </button>
+
+                        <div>
+                          <span className="text-[10px] text-[#8B7E6D] font-bold block mb-1">Или выберите готовую аватарку:</span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {AVATAR_PRESETS.map((preset, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => setProfileForm({ ...profileForm, avatar: preset.url })}
+                                className={`w-7 h-7 rounded-lg overflow-hidden border-2 transition-all ${
+                                  profileForm.avatar === preset.url ? 'border-[#2D5A27] scale-110 shadow-xs' : 'border-transparent opacity-70 hover:opacity-100'
+                                }`}
+                                title={preset.label}
+                              >
+                                <img src={preset.url} alt={preset.label} className="w-full h-full object-cover" />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-1">
+                      <input
+                        type="url"
+                        placeholder="Либо вставьте URL картинки из интернета"
+                        value={profileForm.avatar.startsWith('data:') ? '' : profileForm.avatar}
+                        onChange={(e) => setProfileForm({ ...profileForm, avatar: e.target.value })}
+                        className="w-full bg-white border border-[#E5E0D8] rounded-xl px-3 py-2 text-[11px] text-[#2D332D] outline-none focus:border-[#2D5A27]"
+                      />
+                    </div>
                   </div>
 
-                  {/* Actions & Presets */}
-                  <div className="flex-1 space-y-2.5 w-full">
-                    {/* Big Upload Button */}
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="w-full py-2.5 px-3 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold rounded-xl shadow-xs flex items-center justify-center gap-2 transition-all"
-                    >
-                      <UploadCloud className="w-4 h-4" />
-                      <span>Загрузить фото с устройства</span>
-                    </button>
-
-                    {/* Presets row */}
+                  {/* Name & Callsign */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <span className="text-[10px] text-[#8B7E6D] font-bold block mb-1">Или выберите готовую аватарку:</span>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {AVATAR_PRESETS.map((preset, idx) => (
+                      <label className="block text-[#4A443E] font-bold mb-1">Имя / Фамилия *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Например: Дмитрий Васильев"
+                        value={profileForm.name}
+                        onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+                        className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[#4A443E] font-bold mb-1">Позывной на реке / Псевдоним</label>
+                      <input
+                        type="text"
+                        placeholder="Например: Северный Ветер, Капитан"
+                        value={profileForm.callsign}
+                        onChange={(e) => setProfileForm({ ...profileForm, callsign: e.target.value })}
+                        className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
+                      />
+                    </div>
+                  </div>
+
+                  {/* City & Experience */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[#4A443E] font-bold mb-1">Город / Населенный пункт</label>
+                      <input
+                        type="text"
+                        placeholder="Сургут, Салехард, Нижневартовск..."
+                        value={profileForm.city}
+                        onChange={(e) => setProfileForm({ ...profileForm, city: e.target.value })}
+                        className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[#4A443E] font-bold mb-1">Опыт в водном туризме</label>
+                      <select
+                        value={profileForm.experienceLevel}
+                        onChange={(e) => setProfileForm({ ...profileForm, experienceLevel: e.target.value })}
+                        className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
+                      >
+                        <option value="Начинающий (первый сезон)">Начинающий (первый сезон)</option>
+                        <option value="Любитель (1-2 к.с., спокойные реки)">Любитель (1-2 к.с., спокойные реки)</option>
+                        <option value="Опытный турист (3-4 к.с., горные реки Урала)">Опытный турист (3-4 к.с., горные реки Урала)</option>
+                        <option value="Инструктор-проводник / Эксперт">Инструктор-проводник / Эксперт</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* FSTR Rank / Sport Certificate */}
+                  <div>
+                    <label className="block text-[#4A443E] font-bold mb-1">
+                      Спортивный разряд / Звание / Сертификат проводника
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Например: Инструктор водного туризма, II спортивный разряд, Турист России"
+                      value={profileForm.fstrRank}
+                      onChange={(e) => setProfileForm({ ...profileForm, fstrRank: e.target.value })}
+                      className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: FLOTILLA (VESSELS) */}
+              {profileEditTab === 'fleet' && (
+                <div className="space-y-3">
+                  <p className="text-xs text-[#6B665F]">
+                    Отметьте типы плавсредств, которыми вы владеете или на которых регулярно ходите в экспедиции:
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {[
+                      { type: 'catamaran' as VesselType, label: 'Катамаран 4/6 мест', emoji: '⛵', desc: 'Сплавной катамаран для порогов и озер' },
+                      { type: 'kayak' as VesselType, label: 'Байдарка / Каяк', emoji: '🛶', desc: 'Каркасная или надувная байдарка' },
+                      { type: 'packraft' as VesselType, label: 'Пакрафт экспедиционный', emoji: '🎒', desc: 'Легкое судно для пеше-водных связок' },
+                      { type: 'sup' as VesselType, label: 'SUP-борд надувной', emoji: '🏄', desc: 'САП-доска для гладкой воды и озер' },
+                      { type: 'motorboat' as VesselType, label: 'Лодка ПВХ / Мотор', emoji: '🚤', desc: 'Моторная лодка или водомет' },
+                      { type: 'raft' as VesselType, label: 'Рафт многоместный', emoji: '🛟', desc: 'Большой сплавной рафт для команды' }
+                    ].map((v) => {
+                      const isSelected = profileForm.vesselsOwned.includes(v.type);
+                      return (
+                        <div
+                          key={v.type}
+                          onClick={() => {
+                            setProfileForm((prev) => ({
+                              ...prev,
+                              vesselsOwned: isSelected
+                                ? prev.vesselsOwned.filter((t) => t !== v.type)
+                                : [...prev.vesselsOwned, v.type]
+                            }));
+                          }}
+                          className={`p-3 rounded-2xl border cursor-pointer transition-all flex items-center justify-between gap-3 ${
+                            isSelected
+                              ? 'bg-[#E8F1E7] border-[#2D5A27] text-[#1A1F1A] shadow-xs'
+                              : 'bg-[#F9F7F4] border-[#EEEBE6] text-[#6B665F] hover:border-[#CDE0CC]'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl p-2 bg-white rounded-xl border border-[#E5E0D8]">
+                              {v.emoji}
+                            </span>
+                            <div>
+                              <div className="font-bold text-xs text-[#1A1F1A]">{v.label}</div>
+                              <div className="text-[10px] text-[#8B7E6D]">{v.desc}</div>
+                            </div>
+                          </div>
+
+                          <div className={`w-5 h-5 rounded-full flex items-center justify-center border shrink-0 ${
+                            isSelected ? 'bg-[#2D5A27] border-[#2D5A27] text-white' : 'border-[#CBD5E1] bg-white'
+                          }`}>
+                            {isSelected && <Check className="w-3 h-3" />}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: GEAR INVENTORY */}
+              {profileEditTab === 'gear' && (
+                <div className="space-y-4">
+                  <div>
+                    <span className="font-bold text-[#1A1F1A] block mb-1">Популярное походное снаряжение:</span>
+                    <p className="text-[11px] text-[#6B665F] mb-2.5">
+                      Кликайте по тегам, чтобы быстро добавить или убрать из вашей визитки:
+                    </p>
+
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        '📡 Спутниковый трекер Garmin / SOS',
+                        '⛺ Палатка 4-сезонная штормовая',
+                        '🪓 Бензопила Stihl / Топор',
+                        '📻 Рации 433 / 144 МГц',
+                        '🍲 Костровой набор и казан',
+                        '⚡ Генератор 1 кВт',
+                        '🧭 GPS-навигатор Garmin',
+                        '🦺 Спасжилеты (100+ кг)',
+                        '🩺 Расширенная аптечка',
+                        '🔋 Солнечная панель и станция',
+                        '🐟 Рыболовные снасти и забродники',
+                        '⛺ Лагерный тент 4х6 м'
+                      ].map((item) => {
+                        const isIncluded = profileForm.gearInventory.includes(item);
+                        return (
                           <button
-                            key={idx}
+                            key={item}
                             type="button"
-                            onClick={() => setProfileForm({ ...profileForm, avatar: preset.url })}
-                            className={`w-7 h-7 rounded-lg overflow-hidden border-2 transition-all ${
-                              profileForm.avatar === preset.url ? 'border-[#2D5A27] scale-110 shadow-xs' : 'border-transparent opacity-70 hover:opacity-100'
+                            onClick={() => {
+                              setProfileForm((prev) => ({
+                                ...prev,
+                                gearInventory: isIncluded
+                                  ? prev.gearInventory.filter((g) => g !== item)
+                                  : [...prev.gearInventory, item]
+                              }));
+                            }}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                              isIncluded
+                                ? 'bg-[#2D5A27] text-white shadow-2xs'
+                                : 'bg-[#F9F7F4] text-[#4A443E] border border-[#E5E0D8] hover:border-[#2D5A27]'
                             }`}
-                            title={preset.label}
                           >
-                            <img src={preset.url} alt={preset.label} className="w-full h-full object-cover" />
+                            <span>{item}</span>
+                            {isIncluded && <Check className="w-3 h-3" />}
                           </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Add Custom Gear */}
+                  <div className="bg-[#F9F7F4] p-3.5 rounded-2xl border border-[#EEEBE6] space-y-2">
+                    <label className="font-bold text-[#1A1F1A] block text-xs">
+                      Добавить свое снаряжение:
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Например: Мотор Yamaha 9.9, Эхолот, Сухой гидрокостюм..."
+                        value={customGearInput}
+                        onChange={(e) => setCustomGearInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (customGearInput.trim()) {
+                              setProfileForm((prev) => ({
+                                ...prev,
+                                gearInventory: [...prev.gearInventory, customGearInput.trim()]
+                              }));
+                              setCustomGearInput('');
+                            }
+                          }
+                        }}
+                        className="flex-1 bg-white border border-[#E5E0D8] rounded-xl px-3 py-2 text-xs outline-none focus:border-[#2D5A27]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (customGearInput.trim()) {
+                            setProfileForm((prev) => ({
+                              ...prev,
+                              gearInventory: [...prev.gearInventory, customGearInput.trim()]
+                            }));
+                            setCustomGearInput('');
+                          }
+                        }}
+                        className="px-4 py-2 bg-[#2D5A27] text-white font-bold rounded-xl text-xs shadow-xs"
+                      >
+                        Добавить
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Currently Added Gear Chips */}
+                  {profileForm.gearInventory.length > 0 && (
+                    <div className="space-y-1.5">
+                      <span className="text-[11px] font-bold text-[#8B7E6D]">Ваш выбранный список ({profileForm.gearInventory.length}):</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {profileForm.gearInventory.map((g, idx) => (
+                          <span
+                            key={idx}
+                            className="px-2.5 py-1 bg-[#E8F1E7] text-[#2D5A27] text-xs font-medium rounded-xl border border-[#CDE0CC] flex items-center gap-1.5"
+                          >
+                            <span>{g}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setProfileForm((prev) => ({
+                                  ...prev,
+                                  gearInventory: prev.gearInventory.filter((_, i) => i !== idx)
+                                }));
+                              }}
+                              className="text-[#2D5A27] hover:text-[#E54B4B]"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
                         ))}
                       </div>
                     </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 4: FAVORITE RIVERS */}
+              {profileEditTab === 'rivers' && (
+                <div className="space-y-4">
+                  <div>
+                    <span className="font-bold text-[#1A1F1A] block mb-1">Реки Севера (быстрый выбор):</span>
+                    <p className="text-[11px] text-[#6B665F] mb-2.5">
+                      Выберите реки, по которым вы уже ходили или куда мечтаете отправиться:
+                    </p>
+
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        'Собь', 'Щучья', 'Тромъёган', 'Аган', 'Казым', 'Северная Сосьва',
+                        'Вах', 'Лямин', 'Надым', 'Пим', 'Полуй', 'Войкар', 'Сыня', 'Юган'
+                      ].map((river) => {
+                        const isSelected = profileForm.favoriteRivers.includes(river);
+                        return (
+                          <button
+                            key={river}
+                            type="button"
+                            onClick={() => {
+                              setProfileForm((prev) => ({
+                                ...prev,
+                                favoriteRivers: isSelected
+                                  ? prev.favoriteRivers.filter((r) => r !== river)
+                                  : [...prev.favoriteRivers, river]
+                              }));
+                            }}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                              isSelected
+                                ? 'bg-[#2D5A27] text-white shadow-2xs'
+                                : 'bg-[#F9F7F4] text-[#4A443E] border border-[#E5E0D8] hover:border-[#2D5A27]'
+                            }`}
+                          >
+                            <span>р. {river}</span>
+                            {isSelected && <Check className="w-3 h-3" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Add Custom River */}
+                  <div className="bg-[#F9F7F4] p-3.5 rounded-2xl border border-[#EEEBE6] space-y-2">
+                    <label className="font-bold text-[#1A1F1A] block text-xs">
+                      Добавить другую реку:
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Например: Таз, Пур, Хадуттэ..."
+                        value={customRiverInput}
+                        onChange={(e) => setCustomRiverInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (customRiverInput.trim()) {
+                              setProfileForm((prev) => ({
+                                ...prev,
+                                favoriteRivers: [...prev.favoriteRivers, customRiverInput.trim()]
+                              }));
+                              setCustomRiverInput('');
+                            }
+                          }
+                        }}
+                        className="flex-1 bg-white border border-[#E5E0D8] rounded-xl px-3 py-2 text-xs outline-none focus:border-[#2D5A27]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (customRiverInput.trim()) {
+                            setProfileForm((prev) => ({
+                              ...prev,
+                              favoriteRivers: [...prev.favoriteRivers, customRiverInput.trim()]
+                            }));
+                            setCustomRiverInput('');
+                          }
+                        }}
+                        className="px-4 py-2 bg-[#2D5A27] text-white font-bold rounded-xl text-xs shadow-xs"
+                      >
+                        Добавить
+                      </button>
+                    </div>
                   </div>
                 </div>
+              )}
 
-                <div className="pt-1">
-                  <input
-                    type="url"
-                    placeholder="Либо вставьте URL картинки из интернета"
-                    value={profileForm.avatar.startsWith('data:') ? '' : profileForm.avatar}
-                    onChange={(e) => setProfileForm({ ...profileForm, avatar: e.target.value })}
-                    className="w-full bg-white border border-[#E5E0D8] rounded-xl px-3 py-2 text-[11px] text-[#2D332D] outline-none focus:border-[#2D5A27]"
-                  />
+              {/* TAB 5: BADGES & SPECIALIZATIONS */}
+              {profileEditTab === 'badges' && (
+                <div className="space-y-3">
+                  <p className="text-xs text-[#6B665F]">
+                    Отметьте ваши роли, навыки и достижения в походах:
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {[
+                      { key: '🔥 Мастер костра', desc: 'Разведет костер в любой дождь и мороз' },
+                      { key: '🧭 Надежный штурман', desc: 'Безупречное чтение лоции и карты' },
+                      { key: '🍲 Шеф-повар похода', desc: 'Вкусно накормит экипаж в тайге' },
+                      { key: '⚓ Капитан судна', desc: 'Опыт руководства экипажем на воде' },
+                      { key: '💪 Мощный гребец', desc: 'Вынослив на многокилометровых переходах' },
+                      { key: '⛺ Знаток стоянок', desc: 'Найдет сухую и укрытую поляну' },
+                      { key: '🐟 Рыбак Севера', desc: 'Ловит хариуса, щуку и окуня' },
+                      { key: '📸 Летописец экспедиций', desc: 'Создает красивые фото и видеоотчеты' },
+                      { key: '⚡ Первая помощь', desc: 'Навыки полевой медицины и спасения' },
+                      { key: '🏔 Полярный Урал', desc: 'Пройдены сложные горные реки ЯНАО' }
+                    ].map((badge) => {
+                      const isSelected = profileForm.badges.includes(badge.key);
+                      return (
+                        <div
+                          key={badge.key}
+                          onClick={() => {
+                            setProfileForm((prev) => ({
+                              ...prev,
+                              badges: isSelected
+                                ? prev.badges.filter((b) => b !== badge.key)
+                                : [...prev.badges, badge.key]
+                            }));
+                          }}
+                          className={`p-3 rounded-2xl border cursor-pointer transition-all flex items-center justify-between gap-2.5 ${
+                            isSelected
+                              ? 'bg-[#E8F1E7] border-[#2D5A27] text-[#1A1F1A] shadow-xs'
+                              : 'bg-[#F9F7F4] border-[#EEEBE6] text-[#6B665F] hover:border-[#CDE0CC]'
+                          }`}
+                        >
+                          <div>
+                            <div className="font-bold text-xs text-[#1A1F1A]">{badge.key}</div>
+                            <div className="text-[10px] text-[#8B7E6D]">{badge.desc}</div>
+                          </div>
+
+                          <div className={`w-5 h-5 rounded-full flex items-center justify-center border shrink-0 ${
+                            isSelected ? 'bg-[#2D5A27] border-[#2D5A27] text-white' : 'border-[#CBD5E1] bg-white'
+                          }`}>
+                            {isSelected && <Check className="w-3 h-3" />}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {/* Name & Phone */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[#4A443E] font-bold mb-1">Имя / Никнейм *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Например: Иван Иванов"
-                    value={profileForm.name}
-                    onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
-                    className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
-                  />
+              {/* TAB 6: BIO, TELEGRAM & CONTACTS */}
+              {profileEditTab === 'contacts' && (
+                <div className="space-y-4">
+                  {/* Bio */}
+                  <div>
+                    <label className="block text-[#4A443E] font-bold mb-1">
+                      О себе и походном стиле
+                    </label>
+                    <textarea
+                      rows={4}
+                      placeholder="Расскажите о своем походном опыте, стиле сплава (автономные экспедиции, спортивные пороги, неспешный туризм с рыбалкой), характере в команде..."
+                      value={profileForm.bio}
+                      onChange={(e) => setProfileForm({ ...profileForm, bio: e.target.value })}
+                      className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-3 text-[#2D332D] outline-none focus:border-[#2D5A27]"
+                    />
+                  </div>
+
+                  {/* Telegram & VK */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[#4A443E] font-bold mb-1">Telegram (@username)</label>
+                      <input
+                        type="text"
+                        placeholder="@ivan_taiga"
+                        value={profileForm.telegram}
+                        onChange={(e) => setProfileForm({ ...profileForm, telegram: e.target.value })}
+                        className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[#4A443E] font-bold mb-1">VK (ссылка или id)</label>
+                      <input
+                        type="text"
+                        placeholder="https://vk.com/ivan_taiga"
+                        value={profileForm.vk}
+                        onChange={(e) => setProfileForm({ ...profileForm, vk: e.target.value })}
+                        className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Readiness & Privacy Toggles */}
+                  <div className="space-y-2.5 bg-[#F9F7F4] p-3.5 rounded-2xl border border-[#EEEBE6]">
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={profileForm.isReadyForExpeditions}
+                        onChange={(e) => setProfileForm({ ...profileForm, isReadyForExpeditions: e.target.checked })}
+                        className="w-4 h-4 rounded text-[#2D5A27] focus:ring-[#2D5A27]"
+                      />
+                      <div>
+                        <span className="font-bold text-[#1A1F1A] text-xs">🟢 Готов к экспедициям / Ищу команду</span>
+                        <p className="text-[10px] text-[#8B7E6D]">Ваша карточка будет помечена зеленым бейджем готовности к походам</p>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-2.5 cursor-pointer pt-2 border-t border-[#E5E0D8]">
+                      <input
+                        type="checkbox"
+                        checked={profileForm.showContactsPublicly}
+                        onChange={(e) => setProfileForm({ ...profileForm, showContactsPublicly: e.target.checked })}
+                        className="w-4 h-4 rounded text-[#2D5A27] focus:ring-[#2D5A27]"
+                      />
+                      <div>
+                        <span className="font-bold text-[#1A1F1A] text-xs">Показывать номер телефона в открытой карточке</span>
+                        <p className="text-[10px] text-[#8B7E6D]">Если выключено, номер телефона виден только организаторам походов, куда вы подали заявку</p>
+                      </div>
+                    </label>
+                  </div>
                 </div>
+              )}
 
-                <div>
-                  <label className="block text-[#4A443E] font-bold mb-1">Номер телефона</label>
-                  <input
-                    type="tel"
-                    placeholder="+7 (922) 123-45-67"
-                    value={profileForm.phone}
-                    onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
-                    className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
-                  />
-                </div>
-              </div>
-
-              {/* Email & City */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[#4A443E] font-bold mb-1">Email</label>
-                  <input
-                    type="email"
-                    value={profileForm.email}
-                    onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
-                    className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[#4A443E] font-bold mb-1">Город / Населенный пункт</label>
-                  <input
-                    type="text"
-                    placeholder="Сургут, Салехард, Ханты-Мансийск..."
-                    value={profileForm.city}
-                    onChange={(e) => setProfileForm({ ...profileForm, city: e.target.value })}
-                    className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
-                  />
-                </div>
-              </div>
-
-              {/* Experience Level */}
-              <div>
-                <label className="block text-[#4A443E] font-bold mb-1">Опыт в водном туризме</label>
-                <select
-                  value={profileForm.experienceLevel}
-                  onChange={(e) => setProfileForm({ ...profileForm, experienceLevel: e.target.value })}
-                  className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
-                >
-                  <option value="Начинающий (первый сезон)">Начинающий (первый сезон)</option>
-                  <option value="Любитель (1-2 к.с., спокойные реки)">Любитель (1-2 к.с., спокойные реки)</option>
-                  <option value="Опытный турист (3-4 к.с., горные реки Урала)">Опытный турист (3-4 к.с., горные реки Урала)</option>
-                  <option value="Инструктор-проводник / Эксперт">Инструктор-проводник / Эксперт</option>
-                </select>
-              </div>
-
-              <div className="pt-3 border-t border-[#E5E0D8] flex items-center justify-end gap-2">
+              {/* Actions */}
+              <div className="pt-3 border-t border-[#E5E0D8] flex items-center justify-end gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => setIsEditingProfile(false)}
@@ -2845,7 +4712,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
                   className="px-5 py-2.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-all"
                 >
                   <Save className="w-4 h-4" />
-                  Сохранить профиль
+                  Сохранить визитку
                 </button>
               </div>
 
@@ -2854,6 +4721,88 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
         </div>
       )}
 
+      {/* ---------------------------------------------------- */}
+      {/* UNIVERSAL CONFIRMATION DIALOG MODAL */}
+      {/* ---------------------------------------------------- */}
+      {confirmModal && confirmModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-[28px] max-w-md w-full p-6 shadow-2xl border border-[#E5E0D8] space-y-4 animate-in zoom-in-95 duration-200">
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto border ${
+              confirmModal.confirmVariant === 'primary'
+                ? 'bg-[#E8F1E7] text-[#2D5A27] border-[#CDE0CC]'
+                : 'bg-[#FFF2F2] text-[#E54B4B] border-[#F8C8C8]'
+            }`}>
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+
+            <div className="text-center space-y-1.5">
+              <h3 className="text-base font-bold text-[#1A1F1A]">{confirmModal.title}</h3>
+              <p className="text-xs text-[#6B665F] leading-relaxed whitespace-pre-line">
+                {confirmModal.message}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmModal(null)}
+                className="flex-1 py-2.5 px-4 bg-[#F2EFE9] hover:bg-[#E5E0D8] text-[#2D332D] font-bold text-xs rounded-xl transition-all cursor-pointer"
+              >
+                {confirmModal.cancelText || 'Отмена'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const onConfirmAction = confirmModal.onConfirm;
+                  setConfirmModal(null);
+                  onConfirmAction();
+                }}
+                className={`flex-1 py-2.5 px-4 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  confirmModal.confirmVariant === 'primary'
+                    ? 'bg-[#2D5A27] hover:bg-[#3D7136]'
+                    : 'bg-[#E54B4B] hover:bg-[#D43F3F]'
+                }`}
+              >
+                {confirmModal.confirmVariant === 'danger' && <Trash2 className="w-3.5 h-3.5" />}
+                <span>{confirmModal.confirmText || 'Подтвердить'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* USER PROFILE CARD PREVIEW MODAL */}
+      {/* ---------------------------------------------------- */}
+      {viewingUserModal && (
+        <UserProfileModal
+          user={viewingUserModal}
+          isOpen={!!viewingUserModal}
+          onClose={() => setViewingUserModal(null)}
+          currentUser={currentUser}
+          crewReviews={currentNotesConfig?.crewReviews || []}
+          trips={trips}
+          routes={routes}
+          onSelectRoute={onSelectRoute}
+          onOpenAuth={onOpenAuth}
+          onAddCrewReview={(newRev) => {
+            const updated = [newRev, ...(currentNotesConfig?.crewReviews || [])];
+            const newConfig = { ...currentNotesConfig, crewReviews: updated };
+            handleSetNotesConfig(newConfig);
+            TravelNotesSyncService.saveNotesConfig(newConfig).catch(console.warn);
+            showNotification('Отзыв успешно опубликован!');
+          }}
+          onDeleteCrewReview={(reviewId) => {
+            const updated = (currentNotesConfig?.crewReviews || []).filter(r => r.id !== reviewId);
+            const newConfig = { ...currentNotesConfig, crewReviews: updated };
+            handleSetNotesConfig(newConfig);
+            TravelNotesSyncService.saveNotesConfig(newConfig).catch(console.warn);
+            showNotification('Отзыв успешно удален.');
+          }}
+        />
+      )}
+
     </div>
   );
 };
+

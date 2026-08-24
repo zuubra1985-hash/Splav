@@ -79,6 +79,68 @@
         "registeredAt": { "type": "string", "maxLength": 100 }
       },
       "required": ["id", "name", "email"]
+    },
+    "FaqConfig": {
+      "title": "FaqConfig",
+      "description": "FAQ data configuration, safety handbook, and emergency communications",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "subtitle": { "type": "string", "maxLength": 500 },
+        "warningTitle": { "type": "string", "maxLength": 300 },
+        "warningText": { "type": "string", "maxLength": 2000 },
+        "sosTemplateText": { "type": "string", "maxLength": 1000 },
+        "cheatSheetContent": { "type": "string", "maxLength": 10000 },
+        "emergencyContacts": { "type": "array" },
+        "radioFrequencies": { "type": "array" },
+        "visualSignals": { "type": "array" },
+        "safetyGuides": { "type": "array" },
+        "faqQuestions": { "type": "array" },
+        "updatedAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "title"]
+    },
+    "TravelNotesConfig": {
+      "title": "TravelNotesConfig",
+      "description": "Travel notes, checklists, logbook trips, river ratings and crew reviews",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "notes": { "type": "array" },
+        "checklist": { "type": "array" },
+        "logbookTrips": { "type": "array" },
+        "riverReviews": { "type": "array" },
+        "crewReviews": { "type": "array" },
+        "updatedAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id"]
+    },
+    "Article": {
+      "title": "Article",
+      "description": "Expedition report, river guide, lotiya and tourist article",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "subtitle": { "type": "string", "maxLength": 300 },
+        "riverName": { "type": "string", "maxLength": 150 },
+        "region": { "type": "string", "maxLength": 50 },
+        "author": { "type": "string", "maxLength": 150 },
+        "authorRank": { "type": "string", "maxLength": 100 },
+        "authorAvatar": { "type": "string", "maxLength": 1000 },
+        "authorId": { "type": "string", "maxLength": 128 },
+        "authorEmail": { "type": "string", "maxLength": 150 },
+        "date": { "type": "string", "maxLength": 100 },
+        "readTimeMin": { "type": "number" },
+        "coverImage": { "type": "string", "maxLength": 500000 },
+        "summary": { "type": "string", "maxLength": 2000 },
+        "fullContent": { "type": "array" },
+        "tags": { "type": "array" },
+        "stats": { "type": "object" },
+        "gallery": { "type": "array" }
+      },
+      "required": ["id", "title", "riverName"]
     }
   },
   "firestore": {
@@ -93,6 +155,18 @@
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
       "description": "Tourist and admin user accounts"
+    },
+    "/articles/{articleId}": {
+      "schema": { "$ref": "#/entities/Article" },
+      "description": "Articles, expedition reports and river pilot guides"
+    },
+    "/faq/{docId}": {
+      "schema": { "$ref": "#/entities/FaqConfig" },
+      "description": "FAQ content, safety rules, emergency contacts and radio frequencies"
+    },
+    "/travel_notes/{docId}": {
+      "schema": { "$ref": "#/entities/TravelNotesConfig" },
+      "description": "Travel notes, equipment checklists, logbook trips, river and crew reviews"
     }
   }
 }

@@ -1,6 +1,6 @@
 export type Region = 'ALL' | 'ХМАО' | 'ЯНАО';
 
-export type VesselType = 'sup' | 'kayak' | 'catamaran' | 'motorboat' | 'raft';
+export type VesselType = 'sup' | 'kayak' | 'catamaran' | 'motorboat' | 'raft' | 'packraft';
 
 export type UserRole = 'user' | 'admin' | 'superadmin';
 
@@ -10,11 +10,28 @@ export interface AppUser {
   name: string;
   phone: string;
   role: UserRole;
+  password?: string;
   avatar?: string;
   city?: string;
   experienceLevel?: string;
   registeredAt: string;
   favoriteRouteIds: string[];
+  callsign?: string; // Позывной / Никнейм на воде
+  bio?: string; // О себе и походном стиле
+  fstrRank?: string; // Разряд, звание, сертификат (например: "Инструктор-проводник", "КМС", "II разряд")
+  favoriteRivers?: string[]; // Любимые реки (Собь, Тромъёган, Аган, Казым и др.)
+  vesselsOwned?: VesselType[]; // Личный флот (катамаран, байдарка, пакрафт, сап, моторка)
+  gearInventory?: string[]; // Снаряжение (спутниковый трекер, палатка 4-сезонная, бензопила, рация, костровое)
+  badges?: string[]; // Походные бейджи и знаки отличия
+  telegram?: string; // @username в Telegram
+  vk?: string; // Ссылка или id VK
+  isReadyForExpeditions?: boolean; // Статус "Готов к экспедициям / Ищу команду"
+  showContactsPublicly?: boolean; // Показывать ли телефон всем авторизованным туристам
+  emergencyContact?: {
+    name: string;
+    phone: string;
+    relation?: string;
+  };
 }
 
 export interface RouteCoordinate {
@@ -69,28 +86,15 @@ export interface RiverRoute {
     transportContacts?: string; // Телефоны местных перевозчиков / вездеходов
   };
   recommendedGear?: string[];
+  authorId?: string;
   authorName?: string;
   authorEmail?: string;
+  isPersonal?: boolean;
+  isPublic?: boolean;
   lastPassportRevision?: string;
   photos?: string[];
-}
-
-export interface HydroStation {
-  id: string;
-  name: string;
-  river: string;
-  region: 'ХМАО' | 'ЯНАО';
-  lat: number;
-  lng: number;
-  currentLevelCm: number;
-  change24hCm: number;
-  dangerLevelCm: number;
-  floodLevelCm: number;
-  normalLevelCm: number;
-  waterTempC: number;
-  iceCondition: string;
-  lastUpdated: string;
-  historicalTrend: { date: string; level: number }[];
+  wikipediaUrl?: string;
+  wikipediaExtract?: string;
 }
 
 export interface WeatherPoint {
@@ -276,3 +280,171 @@ export interface ArticleReport {
   stats: { distanceKm: number; days: number; vessel: string; bestMonth: string };
   gallery: { url: string; caption: string }[];
 }
+
+export interface TravelNote {
+  id: string;
+  userId?: string;
+  authorName?: string;
+  title: string;
+  riverName?: string;
+  category: 'future_idea' | 'gear_lessons' | 'secret_camp' | 'fishing_spots' | 'safety_warning' | 'trip_impressions';
+  season?: 'spring_highwater' | 'summer_warm' | 'summer_polar' | 'autumn_cold';
+  content: string;
+  tags?: string[];
+  isPinned?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface LogbookTrip {
+  id: string;
+  userId?: string;
+  tripId?: string;
+  riverName: string;
+  region: 'ХМАО' | 'ЯНАО';
+  year: number;
+  month: string;
+  durationDays: number;
+  distanceKm: number;
+  vessel: VesselType;
+  role: 'Капитан / Организатор' | 'Матрос / Гребец' | 'Штурман' | 'Костровой / Завпит' | 'Фотограф / Летописец';
+  status: 'completed' | 'planned' | 'evacuated';
+  personalNotes: string;
+  difficultyRating: string; // "I к.с.", "II к.с.", etc.
+  riverRating?: number; // 1 to 5 stars
+  photos?: string[];
+  createdAt: string;
+}
+
+export interface RiverReview {
+  id: string;
+  riverName: string;
+  routeId?: string;
+  userId?: string;
+  userName: string;
+  userAvatar?: string;
+  date: string;
+  ratingOverall: number; // 1 to 5
+  ratingScenery: number; // 1 to 5
+  ratingRapids: number; // 1 to 5
+  ratingCamps: number; // 1 to 5
+  ratingFishing: number; // 1 to 5
+  vesselUsed: VesselType;
+  comment: string;
+  adviceForOthers?: string;
+}
+
+export interface CrewReview {
+  id: string;
+  tripId?: string;
+  tripTitle?: string;
+  targetUserId: string;
+  targetUserName: string;
+  targetUserAvatar?: string;
+  authorUserId: string;
+  authorUserName: string;
+  authorAvatar?: string;
+  date: string;
+  ratingOverall: number; // 1 to 5
+  ratingPaddling: number; // 1 to 5
+  ratingCampSkills: number; // 1 to 5
+  ratingTeamwork: number; // 1 to 5
+  ratingPunctuality: number; // 1 to 5
+  tags: string[]; // e.g. "💪 Мощный гребец", "🔥 Мастер костра", "🍲 Шеф-повар", "🧭 Отличный штурман", "🎸 Душа компании"
+  comment: string;
+}
+
+export interface ChecklistItem {
+  id: string;
+  text: string;
+  category: 'life_safety' | 'camp_bivouac' | 'kitchen_fire' | 'repair_vessel' | 'firstaid_hygiene' | 'wildlife_bear' | 'hydro_clothes' | 'custom';
+  isChecked: boolean;
+  isCustom?: boolean;
+  notes?: string;
+  quantity?: string;
+}
+
+export interface FaqEmergencyContact {
+  id: string;
+  name: string;
+  phone: string;
+  description: string;
+  badge?: string;
+  isCritical?: boolean;
+}
+
+export interface FaqRadioFrequency {
+  id: string;
+  name: string;
+  frequency: string;
+  description: string;
+  tag: string;
+}
+
+export interface FaqVisualSignal {
+  id: string;
+  code: string;
+  meaning: string;
+  description: string;
+  color?: 'red' | 'green' | 'gray' | 'amber';
+}
+
+export interface FaqQuestionItem {
+  id: string;
+  question: string;
+  answer: string;
+  category: 'general' | 'permits_gims' | 'satellite_sos' | 'wildlife' | 'routes_logistics';
+  isPopular?: boolean;
+}
+
+export interface TravelNotesConfig {
+  id: string;
+  notes: TravelNote[];
+  checklist: ChecklistItem[];
+  logbookTrips: LogbookTrip[];
+  riverReviews: RiverReview[];
+  crewReviews: CrewReview[];
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface FaqDataConfig {
+  id: string;
+  title: string;
+  subtitle: string;
+  warningTitle: string;
+  warningText: string;
+  sosTemplateText: string;
+  cheatSheetContent: string;
+  emergencyContacts: FaqEmergencyContact[];
+  radioFrequencies: FaqRadioFrequency[];
+  visualSignals: FaqVisualSignal[];
+  safetyGuides: SafetyGuide[];
+  faqQuestions: FaqQuestionItem[];
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface SectionSyncInfo {
+  id: 'routes' | 'trips' | 'travel_notes' | 'articles' | 'faq' | 'users' | 'cloudsql';
+  title: string;
+  description: string;
+  category: 'cloud' | 'database';
+  collectionOrTable: string;
+  lastUploadedAt: string | null; // ISO string of last successful send to server
+  lastDownloadedAt: string | null; // ISO string of last successful fetch/subscription from server
+  status: 'synced' | 'syncing' | 'error' | 'idle';
+  itemCount: number;
+  lastError?: string;
+}
+
+export interface SyncLogEntry {
+  id: string;
+  timestamp: string; // ISO string
+  sectionId: 'routes' | 'trips' | 'travel_notes' | 'articles' | 'faq' | 'users' | 'cloudsql' | 'all';
+  sectionTitle: string;
+  direction: 'upload' | 'download' | 'error' | 'info';
+  message: string;
+  count?: number;
+}
+

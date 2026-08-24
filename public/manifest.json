@@ -1,0 +1,24 @@
+{
+  "name": "Splav86 — Сплавы и Водный Туризм ХМАО и ЯНАО",
+  "short_name": "Splav86",
+  "description": "Экспедиции, водные маршруты, поиск попутчиков и безопасность на реках Югры и Ямала",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F5F2ED",
+  "theme_color": "#2D5A27",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { 
   getFirestore, 
@@ -12,10 +12,11 @@ import {
   orderBy
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { CompanionTrip, RiverRoute, AppUser, ArticleReport, HydroStation, TripChatMessage, TripChatPresence } from './types';
+import { CompanionTrip, RiverRoute, AppUser, ArticleReport, TripChatMessage, TripChatPresence, FaqDataConfig, TravelNotesConfig } from './types';
+import { syncTracker } from './services/syncTracker';
 
-// 1. Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// 1. Initialize Firebase (Safe check to avoid duplicate-app error in HMR or re-renders)
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 
@@ -158,10 +159,15 @@ export const TripsSyncService = {
         snapshot.forEach((docSnap) => {
           remoteTrips.push(restoreFromFirestore<CompanionTrip>(docSnap.data()));
         });
+        syncTracker.recordDownload('trips', {
+          count: remoteTrips.length,
+          message: `Получено ${remoteTrips.length} походов из Firestore`
+        });
         onUpdate(remoteTrips);
       },
       (error) => {
         handleFirestoreError(error, OperationType.GET, 'trips');
+        syncTracker.recordError('trips', error instanceof Error ? error.message : String(error));
         if (onError) onError(error);
       }
     );
@@ -169,21 +175,31 @@ export const TripsSyncService = {
 
   async saveTrip(trip: CompanionTrip): Promise<void> {
     try {
+      syncTracker.recordSyncing('trips');
       const cleaned = cleanForFirestore(trip);
       const tripDoc = doc(db, 'trips', trip.id);
       await setDoc(tripDoc, cleaned, { merge: true });
+      syncTracker.recordUpload('trips', {
+        message: `Поход "${trip.riverName || trip.title}" сохранен в облако`
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `trips/${trip.id}`);
+      syncTracker.recordError('trips', error instanceof Error ? error.message : String(error));
       throw error;
     }
   },
 
   async removeTrip(tripId: string): Promise<void> {
     try {
+      syncTracker.recordSyncing('trips');
       const tripDoc = doc(db, 'trips', tripId);
       await deleteDoc(tripDoc);
+      syncTracker.recordUpload('trips', {
+        message: `Поход ${tripId} удален из облака`
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `trips/${tripId}`);
+      syncTracker.recordError('trips', error instanceof Error ? error.message : String(error));
       throw error;
     }
   }
@@ -203,10 +219,15 @@ export const RoutesSyncService = {
         snapshot.forEach((docSnap) => {
           remoteRoutes.push(restoreFromFirestore<RiverRoute>(docSnap.data()));
         });
+        syncTracker.recordDownload('routes', {
+          count: remoteRoutes.length,
+          message: `Получено ${remoteRoutes.length} маршрутов из Firestore`
+        });
         onUpdate(remoteRoutes);
       },
       (error) => {
         handleFirestoreError(error, OperationType.GET, 'routes');
+        syncTracker.recordError('routes', error instanceof Error ? error.message : String(error));
         if (onError) onError(error);
       }
     );
@@ -214,21 +235,31 @@ export const RoutesSyncService = {
 
   async saveRoute(route: RiverRoute): Promise<void> {
     try {
+      syncTracker.recordSyncing('routes');
       const cleaned = cleanForFirestore(route);
       const routeDoc = doc(db, 'routes', route.id);
       await setDoc(routeDoc, cleaned, { merge: true });
+      syncTracker.recordUpload('routes', {
+        message: `Маршрут "${route.name}" успешно загружен на сервер`
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `routes/${route.id}`);
+      syncTracker.recordError('routes', error instanceof Error ? error.message : String(error));
       throw error;
     }
   },
 
   async removeRoute(routeId: string): Promise<void> {
     try {
+      syncTracker.recordSyncing('routes');
       const routeDoc = doc(db, 'routes', routeId);
       await deleteDoc(routeDoc);
+      syncTracker.recordUpload('routes', {
+        message: `Маршрут ${routeId} удален с сервера`
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `routes/${routeId}`);
+      syncTracker.recordError('routes', error instanceof Error ? error.message : String(error));
       throw error;
     }
   }
@@ -248,10 +279,15 @@ export const UsersSyncService = {
         snapshot.forEach((docSnap) => {
           remoteUsers.push(restoreFromFirestore<AppUser>(docSnap.data()));
         });
+        syncTracker.recordDownload('users', {
+          count: remoteUsers.length,
+          message: `Синхронизировано ${remoteUsers.length} пользователей`
+        });
         onUpdate(remoteUsers);
       },
       (error) => {
         handleFirestoreError(error, OperationType.GET, 'users');
+        syncTracker.recordError('users', error instanceof Error ? error.message : String(error));
         if (onError) onError(error);
       }
     );
@@ -259,21 +295,31 @@ export const UsersSyncService = {
 
   async saveUser(user: AppUser): Promise<void> {
     try {
+      syncTracker.recordSyncing('users');
       const cleaned = cleanForFirestore(user);
       const userDoc = doc(db, 'users', user.id);
       await setDoc(userDoc, cleaned, { merge: true });
+      syncTracker.recordUpload('users', {
+        message: `Профиль "${user.name || user.email}" сохранен на сервере`
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${user.id}`);
+      syncTracker.recordError('users', error instanceof Error ? error.message : String(error));
       throw error;
     }
   },
 
   async removeUser(userId: string): Promise<void> {
     try {
+      syncTracker.recordSyncing('users');
       const userDoc = doc(db, 'users', userId);
       await deleteDoc(userDoc);
+      syncTracker.recordUpload('users', {
+        message: `Пользователь ${userId} удален с сервера`
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `users/${userId}`);
+      syncTracker.recordError('users', error instanceof Error ? error.message : String(error));
       throw error;
     }
   }
@@ -293,10 +339,15 @@ export const ArticlesSyncService = {
         snapshot.forEach((docSnap) => {
           remoteArticles.push(restoreFromFirestore<ArticleReport>(docSnap.data()));
         });
+        syncTracker.recordDownload('articles', {
+          count: remoteArticles.length,
+          message: `Получено ${remoteArticles.length} статей из Firestore`
+        });
         onUpdate(remoteArticles);
       },
       (error) => {
         handleFirestoreError(error, OperationType.GET, 'articles');
+        syncTracker.recordError('articles', error instanceof Error ? error.message : String(error));
         if (onError) onError(error);
       }
     );
@@ -304,72 +355,37 @@ export const ArticlesSyncService = {
 
   async saveArticle(article: ArticleReport): Promise<void> {
     try {
+      syncTracker.recordSyncing('articles');
       const cleaned = cleanForFirestore(article);
       const artDoc = doc(db, 'articles', article.id);
       await setDoc(artDoc, cleaned, { merge: true });
+      syncTracker.recordUpload('articles', {
+        message: `Статья "${article.title}" сохранена в облако`
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `articles/${article.id}`);
+      syncTracker.recordError('articles', error instanceof Error ? error.message : String(error));
       throw error;
     }
   },
 
   async removeArticle(articleId: string): Promise<void> {
     try {
+      syncTracker.recordSyncing('articles');
       const artDoc = doc(db, 'articles', articleId);
       await deleteDoc(artDoc);
+      syncTracker.recordUpload('articles', {
+        message: `Статья ${articleId} удалена из облака`
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `articles/${articleId}`);
+      syncTracker.recordError('articles', error instanceof Error ? error.message : String(error));
       throw error;
     }
   }
 };
 
-// 8. Firestore Hydro Stations Sync Service
-export const HydroSyncService = {
-  subscribeToHydro(
-    onUpdate: (stations: HydroStation[]) => void,
-    onError?: (err: unknown) => void
-  ) {
-    const hydroCol = collection(db, 'hydro');
-    return onSnapshot(
-      hydroCol,
-      (snapshot) => {
-        const remoteStations: HydroStation[] = [];
-        snapshot.forEach((docSnap) => {
-          remoteStations.push(restoreFromFirestore<HydroStation>(docSnap.data()));
-        });
-        onUpdate(remoteStations);
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.GET, 'hydro');
-        if (onError) onError(error);
-      }
-    );
-  },
-
-  async saveHydroStation(station: HydroStation): Promise<void> {
-    try {
-      const cleaned = cleanForFirestore(station);
-      const hydroDoc = doc(db, 'hydro', station.id);
-      await setDoc(hydroDoc, cleaned, { merge: true });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `hydro/${station.id}`);
-      throw error;
-    }
-  },
-
-  async removeHydroStation(stationId: string): Promise<void> {
-    try {
-      const hydroDoc = doc(db, 'hydro', stationId);
-      await deleteDoc(hydroDoc);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `hydro/${stationId}`);
-      throw error;
-    }
-  }
-};
-
-// 9. Real-time Instant Trip Chat & Live Presence Sync Service
+// 8. Real-time Instant Trip Chat & Live Presence Sync Service
 export const TripChatSyncService = {
   // Subscribe to live messages of a specific trip in real time
   subscribeToTripMessages(
@@ -486,3 +502,112 @@ export const TripChatSyncService = {
     }
   }
 };
+
+// 9. Firestore FAQ, Safety Guides & Emergency Directory Sync Service
+export const FaqSyncService = {
+  subscribeToFaq(
+    onUpdate: (faqData: FaqDataConfig) => void,
+    onError?: (err: unknown) => void
+  ) {
+    const faqDocRef = doc(db, 'faq', 'faq_main_config');
+    return onSnapshot(
+      faqDocRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = restoreFromFirestore<FaqDataConfig>(snapshot.data());
+          syncTracker.recordDownload('faq', {
+            count: (data.safetyGuides || []).length + (data.faqQuestions || []).length,
+            message: `Справочник и FAQ обновлены из облака`
+          });
+          onUpdate(data);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'faq/faq_main_config');
+        syncTracker.recordError('faq', error instanceof Error ? error.message : String(error));
+        if (onError) onError(error);
+      }
+    );
+  },
+
+  async saveFaq(faqData: FaqDataConfig): Promise<void> {
+    try {
+      syncTracker.recordSyncing('faq');
+      const cleaned = cleanForFirestore({
+        ...faqData,
+        id: 'faq_main_config',
+        updatedAt: new Date().toISOString()
+      });
+      const faqDocRef = doc(db, 'faq', 'faq_main_config');
+      await setDoc(faqDocRef, cleaned, { merge: true });
+      syncTracker.recordUpload('faq', {
+        count: (faqData.safetyGuides || []).length + (faqData.faqQuestions || []).length,
+        message: `Справочник безопасности и FAQ сохранены на сервере`
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'faq/faq_main_config');
+      syncTracker.recordError('faq', error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
+};
+
+// 10. Firestore Travel Notes, Checklist, Logbook & 5-Star Reviews Sync Service
+export const TravelNotesSyncService = {
+  subscribeToNotes(
+    onUpdate: (config: TravelNotesConfig) => void,
+    onError?: (err: unknown) => void
+  ) {
+    const notesDocRef = doc(db, 'travel_notes', 'notes_main_config');
+    return onSnapshot(
+      notesDocRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = restoreFromFirestore<TravelNotesConfig>(snapshot.data());
+          const totalItems = (data.notes || []).length + (data.checklist || []).length + (data.logbookTrips || []).length + (data.riverReviews || []).length + (data.crewReviews || []).length;
+          syncTracker.recordDownload('travel_notes', {
+            count: totalItems,
+            message: `Путевые заметки & бортовой журнал получены из облака (${totalItems} эл.)`
+          });
+          onUpdate(data);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'travel_notes/notes_main_config');
+        syncTracker.recordError('travel_notes', error instanceof Error ? error.message : String(error));
+        if (onError) onError(error);
+      }
+    );
+  },
+
+  subscribeToNotesConfig(
+    onUpdate: (config: TravelNotesConfig) => void,
+    onError?: (err: unknown) => void
+  ) {
+    return this.subscribeToNotes(onUpdate, onError);
+  },
+
+  async saveNotesConfig(config: TravelNotesConfig): Promise<void> {
+    try {
+      syncTracker.recordSyncing('travel_notes');
+      const totalItems = (config.notes || []).length + (config.checklist || []).length + (config.logbookTrips || []).length + (config.riverReviews || []).length + (config.crewReviews || []).length;
+      const cleaned = cleanForFirestore({
+        ...config,
+        id: 'notes_main_config',
+        updatedAt: new Date().toISOString()
+      });
+      const notesDocRef = doc(db, 'travel_notes', 'notes_main_config');
+      await setDoc(notesDocRef, cleaned, { merge: true });
+      syncTracker.recordUpload('travel_notes', {
+        count: totalItems,
+        message: `Путевые заметки, чек-листы и отзывы (${totalItems} эл.) сохранены в облаке`
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'travel_notes/notes_main_config');
+      syncTracker.recordError('travel_notes', error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
+};
+
+

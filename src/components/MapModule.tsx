@@ -26,7 +26,8 @@ import {
   CheckCircle2,
   X,
   TrendingUp,
-  Share2
+  Share2,
+  Heart
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { parseGpxFile, generateGpxString, ParsedGpxResult } from '../utils/gpxParser';
@@ -41,6 +42,7 @@ interface MapModuleProps {
   onOpenRouteDetails: (route: RiverRoute) => void;
   onAddRoute?: (newRoute: RiverRoute) => void;
   onOpenPassportEditor?: (route?: RiverRoute) => void;
+  onToggleFavorite?: (routeId: string) => void;
 }
 
 // Helper to safely extract [lat, lng] array from any coordinate representation
@@ -60,7 +62,8 @@ export const MapModule: React.FC<MapModuleProps> = ({
   onSelectRoute,
   onOpenRouteDetails,
   onAddRoute,
-  onOpenPassportEditor
+  onOpenPassportEditor,
+  onToggleFavorite
 }) => {
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'superadmin';
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -70,8 +73,8 @@ export const MapModule: React.FC<MapModuleProps> = ({
   const importedGpxLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const gpxFileInputRef = useRef<HTMLInputElement>(null);
 
-  // Mobile View Switcher: 'list' or 'map'
-  const [mobileView, setMobileView] = useState<'map' | 'list'>('map');
+  // Mobile View Switcher: 'list' (default on mobile) or 'map'
+  const [mobileView, setMobileView] = useState<'map' | 'list'>('list');
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -665,7 +668,7 @@ export const MapModule: React.FC<MapModuleProps> = ({
 
   return (
     <div 
-      className="relative w-full h-[calc(100vh-64px)] sm:h-[calc(100vh-80px)] flex flex-col md:flex-row overflow-hidden bg-[#F5F2ED]"
+      className="relative w-full h-[calc(100dvh-64px-60px)] md:h-[calc(100vh-80px)] flex flex-col md:flex-row overflow-hidden bg-[#F5F2ED]"
       onDragOver={(e) => {
         e.preventDefault();
         setIsDraggingFile(true);
@@ -702,40 +705,40 @@ export const MapModule: React.FC<MapModuleProps> = ({
       )}
       
       {/* Mobile Top View Switcher (List vs Map) */}
-      <div className="md:hidden flex items-center justify-between p-2.5 bg-white border-b border-[#E5E0D8] z-20 shrink-0">
+      <div className="md:hidden flex items-center justify-between p-2 bg-white border-b border-[#E5E0D8] z-20 shrink-0">
         <div className="flex items-center gap-1 bg-[#F9F7F4] p-1 rounded-xl border border-[#EEEBE6] w-full">
           <button
-            onClick={() => setMobileView('map')}
-            className={`flex-1 py-1.5 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all ${
-              mobileView === 'map'
-                ? 'bg-[#2D5A27] text-white shadow-xs'
-                : 'text-[#6B665F]'
-            }`}
-          >
-            <MapIcon className="w-3.5 h-3.5" />
-            <span>Интерактивная карта</span>
-          </button>
-          <button
             onClick={() => setMobileView('list')}
-            className={`flex-1 py-1.5 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+            className={`flex-1 py-2 text-xs font-black rounded-lg flex items-center justify-center gap-1.5 transition-all ${
               mobileView === 'list'
                 ? 'bg-[#2D5A27] text-white shadow-xs'
-                : 'text-[#6B665F]'
+                : 'text-[#6B665F] hover:text-[#2D5A27]'
             }`}
           >
-            <List className="w-3.5 h-3.5" />
+            <List className="w-4 h-4" />
             <span>Каталог рек ({filteredList.length})</span>
+          </button>
+          <button
+            onClick={() => setMobileView('map')}
+            className={`flex-1 py-2 text-xs font-black rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+              mobileView === 'map'
+                ? 'bg-[#2D5A27] text-white shadow-xs'
+                : 'text-[#6B665F] hover:text-[#2D5A27]'
+            }`}
+          >
+            <MapIcon className="w-4 h-4" />
+            <span>Карта</span>
           </button>
         </div>
       </div>
 
       {/* Routes Explorer Sidebar (Desktop: always visible / Mobile: conditional based on mobileView) */}
-      <aside className={`w-full md:w-[380px] lg:w-[420px] bg-white border-r border-[#E5E0D8] flex flex-col z-10 shadow-sm shrink-0 ${
-        mobileView === 'list' ? 'flex flex-1 pb-20 md:pb-0' : 'hidden md:flex'
+      <aside className={`w-full md:w-[380px] lg:w-[420px] bg-white border-r border-[#E5E0D8] flex flex-col z-10 shadow-sm shrink-0 min-h-0 ${
+        mobileView === 'list' ? 'flex flex-1 h-full' : 'hidden md:flex'
       }`}>
         
         {/* Search & Filter Header */}
-        <div className="p-3 sm:p-4 border-b border-[#E5E0D8] space-y-2.5 bg-[#F9F7F4]">
+        <div className="p-3 sm:p-4 border-b border-[#E5E0D8] space-y-2.5 bg-[#F9F7F4] shrink-0">
           <div className="relative">
             <Search className="absolute left-3 top-2.5 w-4 h-4 text-[#8B7E6D]" />
             <input
@@ -803,92 +806,158 @@ export const MapModule: React.FC<MapModuleProps> = ({
           </div>
         </div>
 
-        {/* Routes List */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {/* Routes List Container (Scrollable) */}
+        <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 overscroll-contain touch-pan-y pb-6 md:pb-4">
           <div className="flex items-center justify-between px-1 text-xs text-[#8B7E6D] font-bold uppercase tracking-wider">
-            <span>Маршруты по руслам ({filteredList.length})</span>
-            <span>ФСТР / Русло</span>
+            <span>Список маршрутов ({filteredList.length})</span>
           </div>
 
-          {filteredList.map((route) => {
-            const isSelected = selectedRoute?.id === route.id;
-
-            return (
-              <div
-                key={route.id}
+          {filteredList.length === 0 ? (
+            <div className="p-8 text-center bg-[#F9F7F4] rounded-2xl border border-dashed border-[#E5E0D8] my-4">
+              <Compass className="w-8 h-8 text-[#8B7E6D] mx-auto mb-2 opacity-50" />
+              <p className="text-xs font-bold text-[#6B665F]">По вашему запросу маршрутов не найдено</p>
+              <button
                 onClick={() => {
-                  onSelectRoute(route);
-                  if (window.innerWidth < 768) {
-                    setMobileView('map');
-                  }
+                  setSearchQuery('');
+                  setSelectedVessel('all');
+                  setSelectedDifficulty('all');
                 }}
-                className={`p-3.5 rounded-2xl border transition-all cursor-pointer relative group ${
-                  isSelected
-                    ? 'bg-[#E8F1E7]/40 border-[#2D5A27] ring-1 ring-[#2D5A27]/30 shadow-xs'
-                    : 'bg-[#F9F7F4] border-[#EEEBE6] hover:bg-white hover:border-[#D9D1C5]'
-                }`}
+                className="mt-2 text-xs font-bold text-[#2D5A27] hover:underline"
               >
-                {/* Header row */}
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-[#E8F1E7] text-[#2D5A27] border border-[#CDE0CC]">
-                        {route.region}
-                      </span>
-                      <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#2D5A27] text-white">
-                        {route.fstrCategory}
-                      </span>
-                      <span className="text-[10px] text-[#8B7E6D]">
-                        {route.intlClass}
-                      </span>
+                Сбросить фильтры
+              </button>
+            </div>
+          ) : (
+            filteredList.map((route) => {
+              const isSelected = selectedRoute?.id === route.id;
+
+              return (
+                <div
+                  key={route.id}
+                  onClick={() => {
+                    onSelectRoute(route);
+                  }}
+                  className={`p-3.5 rounded-2xl border transition-all cursor-pointer relative group ${
+                    isSelected
+                      ? 'bg-[#E8F1E7]/50 border-[#2D5A27] ring-1 ring-[#2D5A27]/30 shadow-xs'
+                      : 'bg-[#F9F7F4] border-[#EEEBE6] hover:bg-white hover:border-[#D9D1C5]'
+                  }`}
+                >
+                  {/* Header row */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-[#E8F1E7] text-[#2D5A27] border border-[#CDE0CC]">
+                          {route.region}
+                        </span>
+                        <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#2D5A27] text-white">
+                          {route.fstrCategory}
+                        </span>
+                        <span className="text-[10px] text-[#8B7E6D]">
+                          {route.intlClass}
+                        </span>
+                      </div>
+                      <h3 className="text-sm font-bold text-[#1A1F1A] mt-1 group-hover:text-[#2D5A27] transition-colors">
+                        {route.name}
+                      </h3>
                     </div>
-                    <h3 className="text-sm font-bold text-[#1A1F1A] mt-1 group-hover:text-[#2D5A27] transition-colors">
-                      {route.name}
-                    </h3>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-xs font-black text-[#2D5A27]">
+                        {route.lengthKm} км
+                      </span>
+                      {currentUser && onToggleFavorite && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleFavorite(route.id);
+                          }}
+                          className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                            currentUser.favoriteRouteIds?.includes(route.id)
+                              ? 'text-[#E54B4B] hover:text-[#B91C1C] hover:bg-[#FDE8E8]'
+                              : 'text-[#8B7E6D]/50 hover:text-[#E54B4B] hover:bg-[#F5F2EC]'
+                          }`}
+                          title={
+                            currentUser.favoriteRouteIds?.includes(route.id)
+                              ? 'Убрать из избранного'
+                              : 'Добавить в избранное'
+                          }
+                        >
+                          <Heart
+                            className={`w-3.5 h-3.5 ${
+                              currentUser.favoriteRouteIds?.includes(route.id)
+                                ? 'fill-[#E54B4B]'
+                                : ''
+                            }`}
+                          />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
-                  <span className="text-xs font-black text-[#2D5A27] shrink-0">
-                    {route.lengthKm} км
-                  </span>
+                  <p className="text-xs text-[#6B665F] mt-1.5 line-clamp-2 leading-relaxed">
+                    {route.shortDesc}
+                  </p>
+
+                  {/* Key stats & action buttons row */}
+                  <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-[#E5E0D8]/60 text-[11px] text-[#8B7E6D]">
+                    <div className="flex items-center gap-2">
+                      <span>⏱ {route.durationDays} дн.</span>
+                      <span>🌊 {route.avgFlowSpeedKmh} км/ч</span>
+                      <span>⛰️ {route.elevationGainM} м</span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectRoute(route);
+                          setMobileView('map');
+                        }}
+                        className="px-2.5 py-1.5 bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] font-bold text-[11px] rounded-xl border border-[#CDE0CC] flex items-center gap-1 transition-all"
+                        title="Показать на карте"
+                      >
+                        <MapIcon className="w-3 h-3" />
+                        <span className="hidden sm:inline">Карта</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectRoute(route);
+                          onOpenRouteDetails(route);
+                        }}
+                        className="px-3 py-1.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold text-[11px] rounded-xl shadow-xs flex items-center gap-1 transition-all"
+                      >
+                        <span>Паспорт</span>
+                        <ChevronRight className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
-
-                <p className="text-xs text-[#6B665F] mt-1.5 line-clamp-2 leading-relaxed">
-                  {route.shortDesc}
-                </p>
-
-                {/* Key stats row */}
-                <div className="flex items-center justify-between mt-3 pt-2 border-t border-[#E5E0D8]/60 text-[11px] text-[#8B7E6D]">
-                  <div className="flex items-center gap-2.5">
-                    <span>⏱ {route.durationDays} дн.</span>
-                    <span>🌊 {route.avgFlowSpeedKmh} км/ч</span>
-                    <span>⛰️ {route.elevationGainM} м</span>
-                  </div>
-
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelectRoute(route);
-                        onOpenRouteDetails(route);
-                      }}
-                      className="px-3 py-1.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold text-[11px] rounded-xl shadow-xs flex items-center gap-1 transition-all"
-                    >
-                      Локация
-                      <ChevronRight className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
 
       </aside>
 
       {/* Main Leaflet Map Viewport (Mobile: conditional based on mobileView / Desktop: full flex-1) */}
-      <div className={`flex-1 relative h-full ${mobileView === 'list' ? 'hidden md:block' : 'block'}`}>
+      <div className={`flex-1 relative h-full min-h-0 ${mobileView === 'list' ? 'hidden md:block' : 'block'}`}>
         
         <div ref={mapContainerRef} className="w-full h-full" />
+
+        {/* Floating Mobile Switch to List Button */}
+        <button
+          type="button"
+          onClick={() => setMobileView('list')}
+          className="md:hidden absolute bottom-5 left-4 z-[1000] px-4 py-2.5 bg-[#2D5A27] text-white font-black text-xs rounded-2xl shadow-xl flex items-center gap-2 border border-white/20 active:scale-95 transition-all"
+        >
+          <List className="w-4 h-4" />
+          <span>К списку маршрутов ({filteredList.length})</span>
+        </button>
 
         {/* Floating Top-Right Map Controls */}
         <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-[1000] flex items-center gap-2">

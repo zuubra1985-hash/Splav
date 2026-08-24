@@ -58,88 +58,113 @@ export const ArticlesModule: React.FC<ArticlesModuleProps> = ({
       </div>
 
       {/* Articles Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredArticles.map((art) => (
-          <div
-            key={art.id}
-            onClick={() => setSelectedArticle(art)}
-            className="bg-white border border-[#E5E0D8] rounded-[28px] overflow-hidden shadow-sm flex flex-col justify-between hover:border-[#D9D1C5] hover:shadow-md cursor-pointer transition-all group"
-          >
-            {/* Cover Image */}
-            <div className="relative h-48 w-full overflow-hidden">
-              <img
-                src={art.coverImage}
-                alt={art.title}
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-              
-              <div className="absolute top-3 left-3 flex items-center gap-1.5">
-                <span className="text-[10px] font-bold uppercase px-2.5 py-1 rounded-full bg-white/95 text-[#2D5A27] shadow-sm backdrop-blur-md">
-                  {art.region} • р. {art.riverName}
-                </span>
-              </div>
-            </div>
-
-            {/* Article Content Preview */}
-            <div className="p-5 space-y-3 flex-1 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center gap-3 text-[11px] text-[#8B7E6D] mb-1.5">
-                  <span className="flex items-center gap-1">
-                    <Calendar className="w-3 h-3 text-[#2D5A27]" />
-                    {art.date}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Clock className="w-3 h-3 text-[#8B7E6D]" />
-                    {art.readTimeMin} мин чтения
-                  </span>
-                </div>
-
-                <h3 className="text-sm sm:text-base font-bold text-[#1A1F1A] leading-snug group-hover:text-[#2D5A27] transition-colors">
-                  {art.title}
-                </h3>
-
-                <p className="text-xs text-[#6B665F] line-clamp-2 mt-2 leading-relaxed">
-                  {art.summary}
-                </p>
-              </div>
-
-              {/* Author & Read More */}
-              <div className="pt-3 border-t border-[#E5E0D8] flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-full bg-[#E8F1E7] border border-[#CDE0CC] flex items-center justify-center text-[10px] font-bold text-[#2D5A27]">
-                    {art.author.slice(0, 1)}
-                  </div>
-                  <span className="text-xs text-[#2D332D] font-medium truncate max-w-[110px] sm:max-w-[130px]">{art.author}</span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {isAdmin && onOpenArticleEditor && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenArticleEditor(art);
-                      }}
-                      className="p-1.5 bg-[#E8F1E7] hover:bg-[#D4E7D3] text-[#2D5A27] rounded-lg transition-colors"
-                      title="Редактировать статью"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-
-                  <span className="text-xs font-bold text-[#2D5A27] group-hover:translate-x-0.5 transition-transform flex items-center gap-0.5">
-                    Читать
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </span>
-                </div>
-              </div>
-
-            </div>
-
+      {filteredArticles.length === 0 ? (
+        <div className="bg-white border border-[#E5E0D8] rounded-[28px] p-12 text-center shadow-sm space-y-4 my-6">
+          <div className="w-16 h-16 rounded-2xl bg-[#F9F7F4] border border-[#E5E0D8] flex items-center justify-center mx-auto text-[#8B7E6D]">
+            <BookOpen className="w-8 h-8 opacity-60 text-[#2D5A27]" />
           </div>
-        ))}
-      </div>
+          <div className="max-w-md mx-auto space-y-1.5">
+            <h3 className="text-base font-bold text-[#1A1F1A]">В данном разделе пока нет статей</h3>
+            <p className="text-xs text-[#6B665F] leading-relaxed">
+              Раздел готов к наполнению авторскими отчетами, лоциями и описаниями водных маршрутов.
+            </p>
+          </div>
+          {isAdmin && onOpenArticleEditor && (
+            <div className="pt-2">
+              <button
+                onClick={() => onOpenArticleEditor()}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold text-xs rounded-xl shadow-xs transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Написать первую статью</span>
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredArticles.map((art) => (
+            <div
+              key={art.id}
+              onClick={() => setSelectedArticle(art)}
+              className="bg-white border border-[#E5E0D8] rounded-[28px] overflow-hidden shadow-sm flex flex-col justify-between hover:border-[#D9D1C5] hover:shadow-md cursor-pointer transition-all group"
+            >
+              {/* Cover Image */}
+              <div className="relative h-48 w-full overflow-hidden">
+                <img
+                  src={art.coverImage}
+                  alt={art.title}
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                
+                <div className="absolute top-3 left-3 flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold uppercase px-2.5 py-1 rounded-full bg-white/95 text-[#2D5A27] shadow-sm backdrop-blur-md">
+                    {art.region} • р. {art.riverName}
+                  </span>
+                </div>
+              </div>
+
+              {/* Article Content Preview */}
+              <div className="p-5 space-y-3 flex-1 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-3 text-[11px] text-[#8B7E6D] mb-1.5">
+                    <span className="flex items-center gap-1">
+                      <Calendar className="w-3 h-3 text-[#2D5A27]" />
+                      {art.date}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-[#8B7E6D]" />
+                      {art.readTimeMin} мин чтения
+                    </span>
+                  </div>
+
+                  <h3 className="text-sm sm:text-base font-bold text-[#1A1F1A] leading-snug group-hover:text-[#2D5A27] transition-colors">
+                    {art.title}
+                  </h3>
+
+                  <p className="text-xs text-[#6B665F] line-clamp-2 mt-2 leading-relaxed">
+                    {art.summary}
+                  </p>
+                </div>
+
+                {/* Author & Read More */}
+                <div className="pt-3 border-t border-[#E5E0D8] flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-full bg-[#E8F1E7] border border-[#CDE0CC] flex items-center justify-center text-[10px] font-bold text-[#2D5A27]">
+                      {art.author.slice(0, 1)}
+                    </div>
+                    <span className="text-xs text-[#2D332D] font-medium truncate max-w-[110px] sm:max-w-[130px]">{art.author}</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {isAdmin && onOpenArticleEditor && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenArticleEditor(art);
+                        }}
+                        className="p-1.5 bg-[#E8F1E7] hover:bg-[#D4E7D3] text-[#2D5A27] rounded-lg transition-colors"
+                        title="Редактировать статью"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
+                    <span className="text-xs font-bold text-[#2D5A27] group-hover:translate-x-0.5 transition-transform flex items-center gap-0.5">
+                      Читать
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </span>
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Full Article Reader Modal */}
       {selectedArticle && (

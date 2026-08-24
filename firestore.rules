@@ -37,6 +37,16 @@ service cloud.firestore {
       allow read, write, create, update, delete: if isValidId(stationId);
     }
 
+    // FAQ, Safety Handbook, Radio & Emergency Communications
+    match /faq/{docId} {
+      allow read, write, create, update, delete: if isValidId(docId);
+    }
+
+    // Travel Notes, Checklists, Logbook & 5-Star Reviews
+    match /travel_notes/{docId} {
+      allow read, write, create, update, delete: if isValidId(docId);
+    }
+
     // Catch-all for subcollections or nested paths
     match /{document=**} {
       allow read, write: if true;

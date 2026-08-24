@@ -20,7 +20,10 @@ import {
   ShieldCheck, 
   User, 
   Phone,
-  Camera
+  Camera,
+  BookOpen,
+  ExternalLink,
+  Heart
 } from 'lucide-react';
 import { generateGpxString } from '../utils/gpxParser';
 
@@ -30,6 +33,7 @@ interface RouteDetailModalProps {
   onClose: () => void;
   onSelectForMchs: (route: RiverRoute) => void;
   onEditRoute?: (route: RiverRoute) => void;
+  onToggleFavorite?: (routeId: string) => void;
 }
 
 export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
@@ -37,12 +41,15 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
   currentUser,
   onClose,
   onSelectForMchs,
-  onEditRoute
+  onEditRoute,
+  onToggleFavorite
 }) => {
   const isAdmin = currentUser?.role === 'admin' || 
                   currentUser?.role === 'superadmin' || 
                   currentUser?.email?.toLowerCase() === 'zuubra1985@gmail.com' || 
                   currentUser?.email?.toLowerCase() === 'novichek2@narod.ru';
+
+  const isFavorite = Boolean(currentUser?.favoriteRouteIds?.includes(route.id));
 
   // Sample elevation points to maximum 16 points to prevent freezing/lag on GPX tracks with thousands of points
   const displayElevationPoints = React.useMemo(() => {
@@ -96,6 +103,22 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
           <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
           
           <div className="absolute top-4 right-4 flex items-center gap-2">
+            {currentUser && onToggleFavorite && (
+              <button
+                type="button"
+                onClick={() => onToggleFavorite(route.id)}
+                className={`px-3 py-2 text-xs font-black rounded-xl backdrop-blur-md transition-all shadow-md flex items-center gap-1.5 cursor-pointer ${
+                  isFavorite
+                    ? 'bg-[#E54B4B] hover:bg-[#D43F3F] text-white'
+                    : 'bg-white/95 hover:bg-white text-[#E54B4B]'
+                }`}
+                title={isFavorite ? 'Убрать из избранного' : 'Добавить в избранное'}
+              >
+                <Heart className={`w-3.5 h-3.5 ${isFavorite ? 'fill-white' : 'fill-[#E54B4B]'}`} />
+                <span className="hidden sm:inline">{isFavorite ? 'В избранном' : 'В избранное'}</span>
+              </button>
+            )}
+
             {onEditRoute && (
               <button
                 onClick={() => onEditRoute(route)}
@@ -205,6 +228,38 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
               {route.description || route.shortDesc}
             </p>
           </div>
+
+          {/* Wikipedia Geo Reference Block (If available) */}
+          {(route.wikipediaUrl || route.wikipediaExtract) && (
+            <div className="p-4 bg-gradient-to-br from-[#F4F8F3] to-[#EAEFE9] rounded-2xl border border-[#CDE0CC] space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-[#2D5A27] text-white flex items-center justify-center">
+                    <BookOpen className="w-3.5 h-3.5" />
+                  </div>
+                  <span className="text-xs font-black text-[#1A1F1A] uppercase tracking-wide">
+                    Географическая справка (Википедия)
+                  </span>
+                </div>
+                {route.wikipediaUrl && (
+                  <a
+                    href={route.wikipediaUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-[#2D5A27] hover:text-[#1F3E1B] font-bold flex items-center gap-1 hover:underline"
+                  >
+                    <span>Читать статью</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </div>
+              {route.wikipediaExtract && (
+                <p className="text-xs text-[#4A443E] leading-relaxed italic bg-white/70 p-3 rounded-xl border border-[#CDE0CC]/50">
+                  «{route.wikipediaExtract}»
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Highlights & Warnings */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
