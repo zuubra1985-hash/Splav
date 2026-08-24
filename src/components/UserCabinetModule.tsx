@@ -815,9 +815,11 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
   const favoriteRoutes = routes.filter((r) => currentUser.favoriteRouteIds?.includes(r.id));
   const myCustomRoutes = routes.filter((r) => {
     if (!currentUser) return false;
-    const authorMatches = (r.authorId && r.authorId === currentUser.id) ||
-      (r.authorEmail && r.authorEmail.toLowerCase() === currentUser.email.toLowerCase());
-    return r.isPersonal || authorMatches;
+    const curEmail = (currentUser.email || '').trim().toLowerCase();
+    const authorEmail = (r.authorEmail || '').trim().toLowerCase();
+    const isMyAuthorId = Boolean(r.authorId && r.authorId === currentUser.id);
+    const isMyAuthorEmail = Boolean(authorEmail && curEmail && authorEmail === curEmail);
+    return isMyAuthorId || isMyAuthorEmail;
   });
 
   // --- Handlers for Routes ---
