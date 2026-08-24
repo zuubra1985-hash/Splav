@@ -8,15 +8,13 @@ import {
   MapPin, 
   CheckCircle2, 
   X, 
-  Sparkles, 
   LogIn, 
   UserPlus, 
   AlertCircle, 
-  Send, 
   Globe, 
-  Laptop, 
-  Smartphone,
-  Info
+  Send,
+  HelpCircle,
+  KeyRound
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { initTelegramWebApp, TelegramTourist, isTelegramWebApp } from '../utils/telegramWebApp';
@@ -36,26 +34,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   registeredUsers,
   onRegisterUser
 }) => {
-  const [authMode, setAuthMode] = useState<'telegram' | 'login' | 'register'>('login');
+  // Modes: 'login' (Вход по Email) or 'register' (Регистрация по Email)
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [tgTourist, setTgTourist] = useState<TelegramTourist | null>(null);
   const [isInTelegram, setIsInTelegram] = useState<boolean>(false);
   
   // Login fields
-  const [loginIdentifier, setLoginIdentifier] = useState<string>(''); // Email or @telegram / ID
+  const [loginEmail, setLoginEmail] = useState<string>(''); // Email (primary) or @telegram
   const [loginPassword, setLoginPassword] = useState<string>('');
 
-  // Register fields
+  // Register fields (Strict Email-first registration)
   const [regName, setRegName] = useState<string>('');
   const [regEmail, setRegEmail] = useState<string>('');
   const [regPhone, setRegPhone] = useState<string>('');
   const [regCity, setRegCity] = useState<string>('Сургут');
   const [regPassword, setRegPassword] = useState<string>('');
+  const [regConfirmPassword, setRegConfirmPassword] = useState<string>('');
   const [regExperience, setRegExperience] = useState<string>('Любитель водных походов');
   const [regTelegram, setRegTelegram] = useState<string>('');
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Check Telegram runtime on open
+  // Check Telegram runtime on open for autofill & account linking
   useEffect(() => {
     if (isOpen) {
       const tourist = initTelegramWebApp();
@@ -64,109 +64,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setIsInTelegram(inTg);
 
       if (tourist) {
-        setAuthMode('telegram');
-        setRegName([tourist.first_name, tourist.last_name].filter(Boolean).join(' '));
-        if (tourist.username) {
-          setRegTelegram(`@${tourist.username}`);
-          setRegEmail(`${tourist.username.toLowerCase()}@telegram.org`);
-        }
-      } else {
-        setAuthMode('login');
+        // Pre-fill user name and telegram nick to make email registration swift
+        const tgName = [tourist.first_name, tourist.last_name].filter(Boolean).join(' ');
+        if (tgName) setRegName((prev) => prev || tgName);
+        if (tourist.username) setRegTelegram((prev) => prev || `@${tourist.username}`);
       }
+
       setErrorMessage(null);
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  // 1. One-click Telegram Authentication
-  const handleTelegramAuth = () => {
-    if (!tgTourist) {
-      setErrorMessage('Данные Telegram не обнаружены. Пожалуйста, используйте вход по Email.');
-      return;
-    }
-
-    const tgIdStr = String(tgTourist.id);
-    const tgClean = (tgTourist.username || '').toLowerCase().replace('@', '');
-
-    // Check if user already exists by telegramId or telegram username or ID
-    const existing = registeredUsers.find((u) => {
-      const uTgClean = (u.telegram || '').toLowerCase().replace('@', '');
-      const uTgId = u.telegramId ? String(u.telegramId) : '';
-      return (
-        (uTgId && uTgId === tgIdStr) ||
-        (tgClean && uTgClean && uTgClean === tgClean) ||
-        u.id === `tg-${tgTourist.id}`
-      );
-    });
-
-    const isMasterSuper = tgClean === 'zuubra1985' || (existing?.email && existing.email.toLowerCase() === 'zuubra1985@gmail.com');
-
-    if (existing) {
-      // Update with fresh Telegram details if changed
-      const updatedExisting: AppUser = {
-        ...existing,
-        telegramId: tgTourist.id,
-        telegram: tgTourist.username ? `@${tgTourist.username}` : existing.telegram,
-        avatar: tgTourist.photo_url || existing.avatar,
-        role: isMasterSuper ? 'superadmin' : existing.role || 'user'
-      };
-
-      onRegisterUser(updatedExisting);
-      onLoginSuccess(updatedExisting);
-      onClose();
-      try {
-        confetti({ particleCount: 60, spread: 60, origin: { y: 0.6 } });
-      } catch (e) {}
-      return;
-    }
-
-    // Create fresh tourist account from Telegram
-    const autoUser: AppUser = {
-      id: `tg-${tgTourist.id}`,
-      telegramId: tgTourist.id,
-      name: [tgTourist.first_name, tgTourist.last_name].filter(Boolean).join(' ') || (tgTourist.username ? `@${tgTourist.username}` : `Турист TG #${tgTourist.id}`),
-      email: tgTourist.username ? `${tgTourist.username.toLowerCase()}@telegram.org` : `tg_${tgTourist.id}@splav86.ru`,
-      phone: '',
-      telegram: tgTourist.username ? `@${tgTourist.username}` : '',
-      avatar: tgTourist.photo_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
-      role: isMasterSuper ? 'superadmin' : 'user',
-      password: '', // Can be set later in profile for web login
-      registeredAt: new Date().toISOString().slice(0, 10),
-      city: 'Югра / Ямал',
-      experienceLevel: 'Водный турист (Telegram)',
-      favoriteRouteIds: [],
-      favoriteRivers: [],
-      vesselsOwned: [],
-      gearInventory: [],
-      badges: [],
-      bio: '',
-      callsign: '',
-      fstrRank: '',
-      vk: '',
-      isReadyForExpeditions: true,
-      showContactsPublicly: true
-    };
-
-    onRegisterUser(autoUser);
-    onLoginSuccess(autoUser);
-    onClose();
-    try {
-      confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
-    } catch (e) {}
-  };
-
-  // 2. Standard Login (Email or Telegram @username / ID)
+  // 1. Standard Login by Email (and Password)
   const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
-    const rawInput = loginIdentifier.trim();
-    const cleanIdentifier = rawInput.toLowerCase();
+    const rawInput = loginEmail.trim();
+    const cleanEmail = rawInput.toLowerCase();
     const cleanPassword = loginPassword.trim();
 
-    if (!cleanIdentifier) {
-      setErrorMessage('Пожалуйста, введите ваш Email или Telegram логин.');
+    if (!cleanEmail) {
+      setErrorMessage('Пожалуйста, введите ваш Email для входа.');
       return;
     }
     if (!cleanPassword) {
@@ -174,9 +94,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    const isSuperAdminEmail = cleanIdentifier === 'zuubra1985@gmail.com' || cleanIdentifier.replace('@', '') === 'zuubra1985';
+    const isSuperAdminEmail = cleanEmail === 'zuubra1985@gmail.com' || cleanEmail.replace('@', '') === 'zuubra1985';
     
-    // Check superadmin credentials
+    // Check master superadmin credentials
     if (isSuperAdminEmail) {
       if (cleanPassword !== '110985DimA' && cleanPassword !== 'admin86') {
         setErrorMessage('Неверный пароль администратора. Доступ запрещен.');
@@ -223,28 +143,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    // Flexible multi-field lookup:
-    // 1) By Email
-    // 2) By Telegram username (with or without @)
-    // 3) By numeric Telegram ID
-    // 4) By internal ID
-    const cleanUsername = cleanIdentifier.replace('@', '');
+    // Strict single database lookup: by Email (or telegram nick if already linked)
+    const cleanUsername = cleanEmail.replace('@', '');
     const matchedUser = registeredUsers.find((u) => {
-      const uEmail = (u.email || '').toLowerCase();
-      const uTg = (u.telegram || '').toLowerCase().replace('@', '');
+      const uEmail = (u.email || '').trim().toLowerCase();
+      const uTg = (u.telegram || '').trim().toLowerCase().replace('@', '');
       const uTgId = u.telegramId ? String(u.telegramId) : '';
-      const uId = (u.id || '').toLowerCase();
 
       return (
-        uEmail === cleanIdentifier ||
+        uEmail === cleanEmail ||
         (cleanUsername && uTg === cleanUsername) ||
-        (uTgId && uTgId === cleanIdentifier) ||
-        uId === cleanIdentifier
+        (uTgId && uTgId === cleanEmail)
       );
     });
 
     if (!matchedUser) {
-      setErrorMessage(`Пользователь «${rawInput}» не найден. Если вы еще не зарегистрированы, перейдите на вкладку «Регистрация» или используйте «Вход через Telegram».`);
+      setErrorMessage(`Пользователь с Email «${rawInput}» не найден в единой базе. Пожалуйста, пройдите быструю регистрацию на вкладке «Регистрация по Email».`);
       return;
     }
 
@@ -256,7 +170,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
     }
 
-    // If logging in inside Telegram WebApp, automatically link Telegram ID to this account!
+    // If logging in inside Telegram WebApp, link Telegram ID to this unified Email account
     let userToLogin = matchedUser;
     if (tgTourist) {
       userToLogin = {
@@ -276,7 +190,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     } catch (e) {}
   };
 
-  // 3. New User Registration
+  // 2. Strict Email-First Registration
   const handleRegisterSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -284,10 +198,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     const cleanEmail = regEmail.trim().toLowerCase();
     const cleanName = regName.trim();
     const cleanPassword = regPassword.trim();
+    const cleanConfirm = regConfirmPassword.trim();
     const cleanTg = regTelegram.trim();
 
-    if (!cleanName || !cleanEmail) {
-      setErrorMessage('Пожалуйста, укажите ваше имя и Email адрес.');
+    if (!cleanName) {
+      setErrorMessage('Пожалуйста, укажите ваше имя или ФИО.');
+      return;
+    }
+
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setErrorMessage('Пожалуйста, укажите корректный рабочий Email адрес.');
       return;
     }
 
@@ -296,24 +216,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    // Check Duplicate by Email or Telegram username
+    if (cleanConfirm && cleanPassword !== cleanConfirm) {
+      setErrorMessage('Введенные пароли не совпадают. Пожалуйста, проверьте подтверждение пароля.');
+      return;
+    }
+
+    // Check Duplicate by Email in the unified database
     const alreadyExists = registeredUsers.some((u) => {
-      const uEmail = (u.email || '').toLowerCase();
-      const uTg = (u.telegram || '').toLowerCase().replace('@', '');
-      const currentTgClean = cleanTg.toLowerCase().replace('@', '');
-      return uEmail === cleanEmail || (currentTgClean && uTg && uTg === currentTgClean);
+      const uEmail = (u.email || '').trim().toLowerCase();
+      return uEmail === cleanEmail;
     });
 
     if (alreadyExists) {
-      setErrorMessage(`Пользователь с Email «${cleanEmail}» уже зарегистрирован! Перейдите на вкладку «Вход» и введите пароль.`);
+      setErrorMessage(`Пользователь с Email «${cleanEmail}» уже зарегистрирован в единой базе! Перейдите на вкладку «Вход» и введите пароль.`);
       return;
     }
 
     const isSuper = cleanEmail === 'zuubra1985@gmail.com';
 
-    // Fresh new tourist profile
+    // Fresh new unified tourist profile
     const newUser: AppUser = {
-      id: tgTourist ? `tg-${tgTourist.id}` : `user-${Date.now()}`,
+      id: `user-${Date.now()}`,
       telegramId: tgTourist?.id,
       email: cleanEmail,
       name: cleanName,
@@ -348,7 +271,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[3200] bg-black/70 backdrop-blur-md flex items-center justify-center p-3 overflow-y-auto">
-      <div className="bg-white border border-[#E5E0D8] rounded-[28px] max-w-md w-full p-6 space-y-4 shadow-2xl my-auto text-[#2D332D]">
+      <div className="bg-white border border-[#E5E0D8] rounded-[28px] max-w-md w-full p-6 space-y-4 shadow-2xl my-auto text-[#2D332D] animate-fade-in">
         
         {/* Header */}
         <div className="flex items-start justify-between">
@@ -358,10 +281,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
             <div>
               <h2 className="text-lg font-black text-[#1A1F1A]">
-                Авторизация в SPLAV86
+                {authMode === 'login' ? 'Вход в SPLAV86' : 'Регистрация туриста'}
               </h2>
               <p className="text-xs text-[#8B7E6D]">
-                {isInTelegram ? 'Вход через Telegram или по Email' : 'Личный кабинет туриста'}
+                Единая авторизация по Email (Web + Telegram)
               </p>
             </div>
           </div>
@@ -375,36 +298,33 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </button>
         </div>
 
-        {/* Mode Switcher Tabs */}
-        <div className={`grid ${tgTourist ? 'grid-cols-3' : 'grid-cols-2'} bg-[#F9F7F4] p-1 rounded-2xl border border-[#EEEBE6] text-xs font-bold gap-1`}>
-          {tgTourist && (
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode('telegram');
-                setErrorMessage(null);
-              }}
-              className={`py-2 px-1 rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer text-center ${
-                authMode === 'telegram' ? 'bg-[#0088cc] text-white shadow-xs' : 'text-[#6B665F] hover:text-[#0088cc]'
-              }`}
-            >
-              <Send className="w-3.5 h-3.5" />
-              <span className="truncate">Telegram</span>
-            </button>
-          )}
+        {/* Telegram Notice Banner if inside TMA */}
+        {isInTelegram && tgTourist && (
+          <div className="p-3 bg-[#E6F4FE] border border-[#BEE3F8] rounded-2xl flex items-center gap-2.5 text-xs text-[#006699]">
+            <Send className="w-4 h-4 shrink-0 text-[#0088cc]" />
+            <div className="leading-tight">
+              <span>Вы вошли через Telegram: <strong>{tgTourist.first_name}</strong> {tgTourist.username ? `(@${tgTourist.username})` : ''}.</span>
+              <p className="text-[11px] opacity-85 mt-0.5">
+                Авторизуйтесь по Email или зарегистрируйтесь один раз, и профиль навсегда свяжется с вашим Telegram!
+              </p>
+            </div>
+          </div>
+        )}
 
+        {/* Strict Tabs: Вход | Регистрация */}
+        <div className="grid grid-cols-2 bg-[#F9F7F4] p-1 rounded-2xl border border-[#EEEBE6] text-xs font-bold gap-1">
           <button
             type="button"
             onClick={() => {
               setAuthMode('login');
               setErrorMessage(null);
             }}
-            className={`py-2 px-1 rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer text-center ${
+            className={`py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center ${
               authMode === 'login' ? 'bg-[#2D5A27] text-white shadow-xs' : 'text-[#6B665F] hover:text-[#2D5A27]'
             }`}
           >
-            <LogIn className="w-3.5 h-3.5" />
-            <span>Вход</span>
+            <LogIn className="w-4 h-4" />
+            <span>Вход по Email</span>
           </button>
 
           <button
@@ -413,12 +333,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               setAuthMode('register');
               setErrorMessage(null);
             }}
-            className={`py-2 px-1 rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer text-center ${
+            className={`py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center ${
               authMode === 'register' ? 'bg-[#2D5A27] text-white shadow-xs' : 'text-[#6B665F] hover:text-[#2D5A27]'
             }`}
           >
-            <UserPlus className="w-3.5 h-3.5" />
-            <span className="truncate">Регистрация</span>
+            <UserPlus className="w-4 h-4" />
+            <span>Регистрация</span>
           </button>
         </div>
 
@@ -430,73 +350,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
         )}
 
-        {/* OPTION 1: 1-CLICK TELEGRAM AUTH */}
-        {authMode === 'telegram' && tgTourist && (
-          <div className="space-y-4 text-xs pt-1">
-            <div className="p-4 bg-gradient-to-br from-[#F0F8FF] to-[#E6F4FE] rounded-2xl border border-[#BEE3F8] space-y-3">
-              <div className="flex items-center gap-3">
-                <img
-                  src={tgTourist.photo_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80'}
-                  alt="Telegram Avatar"
-                  className="w-12 h-12 rounded-2xl object-cover border-2 border-[#0088cc] shadow-sm shrink-0"
-                />
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-bold text-sm text-[#1A1F1A] truncate">
-                      {[tgTourist.first_name, tgTourist.last_name].filter(Boolean).join(' ') || 'Пользователь Telegram'}
-                    </span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[#0088cc]/10 text-[#0088cc] font-black">
-                      TG
-                    </span>
-                  </div>
-                  <p className="text-xs text-[#0088cc] font-medium truncate">
-                    {tgTourist.username ? `@${tgTourist.username}` : `ID: ${tgTourist.id}`}
-                  </p>
-                </div>
-              </div>
-
-              <p className="text-[11px] text-[#4A5568] leading-relaxed">
-                Быстрый вход в 1 клик. Ваши маршруты, походы и визитка будут автоматически привязаны к вашему профилю Telegram.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleTelegramAuth}
-              className="w-full py-3.5 bg-[#0088cc] hover:bg-[#0077b5] active:scale-[0.99] text-white font-bold rounded-2xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer text-sm"
-            >
-              <Send className="w-4 h-4" />
-              <span>Войти через Telegram</span>
-            </button>
-
-            <div className="text-center pt-1 border-t border-[#EEEBE6]">
-              <button
-                type="button"
-                onClick={() => setAuthMode('login')}
-                className="text-xs text-[#2D5A27] hover:underline font-semibold cursor-pointer"
-              >
-                Есть аккаунт на сайте? Войти по Email и паролю →
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* OPTION 2: LOGIN FORM (EMAIL / TELEGRAM ID) */}
+        {/* 1. LOGIN FORM */}
         {authMode === 'login' && (
           <form onSubmit={handleLoginSubmit} className="space-y-3.5 text-xs">
             <div>
               <label className="block text-[#4A443E] font-medium mb-1">
-                Email или логин Telegram (@username / ID)
+                Ваш Email адрес *
               </label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-[#8B7E6D] absolute left-3 top-2.5" />
                 <input
-                  type="text"
+                  type="email"
                   required
-                  placeholder="name@mail.ru или @username"
-                  value={loginIdentifier}
+                  placeholder="ivan@mail.ru"
+                  value={loginEmail}
                   onChange={(e) => {
-                    setLoginIdentifier(e.target.value);
+                    setLoginEmail(e.target.value);
                     if (errorMessage) setErrorMessage(null);
                   }}
                   className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl pl-9 pr-3 py-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
@@ -505,7 +374,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-[#4A443E] font-medium mb-1">Пароль</label>
+              <label className="block text-[#4A443E] font-medium mb-1">Пароль *</label>
               <div className="relative">
                 <Lock className="w-4 h-4 text-[#8B7E6D] absolute left-3 top-2.5" />
                 <input
@@ -530,33 +399,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               Войти в Личный кабинет
             </button>
 
-            <div className="text-center pt-1 flex items-center justify-between text-xs font-semibold">
+            <div className="text-center pt-1 text-xs">
+              <span className="text-[#8B7E6D]">Ещё нет аккаунта? </span>
               <button
                 type="button"
                 onClick={() => {
                   setAuthMode('register');
                   setErrorMessage(null);
                 }}
-                className="text-[#2D5A27] hover:underline cursor-pointer"
+                className="text-[#2D5A27] font-bold hover:underline cursor-pointer"
               >
-                Создать аккаунт
+                Зарегистрироваться по Email →
               </button>
-
-              {tgTourist && (
-                <button
-                  type="button"
-                  onClick={() => setAuthMode('telegram')}
-                  className="text-[#0088cc] hover:underline cursor-pointer flex items-center gap-1"
-                >
-                  <Send className="w-3 h-3" />
-                  Вход в 1 клик TG
-                </button>
-              )}
             </div>
           </form>
         )}
 
-        {/* OPTION 3: REGISTER FORM */}
+        {/* 2. STRICT REGISTRATION FORM */}
         {authMode === 'register' && (
           <form onSubmit={handleRegisterSubmit} className="space-y-3 text-xs">
             <div>
@@ -576,7 +435,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
-                <label className="block text-[#4A443E] font-medium mb-1">Email адрес *</label>
+                <label className="block text-[#4A443E] font-medium mb-1">Email (основной логин) *</label>
                 <input
                   type="email"
                   required
@@ -591,7 +450,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-[#4A443E] font-medium mb-1">Telegram (@логин)</label>
+                <label className="block text-[#4A443E] font-medium mb-1">Telegram (@логин для связи)</label>
                 <input
                   type="text"
                   placeholder="@ivan_splav"
@@ -639,20 +498,37 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </select>
             </div>
 
-            <div>
-              <label className="block text-[#4A443E] font-medium mb-1">Пароль для входа на сайте и с ПК * (мин. 3 символа)</label>
-              <input
-                type="password"
-                required
-                minLength={3}
-                placeholder="••••••••"
-                value={regPassword}
-                onChange={(e) => {
-                  setRegPassword(e.target.value);
-                  if (errorMessage) setErrorMessage(null);
-                }}
-                className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[#4A443E] font-medium mb-1">Пароль для входа *</label>
+                <input
+                  type="password"
+                  required
+                  minLength={3}
+                  placeholder="••••••••"
+                  value={regPassword}
+                  onChange={(e) => {
+                    setRegPassword(e.target.value);
+                    if (errorMessage) setErrorMessage(null);
+                  }}
+                  className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
+                />
+              </div>
+              <div>
+                <label className="block text-[#4A443E] font-medium mb-1">Повторите пароль *</label>
+                <input
+                  type="password"
+                  required
+                  minLength={3}
+                  placeholder="••••••••"
+                  value={regConfirmPassword}
+                  onChange={(e) => {
+                    setRegConfirmPassword(e.target.value);
+                    if (errorMessage) setErrorMessage(null);
+                  }}
+                  className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-2.5 text-[#2D332D] outline-none focus:border-[#2D5A27]"
+                />
+              </div>
             </div>
 
             <button
@@ -660,32 +536,33 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               className="w-full py-3 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <UserPlus className="w-4 h-4" />
-              Зарегистрироваться
+              Зарегистрировать аккаунт
             </button>
 
-            <div className="text-center pt-1">
+            <div className="text-center pt-1 text-xs">
+              <span className="text-[#8B7E6D]">Уже есть аккаунт? </span>
               <button
                 type="button"
                 onClick={() => {
                   setAuthMode('login');
                   setErrorMessage(null);
                 }}
-                className="text-xs text-[#2D5A27] hover:underline font-semibold cursor-pointer"
+                className="text-[#2D5A27] font-bold hover:underline cursor-pointer"
               >
-                Уже есть аккаунт? Войти
+                Войти по Email →
               </button>
             </div>
           </form>
         )}
 
-        {/* Cross-Platform Access Guarantee Banner */}
-        <div className="p-3 bg-[#FAF8F5] rounded-2xl border border-[#EEEBE6] text-[11px] text-[#6B665F] space-y-1.5">
+        {/* Unified Database Guarantee Banner */}
+        <div className="p-3 bg-[#FAF8F5] rounded-2xl border border-[#EEEBE6] text-[11px] text-[#6B665F] space-y-1">
           <div className="flex items-center gap-1.5 font-bold text-[#2D5A27]">
             <Globe className="w-3.5 h-3.5" />
-            <span>Единый доступ: Web-сайт + Telegram</span>
+            <span>Строгая единая база пользователей</span>
           </div>
           <p className="leading-tight">
-            Вы сможете заходить в свой профиль как со смартфона через Telegram, так и с любого компьютера через сайт, используя ваш логин и пароль.
+            Один аккаунт — один Email. Ваши маршруты, заявки, снаряжение и экипажи будут одинаково доступны как с компьютера на сайте, так и из Telegram.
           </p>
         </div>
 

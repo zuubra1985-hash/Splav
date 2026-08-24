@@ -845,7 +845,23 @@ export default function App() {
   }, [faqData]);
 
   const handleRegisterUser = (newUser: AppUser) => {
-    setRegisteredUsers((prev) => [newUser, ...prev]);
+    const normEmail = (newUser.email || '').trim().toLowerCase();
+    setRegisteredUsers((prev) => {
+      const existsIndex = prev.findIndex(
+        (u) => u.id === newUser.id || (normEmail && (u.email || '').trim().toLowerCase() === normEmail)
+      );
+      let updated: AppUser[];
+      if (existsIndex >= 0) {
+        updated = [...prev];
+        updated[existsIndex] = { ...updated[existsIndex], ...newUser };
+      } else {
+        updated = [newUser, ...prev];
+      }
+      try {
+        localStorage.setItem('splav86_users', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
     UsersSyncService.saveUser(newUser).catch((err) => {
       console.warn('Failed to sync new user to Firestore:', err);
     });
