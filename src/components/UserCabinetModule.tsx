@@ -115,8 +115,8 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
   initialEditingArticle,
   onClearInitialArticle
 }) => {
-  const isMasterAdmin = currentUser?.email.toLowerCase() === 'zuubra1985@gmail.com';
-  const isSuperAdmin = isMasterAdmin || currentUser?.role === 'superadmin';
+  const isSuperAdmin = currentUser?.role === 'superadmin';
+  const isMasterAdmin = isSuperAdmin;
   const isAdmin = isSuperAdmin || currentUser?.role === 'admin';
 
   const [activeCabinetTab, setActiveCabinetTabState] = useState<'profile' | 'applications' | 'sync_history' | 'routes' | 'articles' | 'trips' | 'faq' | 'travel_notes' | 'users' | 'backup' | 'telegram'>(() => {
@@ -815,11 +815,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
   const favoriteRoutes = routes.filter((r) => currentUser.favoriteRouteIds?.includes(r.id));
   const myCustomRoutes = routes.filter((r) => {
     if (!currentUser) return false;
-    const curEmail = (currentUser.email || '').trim().toLowerCase();
-    const authorEmail = (r.authorEmail || '').trim().toLowerCase();
-    const isMyAuthorId = Boolean(r.authorId && r.authorId === currentUser.id);
-    const isMyAuthorEmail = Boolean(authorEmail && curEmail && authorEmail === curEmail);
-    return isMyAuthorId || isMyAuthorEmail;
+    return Boolean(r.authorId && r.authorId === currentUser.id);
   });
 
   // --- Handlers for Routes ---
@@ -2416,7 +2412,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
                 Управление администраторами и пользователями ({uniqueUsers.length})
               </h2>
               <p className="text-xs text-[#6B665F] mt-1">
-                Главный администратор (<span className="font-mono font-bold text-[#E54B4B]">zuubra1985@gmail.com</span>) имеет полный доступ к назначению и управлению правами.
+                Супер-администратор имеет полный доступ к назначению и управлению правами учетных записей.
               </p>
             </div>
 
@@ -2446,10 +2442,9 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
           <div className="bg-white border border-[#E5E0D8] rounded-[28px] overflow-hidden shadow-sm">
             <div className="divide-y divide-[#E5E0D8]">
               {uniqueUsers.map((user) => {
-                const isTargetMaster = (user.email || '').toLowerCase() === 'zuubra1985@gmail.com';
-                const isThisSuper = isTargetMaster || user.role === 'superadmin';
-                const isMe = user.id === currentUser.id || (user.email || '').toLowerCase() === (currentUser.email || '').toLowerCase();
-                const canManageThisUser = !isMe && (isMasterAdmin ? !isTargetMaster : !isThisSuper);
+                const isThisSuper = user.role === 'superadmin';
+                const isMe = user.id === currentUser.id;
+                const canManageThisUser = !isMe && (isSuperAdmin ? true : !isThisSuper);
 
                 return (
                   <div key={user.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-[#F9F7F4]">
@@ -2473,11 +2468,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
                       <div>
                         <div className="flex items-center gap-2">
                           <strong className="text-sm text-[#1A1F1A]">{user.name}</strong>
-                          {isTargetMaster ? (
-                            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-[#FDE8E8] text-[#E54B4B] border border-[#F8B4B4]">
-                              Владелец / Главный админ
-                            </span>
-                          ) : isThisSuper ? (
+                          {isThisSuper ? (
                             <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-[#FDE8E8] text-[#E54B4B] border border-[#F8B4B4]">
                               Главный админ
                             </span>
@@ -2860,11 +2851,10 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {uniqueUsers.map((u) => {
-              const isTargetMaster = (u.email || '').toLowerCase() === 'zuubra1985@gmail.com';
-              const isTargetSuperAdmin = isTargetMaster || u.role === 'superadmin';
+              const isTargetSuperAdmin = u.role === 'superadmin';
               const isTargetAdmin = u.role === 'admin';
-              const isMe = u.id === currentUser.id || ((u.email || '').toLowerCase() === (currentUser.email || '').toLowerCase());
-              const canManageThisCard = !isMe && (isMasterAdmin ? !isTargetMaster : !isTargetSuperAdmin);
+              const isMe = u.id === currentUser.id;
+              const canManageThisCard = !isMe && (isSuperAdmin ? true : !isTargetSuperAdmin);
 
               return (
                 <div
@@ -2905,16 +2895,14 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
 
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
-                          isTargetMaster
-                            ? 'bg-[#FDE8E8] text-[#E54B4B] border border-[#F8B4B4]'
-                            : isTargetSuperAdmin
+                          isTargetSuperAdmin
                             ? 'bg-[#FDE8E8] text-[#E54B4B]'
                             : isTargetAdmin
                             ? 'bg-[#FEF3C7] text-[#92400E]'
                             : 'bg-[#E8F1E7] text-[#2D5A27]'
                         }`}
                       >
-                        {isTargetMaster ? 'Владелец / Главный админ' : isTargetSuperAdmin ? 'Главный админ' : isTargetAdmin ? 'Админ' : 'Турист'}
+                        {isTargetSuperAdmin ? 'Главный админ' : isTargetAdmin ? 'Админ' : 'Турист'}
                       </span>
                     </div>
 

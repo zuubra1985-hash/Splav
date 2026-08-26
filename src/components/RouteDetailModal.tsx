@@ -45,8 +45,7 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
   onToggleFavorite
 }) => {
   const isAdmin = currentUser?.role === 'admin' || 
-                  currentUser?.role === 'superadmin' || 
-                  currentUser?.email?.toLowerCase() === 'zuubra1985@gmail.com';
+                  currentUser?.role === 'superadmin';
 
   const isFavorite = Boolean(currentUser?.favoriteRouteIds?.includes(route.id));
 

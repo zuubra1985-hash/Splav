@@ -1,7 +1,33 @@
 import { db } from './index.ts';
-import { users, companionTrips, customRoutes, travelNotes, articles, faqTable } from './schema.ts';
-import { eq, or } from 'drizzle-orm';
+import {
+  users,
+  companionTrips,
+  customRoutes,
+  travelNotes,
+  articles,
+  faqTable,
+  refreshTokens,
+  revokedTokens,
+  auditLogs
+} from './schema.ts';
+import { eq, or, and, sql, desc } from 'drizzle-orm';
 import { AppUser, UserRole, PublicUserDTO, PrivateUserDTO } from '../types/index.ts';
+
+export interface PaginationOptions {
+  page?: number;
+  limit?: number;
+  search?: string;
+}
+
+export interface PaginatedResult<T> {
+  items: T[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
 
 // Helper to sanitize internal user object to PrivateUserDTO
 export function toPrivateUserDTO(u: typeof users.$inferSelect): PrivateUserDTO {
@@ -26,13 +52,13 @@ export function toPrivateUserDTO(u: typeof users.$inferSelect): PrivateUserDTO {
     telegram: u.telegram || '',
     vk: u.vk || '',
     isReadyForExpeditions: u.isReadyForExpeditions !== false,
-    showContactsPublicly: u.showContactsPublicly !== false
+    showContactsPublicly: u.showContactsPublicly === true
   };
 }
 
-// Helper to sanitize to PublicUserDTO
+// Helper to sanitize to PublicUserDTO (Default: phone and telegram are private)
 export function toPublicUserDTO(u: typeof users.$inferSelect): PublicUserDTO {
-  const isPublicContact = u.showContactsPublicly !== false;
+  const isPublicContact = u.showContactsPublicly === true;
   return {
     id: u.id,
     name: u.name,
@@ -75,29 +101,61 @@ export async function findUserById(id: string) {
   }
 }
 
-// 3. Get Public Users list (for community members directory)
-export async function getPublicUsers(): Promise<PublicUserDTO[]> {
+// 3. Get Public Users list with optional pagination
+export async function getPublicUsers(options?: PaginationOptions): Promise<PublicUserDTO[] | PaginatedResult<PublicUserDTO>> {
   try {
-    const list = await db.select().from(users);
-    return list.map(toPublicUserDTO);
+    const list = await db.select().from(users).orderBy(desc(users.updatedAt));
+    const dtos = list.map(toPublicUserDTO);
+
+    if (options && (options.page || options.limit)) {
+      const page = Math.max(1, options.page || 1);
+      const limit = Math.min(100, Math.max(1, options.limit || 20));
+      const total = dtos.length;
+      const totalPages = Math.ceil(total / limit) || 1;
+      const start = (page - 1) * limit;
+      const items = dtos.slice(start, start + limit);
+
+      return {
+        items,
+        pagination: { total, page, limit, totalPages }
+      };
+    }
+
+    return dtos;
   } catch (error) {
     console.error('Error fetching public users from DB:', error);
     throw new Error('Database query failed for public users.');
   }
 }
 
-// 4. Get Admin Users list (for admin panel)
-export async function getAllUsersForAdmin(): Promise<PrivateUserDTO[]> {
+// 4. Get Admin Users list with optional pagination
+export async function getAllUsersForAdmin(options?: PaginationOptions): Promise<PrivateUserDTO[] | PaginatedResult<PrivateUserDTO>> {
   try {
-    const list = await db.select().from(users);
-    return list.map(toPrivateUserDTO);
+    const list = await db.select().from(users).orderBy(desc(users.updatedAt));
+    const dtos = list.map(toPrivateUserDTO);
+
+    if (options && (options.page || options.limit)) {
+      const page = Math.max(1, options.page || 1);
+      const limit = Math.min(100, Math.max(1, options.limit || 20));
+      const total = dtos.length;
+      const totalPages = Math.ceil(total / limit) || 1;
+      const start = (page - 1) * limit;
+      const items = dtos.slice(start, start + limit);
+
+      return {
+        items,
+        pagination: { total, page, limit, totalPages }
+      };
+    }
+
+    return dtos;
   } catch (error) {
     console.error('Error fetching admin users from DB:', error);
     throw new Error('Database query failed for admin users.');
   }
 }
 
-// 5. Create new registered user
+// 5. Create new registered user (uses transaction)
 export async function createRegisteredUser(data: {
   id: string;
   email: string;
@@ -111,11 +169,11 @@ export async function createRegisteredUser(data: {
   telegram?: string;
   registeredAt?: string;
 }): Promise<PrivateUserDTO> {
-  try {
+  return await db.transaction(async (tx) => {
     const cleanEmail = data.email.trim().toLowerCase();
-    const assignedRole: UserRole = cleanEmail === 'zuubra1985@gmail.com' ? 'superadmin' : (data.role || 'user');
+    const assignedRole: UserRole = data.role || 'user';
 
-    const inserted = await db.insert(users).values({
+    const inserted = await tx.insert(users).values({
       id: data.id,
       email: cleanEmail,
       name: data.name.trim(),
@@ -137,15 +195,12 @@ export async function createRegisteredUser(data: {
       telegram: data.telegram || '',
       vk: '',
       isReadyForExpeditions: true,
-      showContactsPublicly: true,
+      showContactsPublicly: false,
       updatedAt: new Date()
     }).returning();
 
     return toPrivateUserDTO(inserted[0]);
-  } catch (error) {
-    console.error('Error creating registered user in DB:', error);
-    throw new Error('Database insert failed for user.');
-  }
+  });
 }
 
 // 6. Update user profile (user modifying their own profile)
@@ -156,7 +211,6 @@ export async function updateUserProfile(id: string, updates: Partial<AppUser>): 
       throw new Error('User not found');
     }
 
-    // Role and password cannot be modified through this helper
     const updateData: any = {
       updatedAt: new Date()
     };
@@ -214,22 +268,64 @@ export async function adminUpdateUserRole(id: string, newRole: UserRole): Promis
   }
 }
 
-// 9. Delete user from DB
+// 9. Delete user from DB with transaction
 export async function deleteUserFromDb(userId: string) {
-  try {
-    await db.delete(users).where(eq(users.id, userId));
+  return await db.transaction(async (tx) => {
+    await tx.delete(refreshTokens).where(eq(refreshTokens.userId, userId));
+    await tx.delete(revokedTokens).where(eq(revokedTokens.userId, userId));
+    await tx.delete(users).where(eq(users.id, userId));
     return { success: true };
-  } catch (error) {
-    console.error('Error deleting user from DB:', error);
-    throw new Error('Database delete failed for user.');
-  }
+  });
 }
 
 // 10. Companion Trips DB helpers
-export async function getAllTripsFromDb() {
+export async function findTripById(id: string) {
   try {
-    const list = await db.select().from(companionTrips);
-    return list.map(t => t.data);
+    const list = await db.select().from(companionTrips).where(eq(companionTrips.id, id));
+    if (list.length === 0) return null;
+    return list[0].data as any;
+  } catch (error) {
+    console.error('Error finding trip by id:', error);
+    return null;
+  }
+}
+
+export async function getAllTripsFromDb(
+  filterOptions?: { userId?: string; isAdmin?: boolean },
+  pagination?: PaginationOptions
+): Promise<any[] | PaginatedResult<any>> {
+  try {
+    const list = await db.select().from(companionTrips).orderBy(desc(companionTrips.updatedAt));
+    let trips = list.map(t => t.data as any);
+
+    // If filtering for non-admin, separate public trips and user's private trips
+    if (filterOptions && !filterOptions.isAdmin) {
+      trips = trips.filter(t => {
+        const isPrivate = t.isPrivate === true || t.isPersonal === true || t.visibility === 'private' || t.status === 'draft';
+        if (!isPrivate) return true;
+        // Private trips are only visible to the organizer/owner
+        if (filterOptions.userId && (t.ownerId === filterOptions.userId || t.organizer?.userId === filterOptions.userId)) {
+          return true;
+        }
+        return false;
+      });
+    }
+
+    if (pagination && (pagination.page || pagination.limit)) {
+      const page = Math.max(1, pagination.page || 1);
+      const limit = Math.min(100, Math.max(1, pagination.limit || 20));
+      const total = trips.length;
+      const totalPages = Math.ceil(total / limit) || 1;
+      const start = (page - 1) * limit;
+      const items = trips.slice(start, start + limit);
+
+      return {
+        items,
+        pagination: { total, page, limit, totalPages }
+      };
+    }
+
+    return trips;
   } catch (error) {
     console.error('Error fetching trips from DB:', error);
     throw new Error('Database query failed for trips.');
@@ -240,11 +336,21 @@ export async function saveTripInDb(trip: any, ownerId?: string) {
   try {
     if (!trip || !trip.id) throw new Error('Invalid trip payload');
     const existing = await db.select().from(companionTrips).where(eq(companionTrips.id, trip.id));
-    const finalOwnerId = ownerId || trip.organizer?.userId || (existing[0]?.ownerId) || '';
+    const finalOwnerId = ownerId || (existing[0]?.ownerId) || trip.organizer?.userId || '';
+    const visibility = (trip.isPrivate || trip.isPersonal || trip.visibility === 'private' || trip.status === 'draft') ? 'private' : 'public';
+
+    if (finalOwnerId) {
+      if (!trip.organizer) trip.organizer = {};
+      if (ownerId) {
+        trip.organizer.userId = ownerId;
+      }
+      trip.ownerId = finalOwnerId;
+    }
 
     if (existing.length > 0) {
       await db.update(companionTrips).set({
         ownerId: finalOwnerId,
+        visibility,
         data: trip,
         updatedAt: new Date()
       }).where(eq(companionTrips.id, trip.id));
@@ -252,6 +358,7 @@ export async function saveTripInDb(trip: any, ownerId?: string) {
       await db.insert(companionTrips).values({
         id: trip.id,
         ownerId: finalOwnerId,
+        visibility,
         data: trip,
         updatedAt: new Date()
       });
@@ -263,17 +370,41 @@ export async function saveTripInDb(trip: any, ownerId?: string) {
   }
 }
 
-export async function saveTripsInDb(tripsList: any[]) {
-  try {
+export async function saveTripsInDb(tripsList: any[], ownerId?: string) {
+  return await db.transaction(async (tx) => {
     for (const trip of tripsList) {
       if (!trip || !trip.id) continue;
-      await saveTripInDb(trip);
+      const existing = await tx.select().from(companionTrips).where(eq(companionTrips.id, trip.id));
+      const finalOwnerId = ownerId || (existing[0]?.ownerId) || trip.organizer?.userId || '';
+      const visibility = (trip.isPrivate || trip.isPersonal || trip.visibility === 'private' || trip.status === 'draft') ? 'private' : 'public';
+
+      if (finalOwnerId) {
+        if (!trip.organizer) trip.organizer = {};
+        if (ownerId) {
+          trip.organizer.userId = ownerId;
+        }
+        trip.ownerId = finalOwnerId;
+      }
+
+      if (existing.length > 0) {
+        await tx.update(companionTrips).set({
+          ownerId: finalOwnerId,
+          visibility,
+          data: trip,
+          updatedAt: new Date()
+        }).where(eq(companionTrips.id, trip.id));
+      } else {
+        await tx.insert(companionTrips).values({
+          id: trip.id,
+          ownerId: finalOwnerId,
+          visibility,
+          data: trip,
+          updatedAt: new Date()
+        });
+      }
     }
     return { success: true };
-  } catch (error) {
-    console.error('Error saving trips in DB:', error);
-    throw new Error('Database save failed for trips.');
-  }
+  });
 }
 
 export async function deleteTripFromDb(tripId: string) {
@@ -287,19 +418,36 @@ export async function deleteTripFromDb(tripId: string) {
 }
 
 // 11. Custom Routes DB helpers
-export async function getAllCustomRoutesFromDb(filterOptions?: { userId?: string; isAdmin?: boolean }) {
+export async function getAllCustomRoutesFromDb(
+  filterOptions?: { userId?: string; isAdmin?: boolean },
+  pagination?: PaginationOptions
+): Promise<any[] | PaginatedResult<any>> {
   try {
-    const list = await db.select().from(customRoutes);
-    const routes = list.map(r => r.data as any);
+    const list = await db.select().from(customRoutes).orderBy(desc(customRoutes.updatedAt));
+    let routes = list.map(r => r.data as any);
 
-    // If filterOptions provided, ensure private personal routes only visible to their author/admin
     if (filterOptions && !filterOptions.isAdmin) {
-      return routes.filter(r => {
+      routes = routes.filter(r => {
         if (!r.isPersonal && r.isPublic !== false) return true;
-        if (filterOptions.userId && (r.authorId === filterOptions.userId || r.authorEmail === filterOptions.userId)) return true;
+        if (filterOptions.userId && r.authorId === filterOptions.userId) return true;
         return false;
       });
     }
+
+    if (pagination && (pagination.page || pagination.limit)) {
+      const page = Math.max(1, pagination.page || 1);
+      const limit = Math.min(100, Math.max(1, pagination.limit || 20));
+      const total = routes.length;
+      const totalPages = Math.ceil(total / limit) || 1;
+      const start = (page - 1) * limit;
+      const items = routes.slice(start, start + limit);
+
+      return {
+        items,
+        pagination: { total, page, limit, totalPages }
+      };
+    }
+
     return routes;
   } catch (error) {
     console.error('Error fetching custom routes from DB:', error);
@@ -311,8 +459,15 @@ export async function saveCustomRouteInDb(route: any, ownerId?: string) {
   try {
     if (!route || !route.id) throw new Error('Invalid route payload');
     const existing = await db.select().from(customRoutes).where(eq(customRoutes.id, route.id));
-    const finalOwnerId = ownerId || route.authorId || (existing[0]?.ownerId) || '';
+    const finalOwnerId = ownerId || (existing[0]?.ownerId) || route.authorId || '';
     const visibility = route.isPersonal ? 'private' : 'public';
+
+    if (finalOwnerId) {
+      if (ownerId) {
+        route.authorId = ownerId;
+      }
+      route.ownerId = finalOwnerId;
+    }
 
     if (existing.length > 0) {
       await db.update(customRoutes).set({
@@ -337,17 +492,40 @@ export async function saveCustomRouteInDb(route: any, ownerId?: string) {
   }
 }
 
-export async function saveCustomRoutesInDb(routesList: any[]) {
-  try {
+export async function saveCustomRoutesInDb(routesList: any[], ownerId?: string) {
+  return await db.transaction(async (tx) => {
     for (const route of routesList) {
       if (!route || !route.id) continue;
-      await saveCustomRouteInDb(route);
+      const existing = await tx.select().from(customRoutes).where(eq(customRoutes.id, route.id));
+      const finalOwnerId = ownerId || (existing[0]?.ownerId) || route.authorId || '';
+      const visibility = route.isPersonal ? 'private' : 'public';
+
+      if (finalOwnerId) {
+        if (ownerId) {
+          route.authorId = ownerId;
+        }
+        route.ownerId = finalOwnerId;
+      }
+
+      if (existing.length > 0) {
+        await tx.update(customRoutes).set({
+          ownerId: finalOwnerId,
+          visibility,
+          data: route,
+          updatedAt: new Date()
+        }).where(eq(customRoutes.id, route.id));
+      } else {
+        await tx.insert(customRoutes).values({
+          id: route.id,
+          ownerId: finalOwnerId,
+          visibility,
+          data: route,
+          updatedAt: new Date()
+        });
+      }
     }
     return { success: true };
-  } catch (error) {
-    console.error('Error saving custom routes in DB:', error);
-    throw new Error('Database save failed for custom routes.');
-  }
+  });
 }
 
 export async function deleteCustomRouteFromDb(routeId: string) {
@@ -397,10 +575,26 @@ export async function saveTravelNotesConfigInDb(configData: any) {
 }
 
 // 13. Articles DB helpers
-export async function getAllArticlesFromDb() {
+export async function getAllArticlesFromDb(pagination?: PaginationOptions): Promise<any[] | PaginatedResult<any>> {
   try {
-    const list = await db.select().from(articles);
-    return list.map(a => a.data);
+    const list = await db.select().from(articles).orderBy(desc(articles.updatedAt));
+    const articlesList = list.map(a => a.data);
+
+    if (pagination && (pagination.page || pagination.limit)) {
+      const page = Math.max(1, pagination.page || 1);
+      const limit = Math.min(100, Math.max(1, pagination.limit || 20));
+      const total = articlesList.length;
+      const totalPages = Math.ceil(total / limit) || 1;
+      const start = (page - 1) * limit;
+      const items = articlesList.slice(start, start + limit);
+
+      return {
+        items,
+        pagination: { total, page, limit, totalPages }
+      };
+    }
+
+    return articlesList;
   } catch (error) {
     console.error('Error fetching articles from DB:', error);
     throw new Error('Database query failed for articles.');
@@ -408,17 +602,17 @@ export async function getAllArticlesFromDb() {
 }
 
 export async function saveArticlesInDb(articlesList: any[]) {
-  try {
+  return await db.transaction(async (tx) => {
     for (const art of articlesList) {
       if (!art || !art.id) continue;
-      const existing = await db.select().from(articles).where(eq(articles.id, art.id));
+      const existing = await tx.select().from(articles).where(eq(articles.id, art.id));
       if (existing.length > 0) {
-        await db.update(articles).set({
+        await tx.update(articles).set({
           data: art,
           updatedAt: new Date()
         }).where(eq(articles.id, art.id));
       } else {
-        await db.insert(articles).values({
+        await tx.insert(articles).values({
           id: art.id,
           data: art,
           updatedAt: new Date()
@@ -426,10 +620,7 @@ export async function saveArticlesInDb(articlesList: any[]) {
       }
     }
     return { success: true };
-  } catch (error) {
-    console.error('Error saving articles in DB:', error);
-    throw new Error('Database save failed for articles.');
-  }
+  });
 }
 
 export async function deleteArticleFromDb(articleId: string) {
@@ -478,15 +669,14 @@ export async function saveFaqConfigInDb(configData: any) {
   }
 }
 
-// 15. SuperAdmin Database Reset
+// 15. SuperAdmin Database Reset (Transactional)
 export async function resetDatabaseCleanStart() {
-  try {
-    await db.delete(companionTrips);
-    await db.delete(customRoutes);
-    await db.delete(travelNotes);
+  return await db.transaction(async (tx) => {
+    await tx.delete(companionTrips);
+    await tx.delete(customRoutes);
+    await tx.delete(travelNotes);
+    await tx.delete(refreshTokens);
+    await tx.delete(revokedTokens);
     return { success: true, timestamp: Date.now() };
-  } catch (error) {
-    console.error('Error resetting database:', error);
-    throw new Error('Database reset failed.');
-  }
+  });
 }

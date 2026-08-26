@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { CompanionTrip, Region, VesselType, AppUser, TripApplication, TripChatMessage, TripChatPresence, RiverRoute, CrewReview } from '../types';
 import { TripChatSyncService } from '../firebase';
+import { CloudSqlDbService } from '../services/cloudSqlDb';
 import { UserProfileModal } from './UserProfileModal';
 import { 
   Users, 
@@ -247,7 +248,7 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
   const [applicantExp, setApplicantExp] = useState('');
   const [applicantNotes, setApplicantNotes] = useState('');
 
-  const isAdmin = currentUser?.email.toLowerCase() === 'zuubra1985@gmail.com' || currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
+  const isAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
 
   // Keep open modal in sync with live real-time trips updates
   useEffect(() => {
@@ -577,32 +578,15 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
       applications: [newApp, ...existingApps.filter(a => a.userId !== currentUser?.id)]
     };
 
-    // Send Telegram instant notification to organizer
-    try {
-      fetch('/api/notifications/telegram-application', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tripTitle: joinModalTrip.title,
-          riverName: joinModalTrip.riverName,
-          region: joinModalTrip.region,
-          dates: `${joinModalTrip.startDate} — ${joinModalTrip.endDate}`,
-          organizerName: joinModalTrip.organizer.name,
-          organizerTelegram: joinModalTrip.organizer.telegram || joinModalTrip.groupChatLink || '',
-          applicantName: newApp.applicantName,
-          applicantPhone: newApp.applicantPhone,
-          applicantVessel: newApp.vesselType,
-          experienceLevel: newApp.experienceLevel,
-          notes: newApp.notes
-        })
-      }).then(res => res.json()).then(data => {
-        console.log('Telegram application notification status:', data);
-      }).catch(err => {
-        console.warn('Failed to send Telegram notification:', err);
-      });
-    } catch (err) {
-      console.warn('Telegram notification trigger error:', err);
-    }
+    // Send Telegram instant notification to organizer via secure backend endpoint (P1-5)
+    CloudSqlDbService.sendTelegramApplication({
+      tripId: joinModalTrip.id,
+      notes: newApp.notes,
+      vesselType: newApp.vesselType,
+      experienceLevel: newApp.experienceLevel
+    }).catch(err => {
+      console.warn('Failed to send Telegram notification:', err);
+    });
 
     onUpdateTrip(updatedTrip);
     if (selectedTrip?.id === updatedTrip.id) {

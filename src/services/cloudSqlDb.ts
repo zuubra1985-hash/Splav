@@ -2,6 +2,7 @@ import { AppUser, CompanionTrip, RiverRoute, TravelNotesConfig, ArticleReport, F
 import { syncTracker } from './syncTracker';
 
 const TOKEN_KEY = 'splav86_jwt_token';
+const REFRESH_TOKEN_KEY = 'splav86_refresh_token';
 
 export function getStoredToken(): string | null {
   try {
@@ -11,14 +12,32 @@ export function getStoredToken(): string | null {
   }
 }
 
-export function setStoredToken(token: string | null) {
+export function getStoredRefreshToken(): string | null {
   try {
-    if (token) {
-      localStorage.setItem(TOKEN_KEY, token);
-    } else {
+    return localStorage.getItem(REFRESH_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredTokens(tokens: { accessToken?: string | null; refreshToken?: string | null }) {
+  try {
+    if (tokens.accessToken) {
+      localStorage.setItem(TOKEN_KEY, tokens.accessToken);
+    } else if (tokens.accessToken === null) {
       localStorage.removeItem(TOKEN_KEY);
     }
+
+    if (tokens.refreshToken) {
+      localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
+    } else if (tokens.refreshToken === null) {
+      localStorage.removeItem(REFRESH_TOKEN_KEY);
+    }
   } catch {}
+}
+
+export function setStoredToken(token: string | null) {
+  setStoredTokens({ accessToken: token });
 }
 
 function getAuthHeaders(): HeadersInit {
@@ -32,10 +51,60 @@ function getAuthHeaders(): HeadersInit {
   return headers;
 }
 
+// Auto-refreshing authenticated fetch wrapper
+async function authenticatedFetch(url: string, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers || {});
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  const token = getStoredToken();
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  let res = await fetch(url, { ...init, headers });
+
+  // If 401 Unauthorized and we have a refresh token, attempt transparent refresh
+  if (res.status === 401) {
+    const refreshToken = getStoredRefreshToken();
+    if (refreshToken) {
+      try {
+        const refreshRes = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken })
+        });
+
+        if (refreshRes.ok) {
+          const refreshData = await refreshRes.json();
+          setStoredTokens({
+            accessToken: refreshData.accessToken || refreshData.token,
+            refreshToken: refreshData.refreshToken
+          });
+
+          // Retry the original request with the new access token
+          headers.set('Authorization', `Bearer ${refreshData.accessToken || refreshData.token}`);
+          res = await fetch(url, { ...init, headers });
+        } else {
+          // Refresh token invalid or expired: clear local session
+          setStoredTokens({ accessToken: null, refreshToken: null });
+        }
+      } catch {
+        setStoredTokens({ accessToken: null, refreshToken: null });
+      }
+    } else {
+      setStoredTokens({ accessToken: null, refreshToken: null });
+    }
+  }
+
+  return res;
+}
+
 // Cloud SQL Database Client Service for secure cross-device synchronization
 export const CloudSqlDbService = {
   // Auth API
-  async login(email: string, password: string): Promise<{ token: string; user: PrivateUserDTO }> {
+  async login(email: string, password: string): Promise<{ token: string; accessToken: string; refreshToken: string; user: PrivateUserDTO }> {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -45,7 +114,10 @@ export const CloudSqlDbService = {
     if (!res.ok) {
       throw new Error(data.error || 'Ошибка авторизации');
     }
-    setStoredToken(data.token);
+    setStoredTokens({
+      accessToken: data.accessToken || data.token,
+      refreshToken: data.refreshToken
+    });
     return data;
   },
 
@@ -57,7 +129,7 @@ export const CloudSqlDbService = {
     city?: string;
     experienceLevel?: string;
     telegram?: string;
-  }): Promise<{ token: string; user: PrivateUserDTO }> {
+  }): Promise<{ token: string; accessToken: string; refreshToken: string; user: PrivateUserDTO }> {
     const res = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -67,21 +139,30 @@ export const CloudSqlDbService = {
     if (!res.ok) {
       throw new Error(data.error || 'Ошибка регистрации');
     }
-    setStoredToken(data.token);
+    setStoredTokens({
+      accessToken: data.accessToken || data.token,
+      refreshToken: data.refreshToken
+    });
     return data;
+  },
+
+  async logout(): Promise<void> {
+    const refreshToken = getStoredRefreshToken();
+    try {
+      await authenticatedFetch('/api/auth/logout', {
+        method: 'POST',
+        body: JSON.stringify({ refreshToken })
+      });
+    } catch {}
+    setStoredTokens({ accessToken: null, refreshToken: null });
   },
 
   async fetchCurrentUser(): Promise<PrivateUserDTO | null> {
     const token = getStoredToken();
     if (!token) return null;
     try {
-      const res = await fetch('/api/users/me', {
-        headers: getAuthHeaders()
-      });
+      const res = await authenticatedFetch('/api/users/me');
       if (!res.ok) {
-        if (res.status === 401) {
-          setStoredToken(null);
-        }
         return null;
       }
       return await res.json();
@@ -92,9 +173,8 @@ export const CloudSqlDbService = {
   },
 
   async updateCurrentUser(updates: Partial<AppUser>): Promise<PrivateUserDTO> {
-    const res = await fetch('/api/users/me', {
+    const res = await authenticatedFetch('/api/users/me', {
       method: 'PATCH',
-      headers: getAuthHeaders(),
       body: JSON.stringify(updates)
     });
     const data = await res.json();
@@ -105,9 +185,8 @@ export const CloudSqlDbService = {
   },
 
   async changePassword(currentPassword: string, newPassword: string): Promise<void> {
-    const res = await fetch('/api/users/me/password', {
+    const res = await authenticatedFetch('/api/users/me/password', {
       method: 'PATCH',
-      headers: getAuthHeaders(),
       body: JSON.stringify({ currentPassword, newPassword })
     });
     const data = await res.json();
@@ -116,43 +195,61 @@ export const CloudSqlDbService = {
     }
   },
 
+  // Telegram Application API (Strict P1-5)
+  async sendTelegramApplication(params: {
+    tripId: string;
+    notes?: string;
+    vesselType?: string;
+    experienceLevel?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const res = await authenticatedFetch('/api/notifications/telegram-application', {
+      method: 'POST',
+      body: JSON.stringify(params)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Ошибка отправки заявки');
+    }
+    return data;
+  },
+
   // Users Directory
   async fetchUsers(): Promise<AppUser[]> {
     try {
-      const res = await fetch('/api/db/users', {
-        headers: getAuthHeaders()
-      });
+      const res = await authenticatedFetch('/api/db/users');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: AppUser[] = await res.json();
       syncTracker.recordDownload('cloudsql', {
-        count: data.length,
-        message: `Загружено ${data.length} пользователей из CloudSQL`
+        count: Array.isArray(data) ? data.length : 0,
+        message: `Загружено пользователей из CloudSQL`
       });
-      return data;
+      return Array.isArray(data) ? data : (data as any).items || [];
     } catch (e) {
       console.warn('CloudSQL fetchUsers failed:', e);
       return [];
     }
   },
 
-  async fetchPublicUsers(): Promise<PublicUserDTO[]> {
+  async fetchPublicUsers(page?: number, limit?: number): Promise<PublicUserDTO[]> {
     try {
-      const res = await fetch('/api/users/public');
+      const query = page ? `?page=${page}&limit=${limit || 20}` : '';
+      const res = await fetch(`/api/users/public${query}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
+      const data = await res.json();
+      return Array.isArray(data) ? data : data.items || [];
     } catch (e) {
       console.warn('fetchPublicUsers failed:', e);
       return [];
     }
   },
 
-  async fetchAdminUsers(): Promise<PrivateUserDTO[]> {
+  async fetchAdminUsers(page?: number, limit?: number): Promise<PrivateUserDTO[]> {
     try {
-      const res = await fetch('/api/admin/users', {
-        headers: getAuthHeaders()
-      });
+      const query = page ? `?page=${page}&limit=${limit || 20}` : '';
+      const res = await authenticatedFetch(`/api/admin/users${query}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
+      const data = await res.json();
+      return Array.isArray(data) ? data : data.items || [];
     } catch (e) {
       console.warn('fetchAdminUsers failed:', e);
       return [];
@@ -160,9 +257,8 @@ export const CloudSqlDbService = {
   },
 
   async adminChangeUserRole(userId: string, role: UserRole): Promise<void> {
-    const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/role`, {
+    const res = await authenticatedFetch(`/api/admin/users/${encodeURIComponent(userId)}/role`, {
       method: 'PATCH',
-      headers: getAuthHeaders(),
       body: JSON.stringify({ role })
     });
     if (!res.ok) {
@@ -172,9 +268,8 @@ export const CloudSqlDbService = {
   },
 
   async adminDeleteUser(userId: string): Promise<void> {
-    const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders()
+    const res = await authenticatedFetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
+      method: 'DELETE'
     });
     if (!res.ok) {
       const err = await res.json();
@@ -183,9 +278,8 @@ export const CloudSqlDbService = {
   },
 
   async adminResetDatabase(): Promise<{ timestamp: number }> {
-    const res = await fetch('/api/admin/reset-database', {
-      method: 'POST',
-      headers: getAuthHeaders()
+    const res = await authenticatedFetch('/api/admin/reset-database', {
+      method: 'POST'
     });
     const data = await res.json();
     if (!res.ok) {
@@ -196,9 +290,8 @@ export const CloudSqlDbService = {
 
   async saveUser(user: AppUser): Promise<void> {
     try {
-      const res = await fetch('/api/db/users', {
+      const res = await authenticatedFetch('/api/db/users', {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: JSON.stringify(user)
       });
       if (res.ok) {
@@ -213,9 +306,8 @@ export const CloudSqlDbService = {
 
   async deleteUser(userId: string): Promise<void> {
     try {
-      await fetch(`/api/db/users/${encodeURIComponent(userId)}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders()
+      await authenticatedFetch(`/api/db/users/${encodeURIComponent(userId)}`, {
+        method: 'DELETE'
       });
       syncTracker.recordUpload('cloudsql', {
         message: `Пользователь ${userId} удален из CloudSQL`
@@ -226,18 +318,18 @@ export const CloudSqlDbService = {
   },
 
   // Trips
-  async fetchTrips(): Promise<CompanionTrip[]> {
+  async fetchTrips(page?: number, limit?: number): Promise<CompanionTrip[]> {
     try {
-      const res = await fetch('/api/db/trips', {
-        headers: getAuthHeaders()
-      });
+      const query = page ? `?page=${page}&limit=${limit || 20}` : '';
+      const res = await authenticatedFetch(`/api/db/trips${query}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: CompanionTrip[] = await res.json();
+      const data = await res.json();
+      const items: CompanionTrip[] = Array.isArray(data) ? data : data.items || [];
       syncTracker.recordDownload('cloudsql', {
-        count: data.length,
-        message: `Загружено ${data.length} походов из CloudSQL`
+        count: items.length,
+        message: `Загружено ${items.length} походов из CloudSQL`
       });
-      return data;
+      return items;
     } catch (e) {
       console.warn('CloudSQL fetchTrips failed:', e);
       return [];
@@ -246,9 +338,8 @@ export const CloudSqlDbService = {
 
   async saveTrips(trips: CompanionTrip[]): Promise<void> {
     try {
-      const res = await fetch('/api/db/trips', {
+      const res = await authenticatedFetch('/api/db/trips', {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: JSON.stringify({ trips })
       });
       if (res.ok) {
@@ -264,9 +355,8 @@ export const CloudSqlDbService = {
 
   async saveTrip(trip: CompanionTrip): Promise<void> {
     try {
-      const res = await fetch('/api/db/trips', {
+      const res = await authenticatedFetch('/api/db/trips', {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: JSON.stringify(trip)
       });
       if (res.ok) {
@@ -281,9 +371,8 @@ export const CloudSqlDbService = {
 
   async deleteTrip(tripId: string): Promise<void> {
     try {
-      await fetch(`/api/db/trips/${encodeURIComponent(tripId)}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders()
+      await authenticatedFetch(`/api/db/trips/${encodeURIComponent(tripId)}`, {
+        method: 'DELETE'
       });
       syncTracker.recordUpload('cloudsql', {
         message: `Поход ${tripId} удален из CloudSQL`
@@ -294,18 +383,18 @@ export const CloudSqlDbService = {
   },
 
   // Routes
-  async fetchRoutes(): Promise<RiverRoute[]> {
+  async fetchRoutes(page?: number, limit?: number): Promise<RiverRoute[]> {
     try {
-      const res = await fetch('/api/db/routes', {
-        headers: getAuthHeaders()
-      });
+      const query = page ? `?page=${page}&limit=${limit || 20}` : '';
+      const res = await authenticatedFetch(`/api/db/routes${query}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: RiverRoute[] = await res.json();
+      const data = await res.json();
+      const items: RiverRoute[] = Array.isArray(data) ? data : data.items || [];
       syncTracker.recordDownload('cloudsql', {
-        count: data.length,
-        message: `Загружено ${data.length} маршрутов из CloudSQL`
+        count: items.length,
+        message: `Загружено ${items.length} маршрутов из CloudSQL`
       });
-      return data;
+      return items;
     } catch (e) {
       console.warn('CloudSQL fetchRoutes failed:', e);
       return [];
@@ -314,9 +403,8 @@ export const CloudSqlDbService = {
 
   async saveRoutes(routes: RiverRoute[]): Promise<void> {
     try {
-      const res = await fetch('/api/db/routes', {
+      const res = await authenticatedFetch('/api/db/routes', {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: JSON.stringify({ routes })
       });
       if (res.ok) {
@@ -332,9 +420,8 @@ export const CloudSqlDbService = {
 
   async saveRoute(route: RiverRoute): Promise<void> {
     try {
-      const res = await fetch('/api/db/routes', {
+      const res = await authenticatedFetch('/api/db/routes', {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: JSON.stringify(route)
       });
       if (res.ok) {
@@ -349,9 +436,8 @@ export const CloudSqlDbService = {
 
   async deleteRoute(routeId: string): Promise<void> {
     try {
-      await fetch(`/api/db/routes/${encodeURIComponent(routeId)}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders()
+      await authenticatedFetch(`/api/db/routes/${encodeURIComponent(routeId)}`, {
+        method: 'DELETE'
       });
       syncTracker.recordUpload('cloudsql', {
         message: `Маршрут ${routeId} удален из CloudSQL`
@@ -362,18 +448,18 @@ export const CloudSqlDbService = {
   },
 
   // Articles & River Pilot Guides
-  async fetchArticles(): Promise<ArticleReport[]> {
+  async fetchArticles(page?: number, limit?: number): Promise<ArticleReport[]> {
     try {
-      const res = await fetch('/api/db/articles', {
-        headers: getAuthHeaders()
-      });
+      const query = page ? `?page=${page}&limit=${limit || 20}` : '';
+      const res = await authenticatedFetch(`/api/db/articles${query}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: ArticleReport[] = await res.json();
+      const data = await res.json();
+      const items: ArticleReport[] = Array.isArray(data) ? data : data.items || [];
       syncTracker.recordDownload('cloudsql', {
-        count: data.length,
-        message: `Загружено ${data.length} статей из CloudSQL`
+        count: items.length,
+        message: `Загружено ${items.length} статей из CloudSQL`
       });
-      return data;
+      return items;
     } catch (e) {
       console.warn('CloudSQL fetchArticles failed:', e);
       return [];
@@ -382,9 +468,8 @@ export const CloudSqlDbService = {
 
   async saveArticles(articles: ArticleReport[]): Promise<void> {
     try {
-      const res = await fetch('/api/db/articles', {
+      const res = await authenticatedFetch('/api/db/articles', {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: JSON.stringify({ articles })
       });
       if (res.ok) {
@@ -411,9 +496,8 @@ export const CloudSqlDbService = {
 
   async deleteArticle(articleId: string): Promise<void> {
     try {
-      await fetch(`/api/db/articles/${encodeURIComponent(articleId)}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders()
+      await authenticatedFetch(`/api/db/articles/${encodeURIComponent(articleId)}`, {
+        method: 'DELETE'
       });
       syncTracker.recordUpload('cloudsql', {
         message: `Статья ${articleId} удалена из CloudSQL`
@@ -426,9 +510,7 @@ export const CloudSqlDbService = {
   // Travel Notes & Reviews
   async fetchTravelNotes(): Promise<TravelNotesConfig | null> {
     try {
-      const res = await fetch('/api/db/travel-notes', {
-        headers: getAuthHeaders()
-      });
+      const res = await authenticatedFetch('/api/db/travel-notes');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: TravelNotesConfig = await res.json();
       syncTracker.recordDownload('cloudsql', {
@@ -443,9 +525,8 @@ export const CloudSqlDbService = {
 
   async saveTravelNotes(notesConfig: TravelNotesConfig): Promise<void> {
     try {
-      const res = await fetch('/api/db/travel-notes', {
+      const res = await authenticatedFetch('/api/db/travel-notes', {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: JSON.stringify(notesConfig)
       });
       if (res.ok) {
@@ -461,9 +542,7 @@ export const CloudSqlDbService = {
   // FAQ & Safety Handbook
   async fetchFaq(): Promise<FaqDataConfig | null> {
     try {
-      const res = await fetch('/api/db/faq', {
-        headers: getAuthHeaders()
-      });
+      const res = await authenticatedFetch('/api/db/faq');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: FaqDataConfig = await res.json();
       syncTracker.recordDownload('cloudsql', {
@@ -478,9 +557,8 @@ export const CloudSqlDbService = {
 
   async saveFaq(faqConfig: FaqDataConfig): Promise<void> {
     try {
-      const res = await fetch('/api/db/faq', {
+      const res = await authenticatedFetch('/api/db/faq', {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: JSON.stringify(faqConfig)
       });
       if (res.ok) {

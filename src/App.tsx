@@ -176,14 +176,6 @@ export default function App() {
       const list: AppUser[] = stored ? JSON.parse(stored) : INITIAL_USERS;
       const map = new Map<string, AppUser>();
 
-      // Guaranteed root master superadmin (unless explicitly deleted)
-      INITIAL_USERS.filter((u) => u.email.toLowerCase() === 'zuubra1985@gmail.com').forEach((sa) => {
-        const key = sa.email.trim().toLowerCase();
-        if (!deletedKeys.has(key) && !deletedKeys.has(sa.id.trim().toLowerCase())) {
-          map.set(key, sa);
-        }
-      });
-
       list.forEach((u) => {
         const emailKey = (u.email || '').trim().toLowerCase();
         const idKey = (u.id || '').trim().toLowerCase();
@@ -200,14 +192,7 @@ export default function App() {
           return;
         }
 
-        if (emailKey === 'zuubra1985@gmail.com') {
-          map.set(emailKey, {
-            ...u,
-            id: 'user-superadmin-zuubra',
-            name: 'Администратор (zuubra1985)',
-            role: 'superadmin'
-          });
-        } else if (emailKey) {
+        if (emailKey) {
           map.set(emailKey, u);
         } else {
           map.set(idKey, u);
@@ -551,15 +536,6 @@ export default function App() {
         const userMap = new Map<string, AppUser>();
         const duplicateIdsToDelete: string[] = [];
 
-        // Master owner always guaranteed unless explicitly deleted
-        INITIAL_USERS.filter((u) => u.email.toLowerCase() === 'zuubra1985@gmail.com').forEach((sa) => {
-          const saEmail = sa.email.trim().toLowerCase();
-          const saId = sa.id.trim().toLowerCase();
-          if (!deletedKeys.has(saEmail) && !deletedKeys.has(saId)) {
-            userMap.set(saEmail, sa);
-          }
-        });
-
         // Merge cloud users, detect duplicates, and omit deleted users
         cloudUsers.forEach((u) => {
           const emailKey = (u.email || '').trim().toLowerCase();
@@ -583,34 +559,21 @@ export default function App() {
 
           const primaryKey = emailKey || idKey;
 
-          if (emailKey === 'zuubra1985@gmail.com') {
-            if (u.id === 'user-superadmin-zuubra') {
-              userMap.set(emailKey, {
-                ...u,
-                id: 'user-superadmin-zuubra',
-                name: 'Администратор (zuubra1985)',
-                role: 'superadmin'
-              });
-            } else {
+          if (userMap.has(primaryKey)) {
+            const existing = userMap.get(primaryKey)!;
+            if (existing.id !== u.id) {
               duplicateIdsToDelete.push(u.id);
             }
+            // Respect whatever role was saved in DB
+            userMap.set(primaryKey, { ...existing, ...u });
           } else {
-            if (userMap.has(primaryKey)) {
-              const existing = userMap.get(primaryKey)!;
-              if (existing.id !== u.id) {
-                duplicateIdsToDelete.push(u.id);
-              }
-              // Respect whatever role was saved dynamically
-              userMap.set(primaryKey, { ...existing, ...u });
-            } else {
-              userMap.set(primaryKey, u);
-            }
+            userMap.set(primaryKey, u);
           }
         });
 
-        // 3. Purge duplicate documents from Firestore and CloudSQL
+        // Purge duplicate documents
         duplicateIdsToDelete.forEach((dupId) => {
-          if (dupId && dupId !== 'user-superadmin-zuubra') {
+          if (dupId) {
             UsersSyncService.removeUser(dupId).catch(console.warn);
             CloudSqlDbService.deleteUser(dupId).catch(console.warn);
           }
@@ -1025,8 +988,7 @@ export default function App() {
     setArticles((prevArticles) => {
       let changed = false;
       const nextArticles = prevArticles.map((art) => {
-        const artEmail = (art.authorEmail || '').trim().toLowerCase();
-        if (art.authorId === updatedUser.id || (normEmail && artEmail === normEmail) || art.author === updatedUser.name) {
+        if (art.authorId === updatedUser.id || art.author === updatedUser.name) {
           changed = true;
           const updatedArt = {
             ...art,
@@ -1229,8 +1191,7 @@ export default function App() {
   }, [selectedRoute, isPassportEditorOpen, isAuthModalOpen, activeTab]);
 
   // Superadmin & Admin status
-  const isSuperAdmin = currentUser?.email.toLowerCase() === 'zuubra1985@gmail.com' || 
-                       currentUser?.role === 'superadmin';
+  const isSuperAdmin = currentUser?.role === 'superadmin';
   const isAdmin = isSuperAdmin || currentUser?.role === 'admin';
 
   const handleOpenFaqEditor = () => {
@@ -1414,11 +1375,7 @@ export default function App() {
       // If author chose to share/publish it, it's public for everyone
       if (r.isPublic) return true;
       // If current user is the author, they can view their own private route
-      if (
-        currentUser &&
-        ((r.authorId && r.authorId === currentUser.id) ||
-          (r.authorEmail && r.authorEmail.toLowerCase() === currentUser.email.toLowerCase()))
-      ) {
+      if (currentUser && r.authorId && r.authorId === currentUser.id) {
         return true;
       }
       // Admins see all routes for moderation
@@ -1657,7 +1614,7 @@ export default function App() {
           onSelectForMchs={handleSelectForMchs}
           onToggleFavorite={handleToggleFavoriteRoute}
           onEditRoute={
-            (isAdmin || (currentUser && ((detailModalRoute.authorId && detailModalRoute.authorId === currentUser.id) || (detailModalRoute.authorEmail && detailModalRoute.authorEmail.toLowerCase() === currentUser.email.toLowerCase()))))
+            (isAdmin || (currentUser && detailModalRoute.authorId && detailModalRoute.authorId === currentUser.id))
               ? (r) => {
                   setPassportEditorRoute(r);
                   setIsPassportEditorOpen(true);
@@ -1668,7 +1625,7 @@ export default function App() {
       )}
 
       {/* River Passport Full Editor Modal (Admin or Route Author) */}
-      {isPassportEditorOpen && (isAdmin || (passportEditorRoute && currentUser && ((passportEditorRoute.authorId && passportEditorRoute.authorId === currentUser.id) || (passportEditorRoute.authorEmail && passportEditorRoute.authorEmail.toLowerCase() === currentUser.email.toLowerCase())))) && (
+      {isPassportEditorOpen && (isAdmin || (passportEditorRoute && currentUser && passportEditorRoute.authorId && passportEditorRoute.authorId === currentUser.id)) && (
         <RiverPassportEditorModal
           initialRoute={passportEditorRoute}
           onSave={handleSavePassport}

@@ -176,7 +176,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     : null;
 
   const isSelf = currentUser?.id === user.id || (currentUser?.name && user.name && currentUser.name.toLowerCase() === user.name.toLowerCase());
-  const isSuperAdmin = currentUser?.role === 'superadmin' || currentUser?.email?.toLowerCase() === 'zuubra1985@gmail.com';
+  const isSuperAdmin = currentUser?.role === 'superadmin';
   const isAdmin = isSuperAdmin || currentUser?.role === 'admin';
   const canSeePhone = isSelf || isAdmin || user.showContactsPublicly;
 
@@ -318,7 +318,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
               {/* Role & FSTR Rank Badge */}
               <div className="flex flex-wrap items-center justify-center sm:justify-start gap-1.5 text-xs">
-                {user.role === 'superadmin' || user.email?.toLowerCase() === 'zuubra1985@gmail.com' ? (
+                {user.role === 'superadmin' ? (
                   <span className="px-2 py-0.5 rounded-lg bg-amber-400 text-black font-black text-[10px] sm:text-[11px] flex items-center gap-1 shadow-xs">
                     <ShieldCheck className="w-3 h-3" />
                     Администратор клуба
