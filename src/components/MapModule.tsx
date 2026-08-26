@@ -32,7 +32,7 @@ import {
 import confetti from 'canvas-confetti';
 import { parseGpxFile, generateGpxString, ParsedGpxResult } from '../utils/gpxParser';
 
-type MapLayerType = 'satellite' | 'topomap' | 'osm' | 'dark';
+type MapLayerType = 'satellite' | 'osm';
 
 interface MapModuleProps {
   routes: RiverRoute[];
@@ -130,24 +130,29 @@ export const MapModule: React.FC<MapModuleProps> = ({
       }
     });
 
-    let tileUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-    let attribution = '&copy; Esri &mdash; Earthstar Geographics';
+    let tileUrl = 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}';
+    let subdomains: string[] = ['mt0', 'mt1', 'mt2', 'mt3'];
+    let attribution = '&copy; Google Maps &mdash; Спутник';
+    let maxZoom = 20;
 
-    if (activeBaseLayer === 'topomap') {
-      tileUrl = 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png';
-      attribution = 'Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap';
-    } else if (activeBaseLayer === 'osm') {
+    if (activeBaseLayer === 'osm') {
       tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+      subdomains = ['a', 'b', 'c'];
       attribution = '&copy; OpenStreetMap contributors';
-    } else if (activeBaseLayer === 'dark') {
-      tileUrl = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
-      attribution = '&copy; CARTO &copy; OpenStreetMap';
+      maxZoom = 19;
     }
 
-    L.tileLayer(tileUrl, {
+    const tileOptions: L.TileLayerOptions = {
       attribution,
-      maxZoom: 18
-    }).addTo(map);
+      maxZoom,
+      crossOrigin: true
+    };
+    if (subdomains.length > 0) {
+      tileOptions.subdomains = subdomains;
+    }
+
+    const newLayer = L.tileLayer(tileUrl, tileOptions);
+    newLayer.addTo(map);
   }, [activeBaseLayer]);
 
   // 3. Render Routes and POIs along real riverbeds
@@ -856,6 +861,11 @@ export const MapModule: React.FC<MapModuleProps> = ({
                         <span className="text-[10px] text-[#8B7E6D]">
                           {route.intlClass}
                         </span>
+                        {route.authorName && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] truncate max-w-[130px]">
+                            Автор: {route.authorName}
+                          </span>
+                        )}
                       </div>
                       <h3 className="text-sm font-bold text-[#1A1F1A] mt-1 group-hover:text-[#2D5A27] transition-colors">
                         {route.name}
@@ -978,31 +988,23 @@ export const MapModule: React.FC<MapModuleProps> = ({
           <div className="flex items-center bg-white/95 backdrop-blur-md p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-[#E5E0D8] shadow-md space-x-0.5 sm:space-x-1">
             <button
               onClick={() => setActiveBaseLayer('satellite')}
-              className={`px-2 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-bold rounded-lg sm:rounded-xl transition-all ${
+              className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-bold rounded-lg sm:rounded-xl transition-all ${
                 activeBaseLayer === 'satellite'
                   ? 'bg-[#2D5A27] text-white shadow-xs'
                   : 'text-[#6B665F] hover:text-[#2D5A27]'
               }`}
+              title="Спутниковые снимки высокого разрешения"
             >
               Спутник
             </button>
             <button
-              onClick={() => setActiveBaseLayer('topomap')}
-              className={`px-2 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-bold rounded-lg sm:rounded-xl transition-all ${
-                activeBaseLayer === 'topomap'
-                  ? 'bg-[#2D5A27] text-white shadow-xs'
-                  : 'text-[#6B665F] hover:text-[#2D5A27]'
-              }`}
-            >
-              Рельеф
-            </button>
-            <button
               onClick={() => setActiveBaseLayer('osm')}
-              className={`px-2 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-bold rounded-lg sm:rounded-xl transition-all ${
+              className={`px-2.5 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-bold rounded-lg sm:rounded-xl transition-all ${
                 activeBaseLayer === 'osm'
                   ? 'bg-[#2D5A27] text-white shadow-xs'
                   : 'text-[#6B665F] hover:text-[#2D5A27]'
               }`}
+              title="Стандартная карта дорог и гидрографии OpenStreetMap"
             >
               OSM
             </button>

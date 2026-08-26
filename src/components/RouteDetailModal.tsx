@@ -186,6 +186,11 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
                   {route.riverBasin}
                 </span>
               )}
+              {route.authorName && (
+                <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-[#FEF3C7] text-[#92400E] backdrop-blur-md">
+                  👤 Автор: {route.authorName}
+                </span>
+              )}
             </div>
             <h1 className="text-xl sm:text-2xl font-extrabold text-white leading-tight">
               {route.name}

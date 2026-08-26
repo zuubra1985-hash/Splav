@@ -908,6 +908,31 @@ export const RiverPassportEditorModal: React.FC<RiverPassportEditorModalProps> =
                   />
                 </div>
               </div>
+
+              {/* Publication Status & Community Access */}
+              <div className="p-4 bg-[#F4F8F3] rounded-2xl border border-[#CDE0CC] space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-black text-[#2D5A27] uppercase tracking-wider">
+                      Публикация в общий каталог SPLAV86
+                    </span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(formData.isPublic)}
+                      onChange={(e) => setFormData({ ...formData, isPublic: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-[#E5E0D8] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[#E5E0D8] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#2D5A27]"></div>
+                  </label>
+                </div>
+                <p className="text-xs text-[#4A443E]">
+                  {formData.isPublic
+                    ? '🌐 Маршрут будет опубликован в общем каталоге и виден всем пользователям и туристам.'
+                    : '🔒 Маршрут будет сохранен как личный черновик и виден только вам в личном кабинете.'}
+                </p>
+              </div>
             </div>
           )}
 

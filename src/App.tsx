@@ -1214,10 +1214,20 @@ export default function App() {
   };
 
   const handleSavePassport = (savedRoute: RiverRoute) => {
-    if (!isAdmin && !(currentUser && savedRoute.authorId === currentUser.id)) return;
+    if (!isAdmin && !(currentUser && (!savedRoute.authorId || savedRoute.authorId === currentUser.id))) return;
+    
+    // Ensure author attribution if user is logged in and not set
+    const preparedRoute: RiverRoute = {
+      ...savedRoute,
+      authorId: savedRoute.authorId || currentUser?.id,
+      authorName: savedRoute.authorName || currentUser?.name,
+      authorEmail: savedRoute.authorEmail || currentUser?.email,
+      isPersonal: savedRoute.isPersonal ?? true
+    };
+
     setRoutes((prev) => {
-      const exists = prev.some((r) => r.id === savedRoute.id);
-      const updated = exists ? prev.map((r) => (r.id === savedRoute.id ? savedRoute : r)) : [savedRoute, ...prev];
+      const exists = prev.some((r) => r.id === preparedRoute.id);
+      const updated = exists ? prev.map((r) => (r.id === preparedRoute.id ? preparedRoute : r)) : [preparedRoute, ...prev];
       try {
         localStorage.setItem('splav86_custom_routes_v5', JSON.stringify(updated));
       } catch (e) {
@@ -1226,17 +1236,39 @@ export default function App() {
       return updated;
     });
 
-    // Sync to Firestore Cloud DB
-    RoutesSyncService.saveRoute(savedRoute).catch((err) => {
+    // Sync to Firestore Cloud DB and CloudSQL
+    RoutesSyncService.saveRoute(preparedRoute).catch((err) => {
       console.warn('Failed to sync route to Firestore:', err);
     });
+    CloudSqlDbService.saveRoute(preparedRoute).catch(console.warn);
 
-    if (selectedRoute?.id === savedRoute.id) {
-      setSelectedRoute(savedRoute);
+    if (selectedRoute?.id === preparedRoute.id) {
+      setSelectedRoute(preparedRoute);
     }
-    if (detailModalRoute?.id === savedRoute.id) {
-      setDetailModalRoute(savedRoute);
+    if (detailModalRoute?.id === preparedRoute.id) {
+      setDetailModalRoute(preparedRoute);
     }
+  };
+
+  const handleDeleteRoute = (routeId: string) => {
+    recordRouteDeletion(routeId);
+    setRoutes((prev) => {
+      const updated = prev.filter((r) => r.id !== routeId);
+      try {
+        localStorage.setItem('splav86_custom_routes_v5', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+
+    RoutesSyncService.removeRoute(routeId).catch((err) => {
+      console.warn('Failed to delete route from Firestore:', err);
+    });
+    CloudSqlDbService.deleteRoute(routeId).catch(console.warn);
+
+    if (selectedRoute?.id === routeId) setSelectedRoute(null);
+    if (detailModalRoute?.id === routeId) setDetailModalRoute(null);
   };
 
   const handleSelectForMchs = (route: RiverRoute) => {
@@ -1295,6 +1327,36 @@ export default function App() {
     CloudSqlDbService.saveTrip(updatedTrip).catch((err) => {
       console.warn('Failed to sync updated trip to CloudSQL API:', err);
     });
+  };
+
+  const handleDeleteTrip = (tripId: string) => {
+    recordTripDeletion(tripId);
+    setTrips((prev) => {
+      const updated = prev.filter((t) => t.id !== tripId);
+      try {
+        localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+    TripsSyncService.removeTrip(tripId).catch(console.warn);
+    CloudSqlDbService.deleteTrip(tripId).catch(console.warn);
+  };
+
+  const handleDeleteArticle = (articleId: string) => {
+    recordArticleDeletion(articleId);
+    setArticles((prev) => {
+      const updated = prev.filter((a) => a.id !== articleId);
+      try {
+        localStorage.setItem('splav86_custom_articles', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+    ArticlesSyncService.removeArticle(articleId).catch(console.warn);
+    CloudSqlDbService.deleteArticle(articleId).catch(console.warn);
   };
 
   const handleViewTripOnMainMap = (trip: CompanionTrip) => {
@@ -1552,13 +1614,18 @@ export default function App() {
             onOpenMyTrip={() => setActiveTab('mytrip')}
             onOpenRouteDetails={(r) => setDetailModalRoute(r)}
             onToggleFavorite={handleToggleFavoriteRoute}
-            onAddCustomRoute={(newRoute) => {
-              setRoutes(prev => [newRoute, ...prev]);
-              try {
-                localStorage.setItem('splav86_custom_routes_v5', JSON.stringify([newRoute, ...routes]));
-              } catch (e) {}
-              RoutesSyncService.saveRoute(newRoute).catch(console.warn);
+            onAddCustomRoute={handleSavePassport}
+            onUpdateRoute={handleSavePassport}
+            onDeleteRoute={handleDeleteRoute}
+            onOpenPassportEditor={(r) => {
+              setPassportEditorRoute(r || null);
+              setIsPassportEditorOpen(true);
             }}
+            onSelectRouteOnMap={(r) => {
+              setSelectedRoute(r);
+              setActiveTab('routes');
+            }}
+            onUpdateTrip={handleUpdateTrip}
           />
         )}
 
@@ -1577,8 +1644,13 @@ export default function App() {
               onUpdateRoutes={setRoutes}
               onUpdateTrips={setTrips}
               onUpdateArticles={setArticles as any}
+              onUpdateNotesConfig={setNotesConfig}
+              onUpdateFaqData={setFaqData}
               onUpdateUserRole={handleUpdateUserRole}
               onDeleteUser={handleDeleteUser}
+              onDeleteRoute={handleDeleteRoute}
+              onDeleteTrip={handleDeleteTrip}
+              onDeleteArticle={handleDeleteArticle}
               onOpenPassportEditor={(r) => {
                 setPassportEditorRoute(r || null);
                 setIsPassportEditorOpen(true);
@@ -1630,7 +1702,7 @@ export default function App() {
           onCreateMyTrip={handleCreateMyTripFromRoute}
           onFindCompanions={handleFindCompanionsFromRoute}
           onEditRoute={
-            (isAdmin || (currentUser && detailModalRoute.authorId && detailModalRoute.authorId === currentUser.id))
+            (isAdmin || (currentUser && (!detailModalRoute.authorId || detailModalRoute.authorId === currentUser.id)))
               ? (r) => {
                   setPassportEditorRoute(r);
                   setIsPassportEditorOpen(true);
@@ -1650,8 +1722,8 @@ export default function App() {
         />
       )}
 
-      {/* River Passport Full Editor Modal (Admin or Route Author) */}
-      {isPassportEditorOpen && (isAdmin || (passportEditorRoute && currentUser && passportEditorRoute.authorId && passportEditorRoute.authorId === currentUser.id)) && (
+      {/* River Passport Full Editor Modal (Admin or Route Author or creating new route) */}
+      {isPassportEditorOpen && (isAdmin || (currentUser && (!passportEditorRoute || !passportEditorRoute.authorId || passportEditorRoute.authorId === currentUser.id))) && (
         <RiverPassportEditorModal
           initialRoute={passportEditorRoute}
           onSave={handleSavePassport}
