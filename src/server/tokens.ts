@@ -63,7 +63,7 @@ export async function revokeToken(token: string, userId?: string, reason: string
       }
     } catch {}
 
-    const id = `rev-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const id = `rev-${crypto.randomUUID()}`;
     await db.insert(revokedTokens).values({
       id,
       tokenHash: hash,
@@ -115,7 +115,7 @@ export async function generateTokenPair(
 
   // Store refresh token in database strictly (P0-2: must throw on DB failure)
   const refreshHash = hashToken(refreshToken);
-  const refreshId = `ref-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const refreshId = `ref-${crypto.randomUUID()}`;
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
 
   await db.insert(refreshTokens).values({

@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { db } from './index.ts';
 import {
   users,
@@ -571,7 +572,7 @@ export async function updateTripApplicationStatusInDb(tripId: string, appId: str
         .where(and(eq(tripParticipants.tripId, tripId), eq(tripParticipants.userId, application.userId)));
 
       if (existingPart.length === 0) {
-        const partId = `part-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const partId = `part-${crypto.randomUUID()}`;
         await tx.insert(tripParticipants).values({
           id: partId,
           tripId,

@@ -3,37 +3,48 @@ import { z } from 'zod';
 export const vesselEnum = z.enum(['sup', 'kayak', 'catamaran', 'motorboat', 'raft', 'packraft']);
 export const userRoleEnum = z.enum(['user', 'organizer', 'moderator', 'admin', 'superadmin']);
 
+// Reusable coordinate validators
+export const latitudeSchema = z.number().min(-90, 'Широта должна быть в диапазоне от -90 до 90').max(90, 'Широта должна быть в диапазоне от -90 до 90');
+export const longitudeSchema = z.number().min(-180, 'Долгота должна быть в диапазоне от -180 до 180').max(180, 'Долгота должна быть в диапазоне от -180 до 180');
+export const coordinatePointSchema = z.tuple([latitudeSchema, longitudeSchema]);
+
+export const geoPointSchema = z.object({
+  name: z.string().max(200).default(''),
+  lat: latitudeSchema,
+  lng: longitudeSchema
+});
+
 // 1. User Schemas
 export const registerUserSchema = z.object({
-  email: z.string().email('Некорректный формат email'),
-  password: z.string().min(3, 'Пароль должен содержать не менее 3 символов'),
-  name: z.string().min(2, 'Имя должно содержать не менее 2 символов'),
-  phone: z.string().optional().default(''),
-  city: z.string().optional().default('Сургут'),
-  experienceLevel: z.string().optional().default('Любитель водных походов'),
-  telegram: z.string().optional().default('')
+  email: z.string().email('Некорректный формат email').max(254, 'Email не должен превышать 254 символов'),
+  password: z.string().min(12, 'Пароль должен содержать не менее 12 символов').max(128, 'Пароль не должен превышать 128 символов'),
+  name: z.string().min(2, 'Имя должно содержать не менее 2 символов').max(100, 'Имя не должно превышать 100 символов'),
+  phone: z.string().max(50).optional().default(''),
+  city: z.string().max(100).optional().default('Сургут'),
+  experienceLevel: z.string().max(100).optional().default('Любитель водных походов'),
+  telegram: z.string().max(100).optional().default('')
 });
 
 export const loginUserSchema = z.object({
-  email: z.string().min(1, 'Email обязателен для входа'),
-  password: z.string().min(1, 'Пароль обязателен для входа')
+  email: z.string().min(1, 'Email обязателен для входа').max(254),
+  password: z.string().min(1, 'Пароль обязателен для входа').max(128)
 });
 
 export const refreshTokenSchema = z.object({
-  refreshToken: z.string().min(1, 'Refresh token обязателен')
+  refreshToken: z.string().min(1, 'Refresh token обязателен').max(2000)
 });
 
 export const userProfileUpdateSchema = z.object({
-  name: z.string().min(1).optional(),
-  phone: z.string().optional(),
-  city: z.string().optional(),
-  avatar: z.string().url().or(z.string()).optional(),
-  experienceLevel: z.string().optional(),
-  favoriteRouteIds: z.array(z.string()).optional(),
-  favoriteRivers: z.array(z.string()).optional(),
-  vesselsOwned: z.array(vesselEnum).optional(),
-  gearInventory: z.array(z.string()).optional(),
-  badges: z.array(z.string()).optional(),
+  name: z.string().min(1).max(100).optional(),
+  phone: z.string().max(50).optional(),
+  city: z.string().max(100).optional(),
+  avatar: z.string().max(2000000).optional(),
+  experienceLevel: z.string().max(100).optional(),
+  favoriteRouteIds: z.array(z.string().max(100)).max(500).optional(),
+  favoriteRivers: z.array(z.string().max(100)).max(100).optional(),
+  vesselsOwned: z.array(vesselEnum).max(20).optional(),
+  gearInventory: z.array(z.string().max(200)).max(200).optional(),
+  badges: z.array(z.string().max(100)).max(100).optional(),
   bio: z.string().max(2000).optional(),
   callsign: z.string().max(100).optional(),
   fstrRank: z.string().max(100).optional(),
@@ -44,120 +55,112 @@ export const userProfileUpdateSchema = z.object({
 });
 
 export const legacyUserSaveSchema = z.object({
-  id: z.string().min(1, 'ID пользователя обязателен'),
-  name: z.string().min(1).optional(),
-  email: z.string().email().optional(),
-  phone: z.string().optional(),
-  city: z.string().optional(),
-  avatar: z.string().optional(),
-  experienceLevel: z.string().optional(),
-  favoriteRouteIds: z.array(z.string()).optional(),
-  favoriteRivers: z.array(z.string()).optional(),
-  vesselsOwned: z.array(vesselEnum).optional(),
-  gearInventory: z.array(z.string()).optional(),
-  badges: z.array(z.string()).optional(),
-  bio: z.string().optional(),
-  callsign: z.string().optional(),
-  fstrRank: z.string().optional(),
-  telegram: z.string().optional(),
-  vk: z.string().optional(),
+  id: z.string().min(1, 'ID пользователя обязателен').max(100),
+  name: z.string().min(1).max(100).optional(),
+  email: z.string().email().max(254).optional(),
+  phone: z.string().max(50).optional(),
+  city: z.string().max(100).optional(),
+  avatar: z.string().max(1000).optional(),
+  experienceLevel: z.string().max(100).optional(),
+  favoriteRouteIds: z.array(z.string().max(100)).max(500).optional(),
+  favoriteRivers: z.array(z.string().max(100)).max(100).optional(),
+  vesselsOwned: z.array(vesselEnum).max(20).optional(),
+  gearInventory: z.array(z.string().max(200)).max(200).optional(),
+  badges: z.array(z.string().max(100)).max(100).optional(),
+  bio: z.string().max(2000).optional(),
+  callsign: z.string().max(100).optional(),
+  fstrRank: z.string().max(100).optional(),
+  telegram: z.string().max(100).optional(),
+  vk: z.string().max(200).optional(),
   isReadyForExpeditions: z.boolean().optional(),
   showContactsPublicly: z.boolean().optional()
 });
 
 // 2. Trip Schemas
 export const tripOrganizerSchema = z.object({
-  userId: z.string().optional(),
-  name: z.string().default('Организатор'),
-  avatar: z.string().default(''),
-  experienceYears: z.number().nonnegative().default(0),
-  completedTrips: z.number().nonnegative().default(0),
-  fstrRank: z.string().default(''),
-  phone: z.string().default(''),
-  telegram: z.string().default('')
+  userId: z.string().max(100).optional(),
+  name: z.string().max(100).default('Организатор'),
+  avatar: z.string().max(1000).default(''),
+  experienceYears: z.number().nonnegative().max(100).default(0),
+  completedTrips: z.number().nonnegative().max(10000).default(0),
+  fstrRank: z.string().max(100).default(''),
+  phone: z.string().max(50).default(''),
+  telegram: z.string().max(100).default('')
 });
 
 export const tripParticipantSchema = z.object({
-  userId: z.string().optional(),
-  name: z.string(),
-  role: z.string().default('Матрос'),
+  userId: z.string().max(100).optional(),
+  name: z.string().max(100),
+  role: z.string().max(100).default('Матрос'),
   vessel: vesselEnum.default('kayak'),
-  avatar: z.string().default(''),
-  phone: z.string().optional()
+  avatar: z.string().max(1000).default(''),
+  phone: z.string().max(50).optional()
 });
 
 export const tripApplicationSchema = z.object({
-  id: z.string(),
-  tripId: z.string(),
-  userId: z.string().optional(),
-  applicantName: z.string(),
-  applicantPhone: z.string(),
-  applicantEmail: z.string().optional(),
-  applicantAvatar: z.string().optional(),
-  experienceLevel: z.string().default('Любитель'),
+  id: z.string().max(100),
+  tripId: z.string().max(100),
+  userId: z.string().max(100).optional(),
+  applicantName: z.string().max(100),
+  applicantPhone: z.string().max(50),
+  applicantEmail: z.string().max(254).optional(),
+  applicantAvatar: z.string().max(1000).optional(),
+  experienceLevel: z.string().max(100).default('Любитель'),
   vesselType: vesselEnum.optional(),
   hasOwnGear: z.boolean().optional(),
-  notes: z.string().optional(),
+  notes: z.string().max(2000).optional(),
   status: z.enum(['pending', 'accepted', 'declined']).default('pending'),
-  appliedAt: z.string().default(() => new Date().toISOString())
+  appliedAt: z.string().max(50).default(() => new Date().toISOString())
 });
 
 export const tripChatMessageSchema = z.object({
-  id: z.string(),
-  tripId: z.string(),
-  userId: z.string().optional(),
-  authorName: z.string().default('Участник'),
-  authorAvatar: z.string().optional().default(''),
+  id: z.string().max(100),
+  tripId: z.string().max(100),
+  userId: z.string().max(100).optional(),
+  authorName: z.string().max(100).default('Участник'),
+  authorAvatar: z.string().max(1000).optional().default(''),
   role: z.enum(['organizer', 'participant', 'guest']).default('participant'),
   text: z.string().max(2000),
-  timestamp: z.string().default(() => new Date().toISOString()),
+  timestamp: z.string().max(50).default(() => new Date().toISOString()),
   createdAt: z.number().optional()
 });
 
 // 3. Route & POI Schemas
 export const routePoiSchema = z.object({
-  id: z.string(),
-  name: z.string(),
+  id: z.string().max(100),
+  name: z.string().max(200),
   type: z.enum(['rapid', 'camp', 'portage', 'hydro_post', 'cabin', 'slipway', 'sos_point', 'indigenous', 'danger']),
-  lat: z.number(),
-  lng: z.number(),
-  description: z.string().default(''),
-  safetyTips: z.string().optional(),
-  photo: z.string().optional(),
-  kmMark: z.number().optional()
+  lat: latitudeSchema,
+  lng: longitudeSchema,
+  description: z.string().max(2000).default(''),
+  safetyTips: z.string().max(2000).optional(),
+  photo: z.string().max(1000).optional(),
+  kmMark: z.number().max(10000).optional()
 });
 
 export const gpxTrackSchema = z.object({
-  name: z.string().default('GPX Track'),
-  lengthKm: z.number().nonnegative().default(0),
-  coordinates: z.array(z.tuple([z.number(), z.number()])).default([]),
-  startPoint: z.object({
-    name: z.string().default(''),
-    lat: z.number(),
-    lng: z.number()
-  }).default({ name: '', lat: 0, lng: 0 }),
-  endPoint: z.object({
-    name: z.string().default(''),
-    lat: z.number(),
-    lng: z.number()
-  }).default({ name: '', lat: 0, lng: 0 }),
-  elevationGainM: z.number().optional(),
-  waypoints: z.array(routePoiSchema).optional()
+  name: z.string().max(200).default('GPX Track'),
+  lengthKm: z.number().nonnegative().max(100000).default(0),
+  coordinates: z.array(coordinatePointSchema).max(50000).default([]),
+  startPoint: geoPointSchema.default({ name: '', lat: 61.25, lng: 73.4 }),
+  endPoint: geoPointSchema.default({ name: '', lat: 61.25, lng: 73.4 }),
+  elevationGainM: z.number().max(10000).optional(),
+  waypoints: z.array(routePoiSchema).max(500).optional()
 });
 
 export const companionTripSchema = z.object({
-  id: z.string().min(1, 'ID похода обязателен'),
-  title: z.string().min(1, 'Название похода обязательно'),
-  riverName: z.string().default('Не указана'),
-  routeId: z.string().optional(),
+  id: z.string().min(1, 'ID похода обязателен').max(100),
+  title: z.string().min(1, 'Название похода обязательно').max(300),
+  riverName: z.string().max(200).default('Не указана'),
+  routeId: z.string().max(100).optional(),
   region: z.enum(['ХМАО', 'ЯНАО', 'ALL']).default('ХМАО'),
-  startDate: z.string().default(''),
-  endDate: z.string().default(''),
-  durationDays: z.number().nonnegative().default(1),
-  vessels: z.array(vesselEnum).default([]),
-  fstrCategory: z.string().default('н/к'),
-  totalSeats: z.number().int().nonnegative().default(4),
-  bookedSeats: z.number().int().nonnegative().default(1),
+  startDate: z.string().max(50).default(''),
+  endDate: z.string().max(50).default(''),
+  durationDays: z.number().nonnegative().max(365).default(1),
+  vessels: z.array(vesselEnum).max(20).default([]),
+  fstrCategory: z.string().max(50).default('н/к'),
+  totalSeats: z.number().int().nonnegative().max(1000).default(4),
+  bookedSeats: z.number().int().nonnegative().max(1000).default(1),
   organizer: tripOrganizerSchema.default({
     name: 'Организатор',
     avatar: '',
@@ -167,283 +170,275 @@ export const companionTripSchema = z.object({
     phone: '',
     telegram: ''
   }),
-  description: z.string().default(''),
-  requiredExperience: z.string().default('Любитель'),
-  gearProvided: z.array(z.string()).default([]),
-  requiredPersonalGear: z.array(z.string()).default([]),
-  estimatedCostPerPersonRub: z.number().nonnegative().default(0),
+  description: z.string().max(20000).default(''),
+  requiredExperience: z.string().max(100).default('Любитель'),
+  gearProvided: z.array(z.string().max(200)).max(100).default([]),
+  requiredPersonalGear: z.array(z.string().max(200)).max(100).default([]),
+  estimatedCostPerPersonRub: z.number().nonnegative().max(10000000).default(0),
   status: z.enum(['recruiting', 'confirmed', 'completed']).default('recruiting'),
-  participants: z.array(tripParticipantSchema).default([]),
-  applications: z.array(tripApplicationSchema).optional().default([]),
-  chatMessages: z.array(tripChatMessageSchema).optional().default([]),
-  groupChatLink: z.string().optional(),
-  commentsCount: z.number().int().nonnegative().default(0),
+  participants: z.array(tripParticipantSchema).max(100).default([]),
+  applications: z.array(tripApplicationSchema).max(200).optional().default([]),
+  chatMessages: z.array(tripChatMessageSchema).max(1000).optional().default([]),
+  groupChatLink: z.string().max(500).optional(),
+  commentsCount: z.number().int().nonnegative().max(10000).default(0),
   gpxTrack: gpxTrackSchema.optional(),
-  gpxFileName: z.string().optional(),
+  gpxFileName: z.string().max(255).optional(),
   isArchived: z.boolean().optional(),
-  archivedAt: z.string().optional(),
+  archivedAt: z.string().max(50).optional(),
   isPrivate: z.boolean().optional(),
   isPersonal: z.boolean().optional(),
   visibility: z.enum(['public', 'private']).optional(),
-  ownerId: z.string().optional()
+  ownerId: z.string().max(100).optional()
 });
 
 export const tripsBatchSchema = z.object({
-  trips: z.array(companionTripSchema)
+  trips: z.array(companionTripSchema).max(100)
 });
 
 export const riverRouteSchema = z.object({
-  id: z.string().min(1, 'ID маршрута обязателен'),
-  name: z.string().min(1, 'Название маршрута обязательно'),
-  riverName: z.string().default(''),
+  id: z.string().min(1, 'ID маршрута обязателен').max(100),
+  name: z.string().min(1, 'Название маршрута обязательно').max(300),
+  riverName: z.string().max(200).default(''),
   region: z.enum(['ХМАО', 'ЯНАО', 'ALL']).default('ХМАО'),
-  riverBasin: z.string().optional(),
-  fstrCategory: z.string().default('I к.с.'),
-  intlClass: z.string().default('Class I'),
-  lengthKm: z.number().nonnegative().default(0),
-  durationDays: z.number().nonnegative().default(1),
-  recommendedVessels: z.array(vesselEnum).default([]),
-  startPoint: z.object({
-    name: z.string().default(''),
-    lat: z.number(),
-    lng: z.number()
-  }).default({ name: '', lat: 61.25, lng: 73.4 }),
-  endPoint: z.object({
-    name: z.string().default(''),
-    lat: z.number(),
-    lng: z.number()
-  }).default({ name: '', lat: 61.25, lng: 73.4 }),
-  coordinates: z.array(z.tuple([z.number(), z.number()])).default([]),
-  elevationGainM: z.number().default(0),
-  avgFlowSpeedKmh: z.number().default(3),
-  seasonMonths: z.string().default('Июнь — Сентябрь'),
-  description: z.string().default(''),
-  shortDesc: z.string().default(''),
-  highlights: z.array(z.string()).default([]),
-  warnings: z.array(z.string()).default([]),
+  riverBasin: z.string().max(200).optional(),
+  fstrCategory: z.string().max(50).default('I к.с.'),
+  intlClass: z.string().max(50).default('Class I'),
+  lengthKm: z.number().nonnegative().max(100000).default(0),
+  durationDays: z.number().nonnegative().max(365).default(1),
+  recommendedVessels: z.array(vesselEnum).max(20).default([]),
+  startPoint: geoPointSchema.default({ name: '', lat: 61.25, lng: 73.4 }),
+  endPoint: geoPointSchema.default({ name: '', lat: 61.25, lng: 73.4 }),
+  coordinates: z.array(coordinatePointSchema).max(50000).default([]),
+  elevationGainM: z.number().max(10000).default(0),
+  avgFlowSpeedKmh: z.number().max(200).default(3),
+  seasonMonths: z.string().max(100).default('Июнь — Сентябрь'),
+  description: z.string().max(20000).default(''),
+  shortDesc: z.string().max(1000).default(''),
+  highlights: z.array(z.string().max(500)).max(100).default([]),
+  warnings: z.array(z.string().max(500)).max(100).default([]),
   mchsRegistrationRequired: z.boolean().default(false),
   kmnsPermitNeeded: z.boolean().default(false),
-  coverImage: z.string().default(''),
-  pois: z.array(routePoiSchema).default([]),
+  coverImage: z.string().max(1000).default(''),
+  pois: z.array(routePoiSchema).max(500).default([]),
   elevationProfile: z.array(z.object({
-    distanceKm: z.number(),
-    elevationM: z.number(),
-    pointName: z.string().optional()
-  })).default([]),
-  gpxFileName: z.string().default(''),
+    distanceKm: z.number().max(100000),
+    elevationM: z.number().max(10000),
+    pointName: z.string().max(200).optional()
+  })).max(2000).default([]),
+  gpxFileName: z.string().max(255).default(''),
   logisticsTransfer: z.object({
-    accessIn: z.string().default(''),
-    accessOut: z.string().default(''),
-    transportContacts: z.string().optional()
+    accessIn: z.string().max(1000).default(''),
+    accessOut: z.string().max(1000).default(''),
+    transportContacts: z.string().max(1000).optional()
   }).optional(),
-  recommendedGear: z.array(z.string()).optional(),
-  authorId: z.string().optional(),
-  authorName: z.string().optional(),
-  authorEmail: z.string().optional(),
+  recommendedGear: z.array(z.string().max(200)).max(100).optional(),
+  authorId: z.string().max(100).optional(),
+  authorName: z.string().max(100).optional(),
+  authorEmail: z.string().max(254).optional(),
   isPersonal: z.boolean().optional(),
   isPublic: z.boolean().optional(),
-  lastPassportRevision: z.string().optional(),
-  photos: z.array(z.string()).optional(),
-  wikipediaUrl: z.string().optional(),
-  wikipediaExtract: z.string().optional()
+  lastPassportRevision: z.string().max(50).optional(),
+  photos: z.array(z.string().max(1000)).max(100).optional(),
+  wikipediaUrl: z.string().max(1000).optional(),
+  wikipediaExtract: z.string().max(5000).optional()
 });
 
 export const routesBatchSchema = z.object({
-  routes: z.array(riverRouteSchema)
+  routes: z.array(riverRouteSchema).max(100)
 });
 
 // 4. Articles Schema
 export const articleSchema = z.object({
-  id: z.string().min(1, 'ID статьи обязателен'),
-  title: z.string().min(1, 'Заголовок статьи обязателен'),
-  subtitle: z.string().default(''),
-  author: z.string().default(''),
-  authorRank: z.string().default(''),
-  riverName: z.string().default(''),
+  id: z.string().min(1, 'ID статьи обязателен').max(100),
+  title: z.string().min(1, 'Заголовок статьи обязателен').max(300),
+  subtitle: z.string().max(500).default(''),
+  author: z.string().max(100).default(''),
+  authorRank: z.string().max(100).default(''),
+  riverName: z.string().max(200).default(''),
   region: z.enum(['ХМАО', 'ЯНАО', 'ALL']).default('ХМАО'),
-  date: z.string().default(() => new Date().toISOString().slice(0, 10)),
-  readTimeMinutes: z.number().int().positive().default(5),
-  coverImage: z.string().default(''),
-  content: z.string().default(''),
-  tags: z.array(z.string()).default([]),
-  authorId: z.string().optional(),
-  authorAvatar: z.string().optional(),
+  date: z.string().max(50).default(() => new Date().toISOString().slice(0, 10)),
+  readTimeMinutes: z.number().int().positive().max(600).default(5),
+  coverImage: z.string().max(1000).default(''),
+  content: z.string().max(50000).default(''),
+  tags: z.array(z.string().max(100)).max(50).default([]),
+  authorId: z.string().max(100).optional(),
+  authorAvatar: z.string().max(1000).optional(),
   isPublished: z.boolean().default(true),
-  likesCount: z.number().int().nonnegative().default(0),
-  viewsCount: z.number().int().nonnegative().default(0)
+  likesCount: z.number().int().nonnegative().max(1000000).default(0),
+  viewsCount: z.number().int().nonnegative().max(10000000).default(0)
 });
 
 export const articlesBatchSchema = z.object({
-  articles: z.array(articleSchema)
+  articles: z.array(articleSchema).max(100)
 });
 
 // 5. FAQ Config Schema (Strict P2)
 export const faqEmergencyContactSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  phone: z.string(),
-  description: z.string().default(''),
-  badge: z.string().optional(),
+  id: z.string().max(100),
+  name: z.string().max(200),
+  phone: z.string().max(50),
+  description: z.string().max(1000).default(''),
+  badge: z.string().max(100).optional(),
   isCritical: z.boolean().optional()
 });
 
 export const faqRadioFrequencySchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  frequency: z.string(),
-  description: z.string().default(''),
-  tag: z.string().default('')
+  id: z.string().max(100),
+  name: z.string().max(200),
+  frequency: z.string().max(100),
+  description: z.string().max(1000).default(''),
+  tag: z.string().max(100).default('')
 });
 
 export const faqVisualSignalSchema = z.object({
-  id: z.string(),
-  code: z.string(),
-  meaning: z.string(),
-  description: z.string().default(''),
+  id: z.string().max(100),
+  code: z.string().max(50),
+  meaning: z.string().max(500),
+  description: z.string().max(1000).default(''),
   color: z.enum(['red', 'green', 'gray', 'amber']).optional()
 });
 
 export const safetyGuideSchema = z.object({
-  id: z.string(),
+  id: z.string().max(100),
   category: z.enum(['bear', 'hypothermia', 'rapids', 'insects', 'firstaid', 'indigenous', 'satellite']),
-  title: z.string(),
-  tag: z.string().default(''),
-  readTimeMin: z.number().default(3),
+  title: z.string().max(300),
+  tag: z.string().max(100).default(''),
+  readTimeMin: z.number().max(120).default(3),
   importance: z.enum(['Критически важно', 'Высокая важность', 'Рекомендация']).default('Рекомендация'),
-  shortSummary: z.string().default(''),
-  rules: z.array(z.string()).default([]),
-  doList: z.array(z.string()).default([]),
-  dontList: z.array(z.string()).default([]),
+  shortSummary: z.string().max(1000).default(''),
+  rules: z.array(z.string().max(1000)).max(100).default([]),
+  doList: z.array(z.string().max(1000)).max(100).default([]),
+  dontList: z.array(z.string().max(1000)).max(100).default([]),
   emergencyContacts: z.array(z.object({
-    name: z.string(),
-    phone: z.string(),
-    note: z.string().default('')
-  })).optional()
+    name: z.string().max(200),
+    phone: z.string().max(50),
+    note: z.string().max(500).default('')
+  })).max(50).optional()
 });
 
 export const faqQuestionItemSchema = z.object({
-  id: z.string(),
-  question: z.string(),
-  answer: z.string(),
+  id: z.string().max(100),
+  question: z.string().max(500),
+  answer: z.string().max(10000),
   category: z.enum(['general', 'permits_gims', 'satellite_sos', 'wildlife', 'routes_logistics']).default('general'),
   isPopular: z.boolean().optional()
 });
 
 export const faqConfigSchema = z.object({
-  id: z.string().optional(),
-  title: z.string().optional(),
-  subtitle: z.string().optional(),
-  warningTitle: z.string().optional(),
-  warningText: z.string().optional(),
-  sosTemplateText: z.string().optional(),
-  cheatSheetContent: z.string().optional(),
-  emergencyContacts: z.array(faqEmergencyContactSchema).optional().default([]),
-  radioFrequencies: z.array(faqRadioFrequencySchema).optional().default([]),
-  visualSignals: z.array(faqVisualSignalSchema).optional().default([]),
-  safetyGuides: z.array(safetyGuideSchema).optional().default([]),
-  faqQuestions: z.array(faqQuestionItemSchema).optional().default([]),
-  updatedAt: z.string().optional(),
-  updatedBy: z.string().optional()
+  id: z.string().max(100).optional(),
+  title: z.string().max(300).optional(),
+  subtitle: z.string().max(500).optional(),
+  warningTitle: z.string().max(300).optional(),
+  warningText: z.string().max(2000).optional(),
+  sosTemplateText: z.string().max(2000).optional(),
+  cheatSheetContent: z.string().max(10000).optional(),
+  emergencyContacts: z.array(faqEmergencyContactSchema).max(100).optional().default([]),
+  radioFrequencies: z.array(faqRadioFrequencySchema).max(100).optional().default([]),
+  visualSignals: z.array(faqVisualSignalSchema).max(100).optional().default([]),
+  safetyGuides: z.array(safetyGuideSchema).max(100).optional().default([]),
+  faqQuestions: z.array(faqQuestionItemSchema).max(500).optional().default([]),
+  updatedAt: z.string().max(50).optional(),
+  updatedBy: z.string().max(100).optional()
 });
 
 // 6. Travel Notes Schema (Strict P2)
 export const travelNoteSchema = z.object({
-  id: z.string(),
-  userId: z.string().optional(),
-  authorName: z.string().optional(),
-  title: z.string(),
-  riverName: z.string().optional(),
+  id: z.string().max(100),
+  userId: z.string().max(100).optional(),
+  authorName: z.string().max(100).optional(),
+  title: z.string().max(300),
+  riverName: z.string().max(200).optional(),
   category: z.enum(['future_idea', 'gear_lessons', 'secret_camp', 'fishing_spots', 'safety_warning', 'trip_impressions']).default('trip_impressions'),
   season: z.enum(['spring_highwater', 'summer_warm', 'summer_polar', 'autumn_cold']).optional(),
-  content: z.string().default(''),
-  tags: z.array(z.string()).optional().default([]),
+  content: z.string().max(20000).default(''),
+  tags: z.array(z.string().max(100)).max(50).optional().default([]),
   isPinned: z.boolean().optional(),
-  createdAt: z.string().default(() => new Date().toISOString()),
-  updatedAt: z.string().optional()
+  createdAt: z.string().max(50).default(() => new Date().toISOString()),
+  updatedAt: z.string().max(50).optional()
 });
 
 export const checklistItemSchema = z.object({
-  id: z.string(),
-  text: z.string(),
+  id: z.string().max(100),
+  text: z.string().max(500),
   category: z.enum(['life_safety', 'camp_bivouac', 'kitchen_fire', 'repair_vessel', 'firstaid_hygiene', 'wildlife_bear', 'hydro_clothes', 'custom']),
   isChecked: z.boolean().default(false),
   isCustom: z.boolean().optional(),
-  notes: z.string().optional(),
-  quantity: z.string().optional()
+  notes: z.string().max(1000).optional(),
+  quantity: z.string().max(50).optional()
 });
 
 export const logbookTripSchema = z.object({
-  id: z.string(),
-  userId: z.string().optional(),
-  tripId: z.string().optional(),
-  riverName: z.string(),
+  id: z.string().max(100),
+  userId: z.string().max(100).optional(),
+  tripId: z.string().max(100).optional(),
+  riverName: z.string().max(200),
   region: z.enum(['ХМАО', 'ЯНАО']).default('ХМАО'),
-  year: z.number().int(),
-  month: z.string().default('Июль'),
-  durationDays: z.number().nonnegative().default(1),
-  distanceKm: z.number().nonnegative().default(0),
+  year: z.number().int().min(1900).max(2100),
+  month: z.string().max(50).default('Июль'),
+  durationDays: z.number().nonnegative().max(365).default(1),
+  distanceKm: z.number().nonnegative().max(100000).default(0),
   vessel: vesselEnum.default('kayak'),
-  role: z.string().default('Матрос / Гребец'),
+  role: z.string().max(100).default('Матрос / Гребец'),
   status: z.enum(['completed', 'planned', 'evacuated']).default('completed'),
-  personalNotes: z.string().default(''),
-  difficultyRating: z.string().default('I к.с.'),
+  personalNotes: z.string().max(10000).default(''),
+  difficultyRating: z.string().max(50).default('I к.с.'),
   riverRating: z.number().min(1).max(5).optional(),
-  photos: z.array(z.string()).optional(),
-  createdAt: z.string().default(() => new Date().toISOString())
+  photos: z.array(z.string().max(1000)).max(50).optional(),
+  createdAt: z.string().max(50).default(() => new Date().toISOString())
 });
 
 export const riverReviewSchema = z.object({
-  id: z.string(),
-  riverName: z.string(),
-  routeId: z.string().optional(),
-  userId: z.string().optional(),
-  userName: z.string(),
-  userAvatar: z.string().optional(),
-  date: z.string().default(() => new Date().toISOString()),
+  id: z.string().max(100),
+  riverName: z.string().max(200),
+  routeId: z.string().max(100).optional(),
+  userId: z.string().max(100).optional(),
+  userName: z.string().max(100),
+  userAvatar: z.string().max(1000).optional(),
+  date: z.string().max(50).default(() => new Date().toISOString()),
   ratingOverall: z.number().min(1).max(5),
   ratingScenery: z.number().min(1).max(5).default(5),
   ratingRapids: z.number().min(1).max(5).default(3),
   ratingCamps: z.number().min(1).max(5).default(4),
   ratingFishing: z.number().min(1).max(5).default(4),
   vesselUsed: vesselEnum.default('kayak'),
-  comment: z.string().default(''),
-  adviceForOthers: z.string().optional()
+  comment: z.string().max(5000).default(''),
+  adviceForOthers: z.string().max(5000).optional()
 });
 
 export const crewReviewSchema = z.object({
-  id: z.string(),
-  tripId: z.string().optional(),
-  tripTitle: z.string().optional(),
-  targetUserId: z.string(),
-  targetUserName: z.string(),
-  targetUserAvatar: z.string().optional(),
-  authorUserId: z.string(),
-  authorUserName: z.string(),
-  authorAvatar: z.string().optional(),
-  date: z.string().default(() => new Date().toISOString()),
+  id: z.string().max(100),
+  tripId: z.string().max(100).optional(),
+  tripTitle: z.string().max(300).optional(),
+  targetUserId: z.string().max(100),
+  targetUserName: z.string().max(100),
+  targetUserAvatar: z.string().max(1000).optional(),
+  authorUserId: z.string().max(100),
+  authorUserName: z.string().max(100),
+  authorAvatar: z.string().max(1000).optional(),
+  date: z.string().max(50).default(() => new Date().toISOString()),
   ratingOverall: z.number().min(1).max(5),
   ratingPaddling: z.number().min(1).max(5).default(5),
   ratingCampSkills: z.number().min(1).max(5).default(5),
   ratingTeamwork: z.number().min(1).max(5).default(5),
   ratingPunctuality: z.number().min(1).max(5).default(5),
-  tags: z.array(z.string()).default([]),
-  comment: z.string().default('')
+  tags: z.array(z.string().max(100)).max(50).default([]),
+  comment: z.string().max(5000).default('')
 });
 
 export const travelNotesConfigSchema = z.object({
-  id: z.string().optional(),
-  notes: z.array(travelNoteSchema).optional().default([]),
-  checklist: z.array(checklistItemSchema).optional().default([]),
-  logbookTrips: z.array(logbookTripSchema).optional().default([]),
-  riverReviews: z.array(riverReviewSchema).optional().default([]),
-  crewReviews: z.array(crewReviewSchema).optional().default([]),
-  updatedAt: z.string().optional(),
-  updatedBy: z.string().optional()
+  id: z.string().max(100).optional(),
+  notes: z.array(travelNoteSchema).max(500).optional().default([]),
+  checklist: z.array(checklistItemSchema).max(500).optional().default([]),
+  logbookTrips: z.array(logbookTripSchema).max(500).optional().default([]),
+  riverReviews: z.array(riverReviewSchema).max(500).optional().default([]),
+  crewReviews: z.array(crewReviewSchema).max(500).optional().default([]),
+  updatedAt: z.string().max(50).optional(),
+  updatedBy: z.string().max(100).optional()
 });
 
 // 7. Telegram Application Schema (Strict P1-5)
 export const telegramApplicationInputSchema = z.object({
-  tripId: z.string().min(1, 'ID похода обязателен'),
+  tripId: z.string().min(1, 'ID похода обязателен').max(100),
   notes: z.string().max(1000, 'Длина сообщения не должна превышать 1000 символов').optional().default(''),
   vesselType: z.string().max(100).optional().default(''),
   experienceLevel: z.string().max(100).optional().default('Любитель')
@@ -462,11 +457,11 @@ export const tripApplicationStatusUpdateSchema = z.object({
 });
 
 export const tripParticipantCreateSchema = z.object({
-  userId: z.string().optional(),
-  name: z.string().min(1, 'Имя участника обязательно'),
-  role: z.string().default('Матрос'),
-  vessel: z.string().default('kayak'),
-  phone: z.string().optional().default(''),
-  avatar: z.string().optional().default('')
+  userId: z.string().max(100).optional(),
+  name: z.string().min(1, 'Имя участника обязательно').max(100),
+  role: z.string().max(100).default('Матрос'),
+  vessel: z.string().max(100).default('kayak'),
+  phone: z.string().max(50).optional().default(''),
+  avatar: z.string().max(1000).optional().default('')
 });
 

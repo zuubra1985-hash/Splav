@@ -35,7 +35,7 @@ export const users = pgTable('users', {
 export const refreshTokens = pgTable('refresh_tokens', {
   id: text('id').primaryKey(),
   tokenHash: text('token_hash').notNull(),
-  userId: text('user_id').notNull(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   expiresAt: timestamp('expires_at').notNull(),
   revoked: boolean('revoked').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull()
@@ -50,7 +50,7 @@ export const refreshTokens = pgTable('refresh_tokens', {
 export const revokedTokens = pgTable('revoked_tokens', {
   id: text('id').primaryKey(),
   tokenHash: text('token_hash').notNull(),
-  userId: text('user_id'),
+  userId: text('user_id').references(() => users.id, { onDelete: 'set null' }),
   expiresAt: timestamp('expires_at').notNull(),
   reason: text('reason').default('logout'),
   createdAt: timestamp('created_at').defaultNow().notNull()
@@ -65,7 +65,7 @@ export const auditLogs = pgTable('audit_logs', {
   id: text('id').primaryKey(),
   eventType: text('event_type').notNull(),
   level: text('level').default('info').notNull(),
-  userId: text('user_id'),
+  userId: text('user_id').references(() => users.id, { onDelete: 'set null' }),
   userRole: text('user_role'),
   ip: text('ip'),
   requestId: text('request_id'),
@@ -97,8 +97,8 @@ export const companionTrips = pgTable('companion_trips', {
 // P1: Dedicated Normalized Table for Trip Applications
 export const tripApplications = pgTable('trip_applications', {
   id: text('id').primaryKey(),
-  tripId: text('trip_id').notNull(),
-  userId: text('user_id').notNull(),
+  tripId: text('trip_id').notNull().references(() => companionTrips.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   applicantName: text('applicant_name').notNull(),
   applicantPhone: text('applicant_phone').default('').notNull(),
   applicantEmail: text('applicant_email').default('').notNull(),
@@ -121,8 +121,8 @@ export const tripApplications = pgTable('trip_applications', {
 // P1: Dedicated Normalized Table for Trip Participants
 export const tripParticipants = pgTable('trip_participants', {
   id: text('id').primaryKey(),
-  tripId: text('trip_id').notNull(),
-  userId: text('user_id'),
+  tripId: text('trip_id').notNull().references(() => companionTrips.id, { onDelete: 'cascade' }),
+  userId: text('user_id').references(() => users.id, { onDelete: 'set null' }),
   name: text('name').notNull(),
   role: text('role').default('Матрос').notNull(),
   vessel: text('vessel').default('kayak').notNull(),

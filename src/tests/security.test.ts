@@ -132,11 +132,34 @@ async function runSecurityTests() {
   // 1. User validation
   const validUser = {
     email: 'kayaker@splav86.ru',
-    password: 'SecurePassword123',
+    password: 'SecurePassword123!',
     name: 'Иван Водник'
   };
   assert(registerUserSchema.safeParse(validUser).success, 'Valid user registration schema passes');
-  assert(!registerUserSchema.safeParse({ email: 'not-an-email', password: '1', name: '' }).success, 'Invalid user registration schema rejected');
+  assert(!registerUserSchema.safeParse({ email: 'valid@splav86.ru', password: 'short', name: 'Иван' }).success, 'Password shorter than 12 chars is strictly rejected (P0-03)');
+  assert(!registerUserSchema.safeParse({ email: 'not-an-email', password: 'ValidPassword123!', name: '' }).success, 'Invalid user registration schema rejected');
+
+  // Coordinate validation tests (P1-11)
+  const validCoordsRoute = {
+    id: 'route-coords-01',
+    name: 'Тестовый маршрут с валидными координатами',
+    coordinates: [[61.5, 73.2], [61.6, 73.4]]
+  };
+  assert(riverRouteSchema.safeParse(validCoordsRoute).success, 'Valid coordinates pass validation');
+
+  const invalidLatRoute = {
+    id: 'route-coords-02',
+    name: 'Невалидная широта',
+    coordinates: [[95.0, 73.2]]
+  };
+  assert(!riverRouteSchema.safeParse(invalidLatRoute).success, 'Latitude > 90 is strictly rejected');
+
+  const invalidLngRoute = {
+    id: 'route-coords-03',
+    name: 'Невалидная долгота',
+    coordinates: [[61.5, 195.0]]
+  };
+  assert(!riverRouteSchema.safeParse(invalidLngRoute).success, 'Longitude > 180 is strictly rejected');
 
   // 2. Trip validation
   const validTrip = {

@@ -80,7 +80,7 @@ export function logAudit(data: AuditLogData) {
 
   // 2. Asynchronously insert to PostgreSQL audit_logs table (fail-safe)
   try {
-    const id = `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const id = `audit-${crypto.randomUUID()}`;
     db.insert(auditLogs).values({
       id,
       eventType: data.eventType,

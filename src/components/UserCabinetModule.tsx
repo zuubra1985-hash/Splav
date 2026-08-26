@@ -345,6 +345,11 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
       return;
     }
 
+    if (profileForm.password && profileForm.password.trim().length > 0 && profileForm.password.trim().length < 12) {
+      showNotification('Пароль должен содержать не менее 12 символов', 'error');
+      return;
+    }
+
     const updated: AppUser = {
       ...currentUser,
       name: profileForm.name.trim(),
@@ -4710,10 +4715,11 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
                       </div>
 
                       <div>
-                        <label className="block text-[#4A443E] font-medium text-[11px] mb-1">Пароль для входа с ПК</label>
+                        <label className="block text-[#4A443E] font-medium text-[11px] mb-1">Пароль для входа (мин. 12 симв.)</label>
                         <input
-                          type="text"
-                          placeholder="Придумайте пароль"
+                          type="password"
+                          minLength={12}
+                          placeholder="Минимум 12 символов"
                           value={profileForm.password || ''}
                           onChange={(e) => setProfileForm({ ...profileForm, password: e.target.value })}
                           className="w-full bg-white border border-[#E5E0D8] rounded-xl p-2 text-[#2D332D] outline-none focus:border-[#2D5A27] text-xs"

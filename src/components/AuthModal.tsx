@@ -144,8 +144,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    if (!cleanPassword || cleanPassword.length < 3) {
-      setErrorMessage('Пароль должен содержать не менее 3 символов.');
+    if (!cleanPassword || cleanPassword.length < 12) {
+      setErrorMessage('Пароль должен содержать не менее 12 символов.');
       return;
     }
 
@@ -421,12 +421,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
-                <label className="block text-[#4A443E] font-medium mb-1">Пароль для входа *</label>
+                <label className="block text-[#4A443E] font-medium mb-1">Пароль для входа (мин. 12 симв.) *</label>
                 <input
                   type="password"
                   required
-                  minLength={3}
-                  placeholder="••••••••"
+                  minLength={12}
+                  placeholder="Минимум 12 символов"
                   value={regPassword}
                   onChange={(e) => {
                     setRegPassword(e.target.value);
@@ -440,8 +440,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <input
                   type="password"
                   required
-                  minLength={3}
-                  placeholder="••••••••"
+                  minLength={12}
+                  placeholder="Повторите пароль"
                   value={regConfirmPassword}
                   onChange={(e) => {
                     setRegConfirmPassword(e.target.value);
