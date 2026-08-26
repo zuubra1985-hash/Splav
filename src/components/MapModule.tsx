@@ -777,12 +777,12 @@ export const MapModule: React.FC<MapModuleProps> = ({
             </div>
           )}
 
-          {/* Filter Pills */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+          {/* Filter Selects - Grid on mobile without horizontal scroll */}
+          <div className="grid grid-cols-2 gap-2 text-xs">
             <select
               value={selectedVessel}
               onChange={(e) => setSelectedVessel(e.target.value as VesselType | 'all')}
-              className="bg-white border border-[#E5E0D8] text-[#2D332D] rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-[#2D5A27] shrink-0"
+              className="bg-white border border-[#E5E0D8] text-[#2D332D] rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-[#2D5A27] w-full"
             >
               <option value="all">Все суда</option>
               <option value="sup">🏄‍♂️ SUP-борды</option>
@@ -795,7 +795,7 @@ export const MapModule: React.FC<MapModuleProps> = ({
             <select
               value={selectedDifficulty}
               onChange={(e) => setSelectedDifficulty(e.target.value)}
-              className="bg-white border border-[#E5E0D8] text-[#2D332D] rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-[#2D5A27] shrink-0"
+              className="bg-white border border-[#E5E0D8] text-[#2D332D] rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-[#2D5A27] w-full"
             >
               <option value="all">Любая к.с.</option>
               <option value="I к.с.">I категория</option>

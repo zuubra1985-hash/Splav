@@ -327,7 +327,7 @@ export const CloudSqlDbService = {
       const items: CompanionTrip[] = Array.isArray(data) ? data : data.items || [];
       syncTracker.recordDownload('cloudsql', {
         count: items.length,
-        message: `Загружено ${items.length} походов из CloudSQL`
+        message: `Загружено ${items.length} сплавов из CloudSQL`
       });
       return items;
     } catch (e) {
@@ -345,7 +345,7 @@ export const CloudSqlDbService = {
       if (res.ok) {
         syncTracker.recordUpload('cloudsql', {
           count: trips.length,
-          message: `Сохранено ${trips.length} походов в CloudSQL`
+          message: `Сохранено ${trips.length} сплавов в CloudSQL`
         });
       }
     } catch (e) {
@@ -361,7 +361,7 @@ export const CloudSqlDbService = {
       });
       if (res.ok) {
         syncTracker.recordUpload('cloudsql', {
-          message: `Поход "${trip.title}" сохранен в CloudSQL`
+          message: `Сплав "${trip.title}" сохранен в CloudSQL`
         });
       }
     } catch (e) {
@@ -375,7 +375,7 @@ export const CloudSqlDbService = {
         method: 'DELETE'
       });
       syncTracker.recordUpload('cloudsql', {
-        message: `Поход ${tripId} удален из CloudSQL`
+        message: `Сплав ${tripId} удален из CloudSQL`
       });
     } catch (e) {
       console.warn('CloudSQL deleteTrip failed:', e);

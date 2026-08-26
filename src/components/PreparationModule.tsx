@@ -167,7 +167,7 @@ ${mchsForm.emergencyContactName}: ${mchsForm.emergencyContactPhone}
               </span>
             </div>
             <h1 className="text-xl sm:text-2xl font-black text-[#1A1F1A] mt-1">
-              Подготовка к водному походу
+              Подготовка к водному сплаву
             </h1>
             <p className="text-xs sm:text-sm text-[#6B665F]">
               Чек-листы, безопасность на воде, радиосвязь, регистрация в МЧС и документы
@@ -180,13 +180,13 @@ ${mchsForm.emergencyContactName}: ${mchsForm.emergencyContactPhone}
               className="px-4 py-2.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-2 transition-all self-start sm:self-auto"
             >
               <ShieldCheck className="w-4 h-4" />
-              <span>Перейти в «Мой поход»</span>
+              <span>Перейти в «Мой сплав»</span>
             </button>
           )}
         </div>
 
-        {/* 6 Core Sub-tabs */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-t border-[#EEEBE6] pt-3">
+        {/* 6 Core Sub-tabs - Column on mobile, grid/flex on larger screens */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:flex lg:flex-wrap gap-2 border-t border-[#EEEBE6] pt-3">
           {[
             { id: 'checklist', label: 'Чек-лист', icon: CheckSquare },
             { id: 'safety', label: 'Безопасность', icon: LifeBuoy },
@@ -201,13 +201,13 @@ ${mchsForm.emergencyContactName}: ${mchsForm.emergencyContactPhone}
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-2 transition-all ${
+                className={`w-full lg:w-auto px-4 py-2.5 sm:py-2 rounded-xl text-xs font-bold flex items-center justify-start gap-2.5 transition-all ${
                   isActive
                     ? 'bg-[#2D5A27] text-white shadow-2xs'
                     : 'bg-[#F9F7F4] text-[#6B665F] hover:bg-[#EAE7E2]'
                 }`}
               >
-                <Icon className="w-4 h-4" />
+                <Icon className="w-4 h-4 shrink-0" />
                 <span>{tab.label}</span>
               </button>
             );
@@ -294,7 +294,7 @@ ${mchsForm.emergencyContactName}: ${mchsForm.emergencyContactPhone}
               />
             </div>
 
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+            <div className="flex flex-wrap items-center gap-1.5 pt-1 sm:pt-0">
               {[
                 { id: 'all', label: 'Все' },
                 { id: 'hypothermia', label: 'Холодная вода' },
@@ -305,7 +305,7 @@ ${mchsForm.emergencyContactName}: ${mchsForm.emergencyContactPhone}
                 <button
                   key={c.id}
                   onClick={() => setSelectedGuideCategory(c.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
                     selectedGuideCategory === c.id
                       ? 'bg-[#2D5A27] text-white'
                       : 'bg-[#F9F7F4] text-[#6B665F] hover:bg-[#EAE7E2]'
@@ -639,7 +639,7 @@ ${mchsForm.emergencyContactName}: ${mchsForm.emergencyContactPhone}
             </div>
             <div className="p-3.5 rounded-xl bg-[#F9F7F4] border border-[#EEEBE6] space-y-1">
               <strong className="text-[#1A1F1A] block">2. Маршрутный лист / Маршрутная книжка</strong>
-              <p>Оформленная маршрутная документация в МКК (при прохождении категорийного спортивного похода).</p>
+              <p>Оформленная маршрутная документация в МКК (при прохождении категорийного спортивного сплава).</p>
             </div>
             <div className="p-3.5 rounded-xl bg-[#F9F7F4] border border-[#EEEBE6] space-y-1">
               <strong className="text-[#1A1F1A] block">3. Подтверждение регистрации МЧС</strong>

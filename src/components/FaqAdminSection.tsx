@@ -576,77 +576,77 @@ export const FaqAdminSection: React.FC<FaqAdminSectionProps> = ({
         </div>
       </div>
 
-      {/* Sub-tabs Selector inside FAQ Admin */}
-      <div className="flex items-center gap-1.5 bg-white p-1.5 rounded-2xl border border-[#E5E0D8] shadow-xs overflow-x-auto">
+      {/* Sub-tabs Selector inside FAQ Admin - Column on mobile, grid/flex on larger screens */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:flex lg:flex-wrap gap-1.5 bg-white p-2 rounded-2xl border border-[#E5E0D8] shadow-xs">
         <button
           onClick={() => setActiveFaqSubTab('questions')}
-          className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 shrink-0 ${
+          className={`w-full lg:w-auto px-3.5 py-2.5 sm:py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-start gap-2 ${
             activeFaqSubTab === 'questions'
               ? 'bg-[#2D5A27] text-white shadow-2xs'
               : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4]'
           }`}
         >
-          <HelpCircle className="w-4 h-4" />
+          <HelpCircle className="w-4 h-4 shrink-0" />
           <span>Вопросы и ответы ({(faqData.faqQuestions || []).length})</span>
         </button>
 
         <button
           onClick={() => setActiveFaqSubTab('guides')}
-          className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 shrink-0 ${
+          className={`w-full lg:w-auto px-3.5 py-2.5 sm:py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-start gap-2 ${
             activeFaqSubTab === 'guides'
               ? 'bg-[#2D5A27] text-white shadow-2xs'
               : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4]'
           }`}
         >
-          <ShieldCheck className="w-4 h-4" />
+          <ShieldCheck className="w-4 h-4 shrink-0" />
           <span>Справочник выживания ({(faqData.safetyGuides || []).length})</span>
         </button>
 
         <button
           onClick={() => setActiveFaqSubTab('hotlines')}
-          className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 shrink-0 ${
+          className={`w-full lg:w-auto px-3.5 py-2.5 sm:py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-start gap-2 ${
             activeFaqSubTab === 'hotlines'
               ? 'bg-[#2D5A27] text-white shadow-2xs'
               : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4]'
           }`}
         >
-          <Phone className="w-4 h-4" />
+          <Phone className="w-4 h-4 shrink-0" />
           <span>Телефоны ПСО ({(faqData.emergencyContacts || []).length})</span>
         </button>
 
         <button
           onClick={() => setActiveFaqSubTab('frequencies')}
-          className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 shrink-0 ${
+          className={`w-full lg:w-auto px-3.5 py-2.5 sm:py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-start gap-2 ${
             activeFaqSubTab === 'frequencies'
               ? 'bg-[#2D5A27] text-white shadow-2xs'
               : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4]'
           }`}
         >
-          <Radio className="w-4 h-4" />
+          <Radio className="w-4 h-4 shrink-0" />
           <span>Радиочастоты ({(faqData.radioFrequencies || []).length})</span>
         </button>
 
         <button
           onClick={() => setActiveFaqSubTab('signals')}
-          className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 shrink-0 ${
+          className={`w-full lg:w-auto px-3.5 py-2.5 sm:py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-start gap-2 ${
             activeFaqSubTab === 'signals'
               ? 'bg-[#2D5A27] text-white shadow-2xs'
               : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4]'
           }`}
         >
-          <Plane className="w-4 h-4" />
+          <Plane className="w-4 h-4 shrink-0" />
           <span>Знаки «Земля — Воздух» ({(faqData.visualSignals || []).length})</span>
         </button>
 
         <button
           onClick={() => setActiveFaqSubTab('texts')}
-          className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 shrink-0 ${
+          className={`w-full lg:w-auto px-3.5 py-2.5 sm:py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-start gap-2 ${
             activeFaqSubTab === 'texts'
               ? 'bg-[#2D5A27] text-white shadow-2xs'
               : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4]'
           }`}
         >
-          <FileText className="w-4 h-4" />
+          <FileText className="w-4 h-4 shrink-0" />
           <span>Тексты и Памятка .TXT</span>
         </button>
       </div>

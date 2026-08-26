@@ -754,14 +754,14 @@ export const CalculatorModule: React.FC<CalculatorModuleProps> = ({ routes = [] 
           <span className="text-xs text-[#8B7E6D]">Доступно {dynamicRiverPresets.length} рек</span>
         </div>
 
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+        <div className="flex flex-wrap gap-2 pt-1">
           {dynamicRiverPresets.map((preset) => {
             const isSelected = selectedPresetName === preset.name;
             return (
               <button
                 key={preset.name}
                 onClick={() => handleSelectPreset(preset)}
-                className={`px-3.5 py-2 rounded-2xl text-xs font-bold whitespace-nowrap transition-all border shrink-0 flex items-center gap-2 ${
+                className={`px-3.5 py-2 rounded-2xl text-xs font-bold transition-all border flex items-center gap-2 ${
                   isSelected
                     ? 'bg-[#2D5A27] text-white border-[#2D5A27] shadow-sm'
                     : 'bg-[#F9F7F4] text-[#4A443E] border-[#E5E0D8] hover:border-[#2D5A27]'
@@ -920,53 +920,53 @@ export const CalculatorModule: React.FC<CalculatorModuleProps> = ({ routes = [] 
         </div>
       </div>
 
-      {/* TABS NAVIGATION */}
-      <div className="flex items-center gap-2 overflow-x-auto border-b border-[#E5E0D8] pb-2 no-scrollbar">
+      {/* TABS NAVIGATION - Column on mobile, grid/flex on larger screens */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap gap-2 border-b border-[#E5E0D8] pb-2">
         <button
           onClick={() => setActiveTab('navigation')}
-          className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
+          className={`w-full lg:w-auto px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center justify-start gap-2 ${
             activeTab === 'navigation'
               ? 'bg-[#2D5A27] text-white shadow-md'
               : 'bg-white text-[#6B665F] hover:text-[#1A1F1A] border border-[#E5E0D8]'
           }`}
         >
-          <Navigation className="w-4 h-4" />
+          <Navigation className="w-4 h-4 shrink-0" />
           <span>Навигация и этапы (OsmAnd+)</span>
         </button>
 
         <button
           onClick={() => setActiveTab('provisions')}
-          className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
+          className={`w-full lg:w-auto px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center justify-start gap-2 ${
             activeTab === 'provisions'
               ? 'bg-[#2D5A27] text-white shadow-md'
               : 'bg-white text-[#6B665F] hover:text-[#1A1F1A] border border-[#E5E0D8]'
           }`}
         >
-          <Utensils className="w-4 h-4" />
+          <Utensils className="w-4 h-4 shrink-0" />
           <span>Раскладка провизии ({totalFoodWeightKg} кг)</span>
         </button>
 
         <button
           onClick={() => setActiveTab('gear')}
-          className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
+          className={`w-full lg:w-auto px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center justify-start gap-2 ${
             activeTab === 'gear'
               ? 'bg-[#2D5A27] text-white shadow-md'
               : 'bg-white text-[#6B665F] hover:text-[#1A1F1A] border border-[#E5E0D8]'
           }`}
         >
-          <CheckSquare className="w-4 h-4" />
+          <CheckSquare className="w-4 h-4 shrink-0" />
           <span>Снаряжение и ремкомплект</span>
         </button>
 
         <button
           onClick={() => setActiveTab('weight_safety')}
-          className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 ${
+          className={`w-full lg:w-auto px-4 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center justify-start gap-2 ${
             activeTab === 'weight_safety'
               ? 'bg-[#2D5A27] text-white shadow-md'
               : 'bg-white text-[#6B665F] hover:text-[#1A1F1A] border border-[#E5E0D8]'
           }`}
         >
-          <Scale className="w-4 h-4" />
+          <Scale className="w-4 h-4 shrink-0" />
           <span>Развесовка и безопасность</span>
         </button>
       </div>

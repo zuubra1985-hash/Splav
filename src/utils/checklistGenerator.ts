@@ -33,7 +33,7 @@ export function generateContextualChecklist(route?: RiverRoute | null): MyTripCh
         { id: 'item-lifejackets', text: 'Индивидуальные сертифицированные спасжилеты с паховыми ремнями на каждого', completed: false, required: true },
         { id: 'item-helmets', text: 'Водные каски (обязательно для II+ к.с. и каменистых рек)', completed: false, required: isHighWater },
         { id: 'item-throwline', text: 'Спасательный конец Александрова (морковка) 15-25 м', completed: false, required: true },
-        { id: 'item-firstaid', text: 'Походная герметичная групповая аптечка (жгуты, гемостатики, противошоковое, шины)', completed: false, required: true },
+        { id: 'item-firstaid', text: 'Сплавная герметичная групповая аптечка (жгуты, гемостатики, противошоковое, шины)', completed: false, required: true },
         { id: 'item-repair-kit', text: 'Ремкомплект для судна (клей ПУ/ПВХ, заплаты, ацетон, армированный скотч, нитки)', completed: false, required: true },
         { id: 'item-bear-defense', text: 'Средства защиты от медведей (фальшфейеры, сигнал охотника, перцовый спрей)', completed: false, required: isNorth }
       ]

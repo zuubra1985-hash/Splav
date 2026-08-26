@@ -282,7 +282,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
 
   const [isCrewReviewModalOpen, setIsCrewReviewModalOpen] = useState(false);
   const [crewTargetUserId, setCrewTargetUserId] = useState<string>('');
-  const [crewTripTitle, setCrewTripTitle] = useState('Совместный поход');
+  const [crewTripTitle, setCrewTripTitle] = useState('Совместный сплав');
   const [crewRatingPaddling, setCrewRatingPaddling] = useState(5);
   const [crewRatingCampSkills, setCrewRatingCampSkills] = useState(5);
   const [crewRatingTeamwork, setCrewRatingTeamwork] = useState(5);
@@ -454,7 +454,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
       if (onOpenAuth) {
         onOpenAuth();
       } else {
-        alert('Для добавления записей, заметок, походов и отзывов необходимо войти в аккаунт.');
+        alert('Для добавления записей, заметок, сплавов и отзывов необходимо войти в аккаунт.');
       }
       return false;
     }
@@ -673,8 +673,8 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
 
   const handleDeleteLogbookTrip = (id: string) => {
     askConfirmation({
-      title: 'Удалить поход из журнала?',
-      message: 'Удалить эту запись о походе из вашего бортового журнала?',
+      title: 'Удалить сплав из журнала?',
+      message: 'Удалить эту запись о сплаве из вашего бортового журнала?',
       confirmText: 'Удалить',
       confirmVariant: 'danger',
       onConfirm: () => {
@@ -769,7 +769,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
     }
 
     if (!crewTargetUserId) {
-      alert('Выберите участника похода для оценки.');
+      alert('Выберите участника сплава для оценки.');
       return;
     }
     if (!crewReviewComment.trim()) {
@@ -880,7 +880,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
             Путевые заметки & Бортовой журнал
           </h1>
           <p className="text-xs sm:text-sm text-emerald-100/90 leading-relaxed">
-            Персональное пространство водного туриста: фиксируйте ценные уроки и стоянки, сверяйте снаряжение по чек-листу, ведите историю походов по рекам Севера и оценивайте маршруты и экипаж.
+            Персональное пространство водного туриста: фиксируйте ценные уроки и стоянки, сверяйте снаряжение по чек-листу, ведите историю сплавов по рекам Севера и оценивайте маршруты и экипаж.
           </p>
 
           {/* Quick Metrics Bar (Personalized for logged-in user) */}
@@ -1372,7 +1372,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
                 <span>Бортовой журнал пройденных рек</span>
               </h3>
               <p className="text-xs text-[#6B665F] mt-0.5">
-                Личный реестр водных экспедиций: добавляйте пройденные маршруты и сохраняйте историю походов.
+                Личный реестр водных экспедиций: добавляйте пройденные маршруты и сохраняйте историю сплавов.
               </p>
             </div>
 
@@ -1381,7 +1381,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
               className="w-full sm:w-auto px-4 py-2 sm:py-2.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 shrink-0"
             >
               <Plus className="w-4 h-4" />
-              <span>Записать поход</span>
+              <span>Записать сплав</span>
             </button>
           </div>
 
@@ -1413,7 +1413,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
           ) : userTrips.length === 0 ? (
             <div className="py-12 sm:py-16 text-center bg-white rounded-2xl sm:rounded-3xl border border-dashed border-[#DDD7CE] p-6 space-y-3">
               <Compass className="w-10 h-10 sm:w-12 sm:h-12 text-[#8B7E6D] mx-auto opacity-50" />
-              <h3 className="text-sm sm:text-base font-bold text-[#1A1F1A]">В вашем личном журнале пока нет походов</h3>
+              <h3 className="text-sm sm:text-base font-bold text-[#1A1F1A]">В вашем личном журнале пока нет сплавов</h3>
               <p className="text-xs text-[#8B7E6D] max-w-md mx-auto">
                 {currentUser.name}, добавьте свой первый пройденный сплав по рекам Севера, чтобы рассчитать персональный километраж и сохранить впечатления!
               </p>
@@ -1422,7 +1422,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
                 className="px-5 py-2.5 bg-[#2D5A27] text-white text-xs font-bold rounded-xl hover:bg-[#3D7136] transition-colors inline-flex items-center gap-2 shadow-xs"
               >
                 <Plus className="w-4 h-4" />
-                <span>Записать первый поход</span>
+                <span>Записать первый сплав</span>
               </button>
             </div>
           ) : (
@@ -1459,7 +1459,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
                       <button
                         onClick={() => handleDeleteLogbookTrip(trip.id)}
                         className="p-1.5 text-[#8B7E6D] hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                        title="Удалить поход"
+                        title="Удалить сплав"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -1633,7 +1633,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
                 <span>Взаимная оценка экипажа</span>
               </h3>
               <p className="text-xs text-[#6B665F] mt-0.5">
-                Оценивайте надежность, слаженность гребли и командный дух товарищей по походу.
+                Оценивайте надежность, слаженность гребли и командный дух товарищей по сплаву.
               </p>
             </div>
 
@@ -1664,7 +1664,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
                       <div className="min-w-0">
                         <div className="text-xs font-black text-[#1A1F1A] truncate">{rev.targetUserName}</div>
                         <div className="text-[10px] text-[#8B7E6D] truncate">
-                          Поход: <span className="font-semibold text-[#2D5A27]">{rev.tripTitle}</span>
+                          Сплав: <span className="font-semibold text-[#2D5A27]">{rev.tripTitle}</span>
                         </div>
                       </div>
                     </div>
@@ -1853,7 +1853,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
             <div className="flex items-center justify-between border-b border-[#F4F1EA] pb-3">
               <h3 className="text-base font-black text-[#1A1F1A] flex items-center gap-2">
                 <Compass className="w-5 h-5 text-[#2D5A27]" />
-                <span>Записать пройденный поход</span>
+                <span>Записать пройденный сплав</span>
               </h3>
               <button
                 onClick={() => setIsNewTripModalOpen(false)}
@@ -2182,7 +2182,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
               </div>
 
               <div>
-                <label className="block font-bold text-[#1A1F1A] mb-1">Название совместного похода</label>
+                <label className="block font-bold text-[#1A1F1A] mb-1">Название совместного сплава</label>
                 <input
                   type="text"
                   placeholder="Например: Сплав по Соби 2026 или ПВД на Тромъёган"
@@ -2194,7 +2194,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
 
               {/* Ratings */}
               <div className="space-y-2.5 bg-[#F9F7F4] p-3.5 sm:p-4 rounded-2xl border border-[#E5E0D8]">
-                <span className="font-bold text-[#1A1F1A] block">Походные качества:</span>
+                <span className="font-bold text-[#1A1F1A] block">Качества на сплаве:</span>
                 
                 <div className="flex items-center justify-between">
                   <span className="text-[#4A443E]">🚣 Гребля и техника:</span>
@@ -2260,7 +2260,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
                 </label>
                 <textarea
                   rows={4}
-                  placeholder="Напишите, как человек проявил себя в походе, готовность помочь, позитив..."
+                  placeholder="Напишите, как человек проявил себя на сплаве, готовность помочь, позитив..."
                   value={crewReviewComment}
                   onChange={(e) => setCrewReviewComment(e.target.value)}
                   className="w-full bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl p-3 text-xs text-[#1A1F1A] outline-none focus:border-[#2D5A27] focus:bg-white resize-none"

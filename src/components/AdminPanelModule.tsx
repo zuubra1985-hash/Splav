@@ -99,7 +99,7 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
       routesWithoutLogistics,
       routesWithoutWarnings,
       outdatedRoutes,
-      activeTrips: trips.filter(t => t.status === 'open' || t.status === 'in_progress').length,
+      activeTrips: trips.filter(t => t.status === 'recruiting' || t.status === 'confirmed').length,
       totalUsers: registeredUsers.length,
       totalArticles: articles.length,
       qualityScore: Math.round(
@@ -199,12 +199,12 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
           </div>
         )}
 
-        {/* Admin Section Tabs */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-t border-[#EEEBE6] pt-3">
+        {/* Admin Section Tabs - Column on mobile, grid/flex on larger screens */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:flex lg:flex-wrap gap-2 border-t border-[#EEEBE6] pt-3">
           {[
             { id: 'dashboard', label: 'Дашборд и KPI', icon: Activity },
             { id: 'routes', label: 'Аудит паспортов рек', count: qualityAudit.totalRoutes, icon: Compass },
-            { id: 'trips', label: 'Походы и заявки', count: trips.length, icon: Users },
+            { id: 'trips', label: 'Сплавы и заявки', count: trips.length, icon: Users },
             { id: 'users', label: 'Пользователи', count: registeredUsers.length, icon: ShieldCheck },
             { id: 'moderation', label: 'Контент', icon: FileText },
             { id: 'database', label: 'База данных', icon: Database }
@@ -215,16 +215,18 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
               <button
                 key={tab.id}
                 onClick={() => setAdminTab(tab.id as any)}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-1.5 transition-all ${
+                className={`w-full lg:w-auto px-4 py-2.5 sm:py-2 rounded-xl text-xs font-bold flex items-center justify-between sm:justify-start gap-2.5 transition-all ${
                   isActive
                     ? 'bg-[#8A3B14] text-white shadow-2xs'
                     : 'bg-[#F9F7F4] text-[#6B665F] hover:bg-[#EAE7E2]'
                 }`}
               >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
+                <div className="flex items-center gap-2">
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span>{tab.label}</span>
+                </div>
                 {tab.count !== undefined && (
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${
+                  <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${
                     isActive ? 'bg-white/20 text-white' : 'bg-[#E5E0D8] text-[#2D332D]'
                   }`}>
                     {tab.count}
@@ -255,7 +257,7 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
             </div>
 
             <div className="bg-white p-4 rounded-2xl border border-[#E5E0D8] shadow-2xs">
-              <div className="text-[10px] uppercase font-bold text-[#8B7E6D]">Активных походов</div>
+              <div className="text-[10px] uppercase font-bold text-[#8B7E6D]">Активных сплавов</div>
               <div className="text-2xl font-black text-[#1A1F1A] mt-1">{qualityAudit.activeTrips}</div>
               <div className="text-[11px] text-[#2D5A27] font-medium mt-0.5">Открытый набор группы</div>
             </div>
@@ -445,7 +447,7 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
                   <tr key={u.id} className="hover:bg-[#F9F7F4]">
                     <td className="py-3 px-3">
                       <div className="font-bold text-[#1A1F1A]">{u.name}</div>
-                      <div className="text-[11px] text-[#6B665F]">Опыт: {u.experience || 'Турист'}</div>
+                      <div className="text-[11px] text-[#6B665F]">Опыт: {u.experienceLevel || u.experience || 'Турист'}</div>
                     </td>
                     <td className="py-3 px-3 text-[11px] text-[#4A443E]">
                       <div>{u.email}</div>
@@ -502,7 +504,7 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
               <div className="text-lg font-black text-[#2D5A27]">{routes.length} записей</div>
             </div>
             <div className="p-4 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
-              <div className="text-xs font-bold text-[#1A1F1A]">Походы (Trips)</div>
+              <div className="text-xs font-bold text-[#1A1F1A]">Сплавы (Trips)</div>
               <div className="text-lg font-black text-[#2D5A27]">{trips.length} записей</div>
             </div>
             <div className="p-4 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">

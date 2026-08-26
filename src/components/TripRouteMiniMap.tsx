@@ -20,7 +20,7 @@ export const TripRouteMiniMap: React.FC<TripRouteMiniMapProps> = ({
   startPoint,
   endPoint,
   waypoints = [],
-  routeName = 'Маршрут похода',
+  routeName = 'Маршрут сплава',
   lengthKm,
   elevationGainM,
   heightClass = 'h-64'

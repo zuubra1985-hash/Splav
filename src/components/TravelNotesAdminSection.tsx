@@ -269,13 +269,13 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
       updatedTrips = notesConfig.logbookTrips.map((t) => (t.id === editingTrip.id ? editingTrip : t));
     }
 
-    commitConfig({ ...notesConfig, logbookTrips: updatedTrips }, 'Запись похода сохранена');
+    commitConfig({ ...notesConfig, logbookTrips: updatedTrips }, 'Запись сплава сохранена');
     setEditingTrip(null);
   };
 
   const handleDeleteTrip = (id: string, _river: string) => {
     const updatedTrips = notesConfig.logbookTrips.filter((t) => t.id !== id);
-    commitConfig({ ...notesConfig, logbookTrips: updatedTrips }, 'Запись о походе удалена');
+    commitConfig({ ...notesConfig, logbookTrips: updatedTrips }, 'Запись о сплаве удалена');
   };
 
   // --- 4. RIVER REVIEWS HANDLERS ---
@@ -337,7 +337,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
         id: `rev-c-${Date.now()}`,
         tripTitle: 'Экспедиция по рекам Севера',
         targetUserId: registeredUsers[0]?.id || 'user-1',
-        targetUserName: registeredUsers[0]?.name || 'Участник похода',
+        targetUserName: registeredUsers[0]?.name || 'Участник сплава',
         authorUserId: currentUser?.id || 'admin',
         authorUserName: currentUser?.name || 'Администратор',
         date: new Date().toISOString().split('T')[0],
@@ -412,7 +412,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
   const handleResetToDefaults = () => {
     askConfirmation({
       title: 'Сброс заметок и отзывов?',
-      message: 'Сбросить ВСЕ заметки, чек-листы, походы и отзывы к исходным эталонным данным? Все изменения будут перезаписаны.',
+      message: 'Сбросить ВСЕ заметки, чек-листы, сплавы и отзывы к исходным эталонным данным? Все изменения будут перезаписаны.',
       confirmText: 'Да, сбросить к эталону',
       confirmVariant: 'danger',
       onConfirm: () => {
@@ -444,7 +444,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
             Полный контроль над разделом «Заметки и Бортовой журнал»
           </h2>
           <p className="text-xs sm:text-sm text-emerald-100/90 mt-1 max-w-2xl">
-            Редактируйте любые путевые заметки, эталонный чек-лист снаряжения, реестр походов, 5-звёздочные отзывы о реках и взаимные оценки участников экипажа.
+            Редактируйте любые путевые заметки, эталонный чек-лист снаряжения, реестр сплавов, 5-звёздочные отзывы о реках и взаимные оценки участников экипажа.
           </p>
         </div>
 
@@ -459,8 +459,8 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
         </div>
       </div>
 
-      {/* Sub-Navigation Tabs */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-[#E5E0D8]">
+      {/* Sub-Navigation Tabs - Column on mobile, grid/flex on larger screens */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:flex lg:flex-wrap gap-2 pb-2 border-b border-[#E5E0D8]">
         {[
           { id: 'notes', label: 'Путевые заметки', icon: BookOpen, count: notesConfig.notes.length },
           { id: 'checklist', label: 'Чек-лист сборов', icon: CheckSquare, count: notesConfig.checklist.length },
@@ -475,16 +475,18 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
             <button
               key={tab.id}
               onClick={() => setSubTab(tab.id as any)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 transition-all ${
+              className={`w-full lg:w-auto px-3.5 py-2.5 sm:py-2 rounded-xl text-xs font-bold flex items-center justify-between sm:justify-start gap-2 transition-all ${
                 isActive
                   ? 'bg-[#2D5A27] text-white shadow-xs'
                   : 'bg-white text-[#6B665F] hover:text-[#2D5A27] border border-[#E5E0D8]'
               }`}
             >
-              <Icon className="w-3.5 h-3.5" />
-              <span>{tab.label}</span>
+              <div className="flex items-center gap-1.5">
+                <Icon className="w-3.5 h-3.5" />
+                <span>{tab.label}</span>
+              </div>
               {tab.count !== undefined && (
-                <span className={`px-1.5 py-0.2 rounded-md text-[10px] ${isActive ? 'bg-white/20 text-white' : 'bg-[#F4F1EA] text-[#2D5A27]'}`}>
+                <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${isActive ? 'bg-white/20 text-white' : 'bg-[#F4F1EA] text-[#2D5A27]'}`}>
                   {tab.count}
                 </span>
               )}
@@ -619,14 +621,14 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-[#E5E0D8]">
             <div className="text-xs text-[#6B665F]">
-              Записано походов: <strong>{notesConfig.logbookTrips.length}</strong>
+              Записано сплавов: <strong>{notesConfig.logbookTrips.length}</strong>
             </div>
             <button
               onClick={() => handleOpenEditTrip()}
               className="px-4 py-2 bg-[#2D5A27] hover:bg-[#3D7136] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 shrink-0 shadow-xs"
             >
               <Plus className="w-4 h-4" />
-              <span>Добавить запись о походе</span>
+              <span>Добавить запись о сплаве</span>
             </button>
           </div>
 
@@ -1151,7 +1153,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-[#1A1F1A] mb-1">Название похода</label>
+                  <label className="block font-bold text-[#1A1F1A] mb-1">Название сплава</label>
                   <input
                     type="text"
                     value={editingCrewReview.tripTitle || ''}

@@ -144,7 +144,7 @@ ${formData.participantsList}
 - Водный маршрут: река ${formData.riverName} (${formData.region})
 - Начальная точка (стапель): ${formData.startLocation}
 - Конечная точка (антистапель): ${formData.endLocation}
-- Сроки похода: с ${formData.startDate} по ${formData.endDate}
+- Сроки сплава: с ${formData.startDate} по ${formData.endDate}
 - Плавсредства: ${formData.vesselTypes}
 
 3. СРЕДСТВА СВЯЗИ И СИГНАЛИЗАЦИИ:
@@ -276,7 +276,7 @@ ${formData.notes}`;
       </div>
 
       {/* Subtabs Selector */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2 md:gap-1.5 bg-white p-2.5 md:p-1.5 rounded-2xl border border-[#E5E0D8] shadow-xs overflow-x-auto">
+      <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2 md:gap-1.5 bg-white p-2.5 md:p-1.5 rounded-2xl border border-[#E5E0D8] shadow-xs">
         <button
           onClick={() => setActiveSubTab('faq_questions')}
           className={`px-4 py-3 md:py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-start md:justify-center gap-2.5 w-full md:w-auto md:shrink-0 text-left md:text-center ${
@@ -764,7 +764,7 @@ ${formData.notes}`;
               />
             </div>
 
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+            <div className="flex flex-wrap items-center gap-1.5 pt-1 sm:pt-0">
               {[
                 { id: 'all', label: 'Все темы' },
                 { id: 'bear', label: '🐻 Медведи' },
@@ -777,7 +777,7 @@ ${formData.notes}`;
                 <button
                   key={cat.id}
                   onClick={() => setSelectedGuideCategory(cat.id)}
-                  className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold whitespace-nowrap transition-all ${
+                  className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all ${
                     selectedGuideCategory === cat.id
                       ? 'bg-[#2D5A27] text-white shadow-2xs'
                       : 'bg-white border border-[#E5E0D8] text-[#6B665F] hover:bg-[#F9F7F4]'

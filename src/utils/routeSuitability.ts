@@ -39,7 +39,7 @@ export function evaluateRouteSuitability(
       score -= 35;
       reasons.push({
         type: 'warning',
-        text: `Маршрут ${route.fstrCategory} требует опыта 3+ походов на бурной воде.`
+        text: `Маршрут ${route.fstrCategory} требует опыта 3+ сплавов на бурной воде.`
       });
       recommendations.push('Необходим сертифицированный капитан и страховка с берега на ключевых порогах.');
     } else {

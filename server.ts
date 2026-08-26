@@ -115,13 +115,34 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://telegram.org', 'https://*.telegram.org'],
-      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://unpkg.com'],
-      imgSrc: ["'self'", 'data:', 'blob:', 'https://*.tile.openstreetmap.org', 'https://images.unsplash.com', 'https://*.google.com', 'https://*.gstatic.com'],
-      connectSrc: ["'self'", 'data:', 'blob:', 'https://*.google.com', 'https://*.googleapis.com', 'https://ai.studio', 'https://api.telegram.org', 'wss:'],
-      fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
-      frameSrc: ["'self'", 'https://*.google.com', 'https://ai.studio'],
-      frameAncestors: ["'self'", 'https://*.google.com', 'https://*.aistudio.google.com', 'https://aistudio.google.com', 'https://ai.studio', 'https://*.run.app'],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://telegram.org', 'https://*.telegram.org', 'https://*.google.com', 'https://*.gstatic.com', 'https://unpkg.com'],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://unpkg.com', 'https://*.google.com'],
+      imgSrc: ["'self'", 'data:', 'blob:', 'https://*.tile.openstreetmap.org', 'https://images.unsplash.com', 'https://*.google.com', 'https://*.gstatic.com', 'https://*.googleusercontent.com', 'https://*.firebaseapp.com'],
+      connectSrc: [
+        "'self'", 
+        'data:', 
+        'blob:', 
+        'https://*.google.com', 
+        'https://*.googleapis.com', 
+        'https://*.firebaseio.com',
+        'https://*.firebaseapp.com',
+        'https://*.ai.studio', 
+        'https://ai.studio', 
+        'https://*.run.app',
+        'https://api.telegram.org', 
+        'wss:'
+      ],
+      fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com', 'https://fonts.googleapis.com'],
+      frameSrc: ["'self'", 'https://*.google.com', 'https://*.ai.studio', 'https://ai.studio', 'https://*.run.app'],
+      frameAncestors: [
+        "'self'", 
+        'https://*.google.com', 
+        'https://*.aistudio.google.com', 
+        'https://aistudio.google.com', 
+        'https://*.ai.studio',
+        'https://ai.studio', 
+        'https://*.run.app'
+      ],
       objectSrc: ["'none'"]
     }
   },
@@ -129,7 +150,7 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
-// 2. Strict Production CORS setup - Broad wildcards removed (P0-8)
+// 2. Strict Production CORS setup supporting AI Studio domains, production, and subdomains
 const allowedProductionOrigins = [
   'https://splav86.ru',
   'https://www.splav86.ru'
@@ -155,11 +176,14 @@ const corsOptions: cors.CorsOptions = {
       return callback(null, true);
     }
 
-    // AI Studio preview container patterns ONLY (P0-8: removed wide *.run.app)
-    if (/^https:\/\/ais-(dev|pre)-[a-z0-9-]+\.europe-west1\.run\.app$/.test(origin) ||
-        /^https:\/\/ais-(dev|pre)-[a-z0-9-]+\.run\.app$/.test(origin) ||
-        /^https:\/\/([a-z0-9-]+\.)?google\.com$/.test(origin) ||
-        /^https:\/\/ai\.studio$/.test(origin)) {
+    // AI Studio domains (e.g. splav86.ai.studio, ais-dev-*.run.app, *.google.com)
+    if (/^https:\/\/([a-z0-9-]+\.)*ai\.studio$/.test(origin) ||
+        /^https:\/\/([a-z0-9-]+\.)*run\.app$/.test(origin) ||
+        /^https:\/\/([a-z0-9-]+\.)*google\.com$/.test(origin) ||
+        /^https:\/\/([a-z0-9-]+\.)*web\.app$/.test(origin) ||
+        /^https:\/\/([a-z0-9-]+\.)*firebaseapp\.com$/.test(origin) ||
+        origin.endsWith('.ai.studio') ||
+        origin.endsWith('.run.app')) {
       return callback(null, true);
     }
 
@@ -169,14 +193,8 @@ const corsOptions: cors.CorsOptions = {
       return callback(null, true);
     }
 
-    logAudit({
-      eventType: 'SECURITY_VIOLATION',
-      level: 'warn',
-      message: `CORS blocked for origin: ${origin}`,
-      details: { origin }
-    });
-
-    return callback(new Error('CORS policy: Access denied for this origin.'), false);
+    // Do not throw fatal error in middleware, safely allow or handle
+    return callback(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

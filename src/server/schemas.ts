@@ -149,8 +149,8 @@ export const gpxTrackSchema = z.object({
 });
 
 export const companionTripSchema = z.object({
-  id: z.string().min(1, 'ID похода обязателен').max(100),
-  title: z.string().min(1, 'Название похода обязательно').max(300),
+  id: z.string().min(1, 'ID сплава обязателен').max(100),
+  title: z.string().min(1, 'Название сплава обязательно').max(300),
   riverName: z.string().max(200).default('Не указана'),
   routeId: z.string().max(100).optional(),
   region: z.enum(['ХМАО', 'ЯНАО', 'ALL']).default('ХМАО'),
@@ -438,7 +438,7 @@ export const travelNotesConfigSchema = z.object({
 
 // 7. Telegram Application Schema (Strict P1-5)
 export const telegramApplicationInputSchema = z.object({
-  tripId: z.string().min(1, 'ID похода обязателен').max(100),
+  tripId: z.string().min(1, 'ID сплава обязателен').max(100),
   notes: z.string().max(1000, 'Длина сообщения не должна превышать 1000 символов').optional().default(''),
   vesselType: z.string().max(100).optional().default(''),
   experienceLevel: z.string().max(100).optional().default('Любитель')

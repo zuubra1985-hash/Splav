@@ -14,15 +14,18 @@ export interface AppUser {
   avatar?: string;
   city?: string;
   experienceLevel?: string;
+  experience?: string;
   registeredAt: string;
   favoriteRouteIds: string[];
   callsign?: string; // Позывной / Никнейм на воде
-  bio?: string; // О себе и походном стиле
+  radioCallsign?: string;
+  bio?: string; // О себе и стиле сплавов
   fstrRank?: string; // Разряд, звание, сертификат (например: "Инструктор-проводник", "КМС", "II разряд")
   favoriteRivers?: string[]; // Любимые реки (Собь, Тромъёган, Аган, Казым и др.)
   vesselsOwned?: VesselType[]; // Личный флот (катамаран, байдарка, пакрафт, сап, моторка)
+  ownedVessels?: VesselType[];
   gearInventory?: string[]; // Снаряжение (спутниковый трекер, палатка 4-сезонная, бензопила, рация, костровое)
-  badges?: string[]; // Походные бейджи и знаки отличия
+  badges?: string[]; // Бейджи и знаки отличия сплавщика
   telegram?: string; // @username в Telegram
   telegramId?: number | string; // Уникальный числовой Telegram ID пользователя
   vk?: string; // Ссылка или id VK
@@ -182,6 +185,7 @@ export interface TripApplication {
   id: string;
   tripId: string;
   userId?: string;
+  applicantUserId?: string;
   applicantName: string;
   applicantPhone: string;
   applicantEmail?: string;
@@ -310,13 +314,17 @@ export interface ArticleReport {
   subtitle: string;
   author: string;
   authorRank: string;
+  authorId?: string;
+  authorAvatar?: string;
   riverName: string;
   region: 'ХМАО' | 'ЯНАО';
   date: string;
   readTimeMin: number;
+  readTimeMinutes?: number;
   coverImage: string;
   tags: string[];
   summary: string;
+  content?: string;
   fullContent: string[];
   stats: { distanceKm: number; days: number; vessel: string; bestMonth: string };
   gallery: { url: string; caption: string }[];
@@ -330,6 +338,9 @@ export interface TravelNote {
   authorName?: string;
   title: string;
   riverName?: string;
+  locationName?: string;
+  region?: Region;
+  date?: string;
   category: 'future_idea' | 'gear_lessons' | 'secret_camp' | 'fishing_spots' | 'safety_warning' | 'trip_impressions';
   season?: 'spring_highwater' | 'summer_warm' | 'summer_polar' | 'autumn_cold';
   content: string;

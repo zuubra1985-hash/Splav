@@ -77,7 +77,7 @@ export const SyncHistorySection: React.FC<SyncHistorySectionProps> = ({
     if (trips.length > 0) {
       const sec = syncTracker.getSection('trips');
       if (sec && sec.itemCount !== trips.length) {
-        syncTracker.recordDownload('trips', { count: trips.length, message: `В системе активно ${trips.length} походов` });
+        syncTracker.recordDownload('trips', { count: trips.length, message: `В системе активно ${trips.length} сплавов` });
       }
     }
     if (articles.length > 0) {
@@ -178,7 +178,7 @@ export const SyncHistorySection: React.FC<SyncHistorySectionProps> = ({
           }
           await CloudSqlDbService.saveTrips(trips);
         }
-        showNotification('Раздел "Походы и экипажи" успешно синхронизирован с сервером!');
+        showNotification('Раздел "Сплавы и экипажи" успешно синхронизирован с сервером!');
       } else if (sectionId === 'travel_notes') {
         if (notesConfig) {
           await TravelNotesSyncService.saveNotesConfig(notesConfig);

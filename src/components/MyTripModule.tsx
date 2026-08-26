@@ -133,7 +133,7 @@ export const MyTripModule: React.FC<MyTripModuleProps> = ({
 
   // Delete trip
   const handleDeleteTrip = (tripId: string) => {
-    if (!window.confirm('Удалить этот поход из списка?')) return;
+    if (!window.confirm('Удалить этот сплав из списка?')) return;
     MyTripsStore.deleteTrip(tripId);
     const updatedList = MyTripsStore.getMyTrips(currentUser?.id);
     setTrips(updatedList);
@@ -162,10 +162,10 @@ export const MyTripModule: React.FC<MyTripModuleProps> = ({
         </div>
         <div className="space-y-2">
           <h2 className="text-xl sm:text-2xl font-black text-[#1A1F1A]">
-            У вас пока нет активных походов
+            У вас пока нет активных сплавов
           </h2>
           <p className="text-xs sm:text-sm text-[#6B665F] max-w-md mx-auto">
-            Выберите маршрут в каталоге рек и нажмите кнопку <strong>«Создать мой поход»</strong>. Система автоматически сформирует чек-лист подготовки, график связи и контрольные точки.
+            Выберите маршрут в каталоге рек и нажмите кнопку <strong>«Создать мой сплав»</strong>. Система автоматически сформирует чек-лист подготовки, график связи и контрольные точки.
           </p>
         </div>
 
@@ -242,7 +242,7 @@ export const MyTripModule: React.FC<MyTripModuleProps> = ({
             }`}
           >
             <Navigation className="w-3.5 h-3.5" />
-            <span>{isExpeditionMode ? 'Выйти из режима похода' : 'Режим «В походе»'}</span>
+            <span>{isExpeditionMode ? 'Выйти из режима сплава' : 'Режим «На сплаве»'}</span>
           </button>
         </div>
       </div>
@@ -382,7 +382,7 @@ export const MyTripModule: React.FC<MyTripModuleProps> = ({
             <div className="flex items-center justify-between">
               <div>
                 <span className="text-xs font-bold text-[#8B7E6D] uppercase tracking-wider">
-                  Состояние подготовки похода
+                  Состояние подготовки сплава
                 </span>
                 <div className="text-2xl sm:text-3xl font-black text-[#1A1F1A] mt-0.5">
                   Готовность: <span className="text-[#2D5A27]">{progress.percent}%</span>
@@ -459,17 +459,17 @@ export const MyTripModule: React.FC<MyTripModuleProps> = ({
           <div className="bg-white p-5 sm:p-6 rounded-2xl border border-[#E5E0D8] space-y-5 shadow-2xs">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#EEEBE6] pb-4">
               <div>
-                <h3 className="text-base font-black text-[#1A1F1A]">Чек-лист подготовки похода</h3>
+                <h3 className="text-base font-black text-[#1A1F1A]">Чек-лист подготовки сплава</h3>
                 <p className="text-xs text-[#6B665F]">Сформирован на основе паспорта реки и условий региона</p>
               </div>
 
-              {/* Section Tabs */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
+              {/* Section Tabs - Column/Grid on mobile, flex on larger screens */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:flex md:flex-wrap items-center gap-1.5 w-full sm:w-auto">
                 {activeTrip.checklistSections.map((sec) => (
                   <button
                     key={sec.id}
                     onClick={() => setSelectedSectionId(sec.id)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                    className={`w-full sm:w-auto px-3.5 py-2 sm:py-1.5 rounded-xl text-xs font-bold transition-all text-left sm:text-center ${
                       selectedSectionId === sec.id
                         ? 'bg-[#2D5A27] text-white shadow-2xs'
                         : 'bg-[#F9F7F4] text-[#6B665F] hover:bg-[#EAE7E2]'
@@ -564,7 +564,7 @@ export const MyTripModule: React.FC<MyTripModuleProps> = ({
                 <button
                   onClick={() => handleDeleteTrip(activeTrip.id)}
                   className="p-2 text-[#E54B4B] hover:bg-red-50 rounded-xl transition-colors"
-                  title="Удалить поход"
+                  title="Удалить сплав"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>

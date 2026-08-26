@@ -726,6 +726,8 @@ export default function App() {
       CloudSqlDbService.fetchTravelNotes().then((sqlNotes) => {
         if (sqlNotes) {
           setNotesConfig((prev) => ({
+            ...prev,
+            id: sqlNotes.id || prev.id || 'default-notes',
             notes: sqlNotes.notes?.length ? sqlNotes.notes : prev.notes,
             checklist: sqlNotes.checklist?.length ? sqlNotes.checklist : prev.checklist,
             logbookTrips: sqlNotes.logbookTrips?.length ? sqlNotes.logbookTrips : prev.logbookTrips,
@@ -936,10 +938,9 @@ export default function App() {
       const nextTrips = prevTrips.map((t) => {
         let tripModified = false;
         let nextOrg = t.organizer;
-        const orgEmail = (t.organizer.email || '').trim().toLowerCase();
-        const orgId = t.organizer.id;
+        const orgUserId = t.organizer.userId;
 
-        if (orgId === updatedUser.id || (normEmail && orgEmail === normEmail)) {
+        if (orgUserId === updatedUser.id || (updatedUser.name && t.organizer.name === updatedUser.name)) {
           nextOrg = {
             ...t.organizer,
             name: updatedUser.name || t.organizer.name,
@@ -955,7 +956,8 @@ export default function App() {
         if (t.applications && t.applications.length > 0) {
           nextApps = t.applications.map((app) => {
             const appEmail = (app.applicantEmail || '').trim().toLowerCase();
-            if (app.applicantUserId === updatedUser.id || (normEmail && appEmail === normEmail)) {
+            const appUid = app.userId || app.applicantUserId;
+            if (appUid === updatedUser.id || (normEmail && appEmail === normEmail)) {
               tripModified = true;
               return {
                 ...app,
@@ -1306,7 +1308,7 @@ export default function App() {
     if (!targetRoute && trip.gpxTrack && trip.gpxTrack.coordinates.length > 0) {
       const generatedRoute: RiverRoute = {
         id: trip.routeId || `trip-route-${trip.id}`,
-        name: trip.gpxTrack.name || `Маршрут похода: ${trip.title}`,
+        name: trip.gpxTrack.name || `Маршрут сплава: ${trip.title}`,
         riverName: trip.riverName,
         region: trip.region,
         lengthKm: trip.gpxTrack.lengthKm || 50,

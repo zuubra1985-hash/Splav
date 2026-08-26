@@ -90,13 +90,13 @@ export const RouteSuitabilityModal: React.FC<RouteSuitabilityModalProps> = ({
           {step === 1 && (
             <div className="space-y-3.5">
               <h3 className="text-sm font-bold text-[#1A1F1A]">
-                1. Какой у вас опыт водных походов и сплавов?
+                1. Какой у вас опыт водных сплавов?
               </h3>
               <div className="space-y-2">
                 {[
                   { id: 'none', title: 'Нет опыта', desc: 'Первый раз на воде или только короткие дневные прогулки' },
-                  { id: 'basic', title: 'Есть базовый опыт', desc: '1-3 некатегорийных похода, уверенно держу весло и управляю лодкой' },
-                  { id: 'experienced', title: 'Опытный водник', desc: '5+ походов, опыт бурной воды (II-IV к.с.), чтение порогов и спасработы' }
+                  { id: 'basic', title: 'Есть базовый опыт', desc: '1-3 некатегорийных сплава, уверенно держу весло и управляю лодкой' },
+                  { id: 'experienced', title: 'Опытный водник', desc: '5+ сплавов, опыт бурной воды (II-IV к.с.), чтение порогов и спасработы' }
                 ].map((opt) => (
                   <label
                     key={opt.id}
@@ -165,7 +165,7 @@ export const RouteSuitabilityModal: React.FC<RouteSuitabilityModalProps> = ({
           {step === 3 && (
             <div className="space-y-3.5">
               <h3 className="text-sm font-bold text-[#1A1F1A]">
-                3. Какая продолжительность автономного похода вам комфортна?
+                3. Какая продолжительность автономного сплава вам комфортна?
               </h3>
               <div className="space-y-2">
                 {[
@@ -362,7 +362,7 @@ export const RouteSuitabilityModal: React.FC<RouteSuitabilityModalProps> = ({
                 className="px-3.5 py-2 bg-[#2D5A27] hover:bg-[#3D7136] text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-all"
               >
                 <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Подготовить поход</span>
+                <span>Подготовить сплав</span>
               </button>
             </div>
           )}

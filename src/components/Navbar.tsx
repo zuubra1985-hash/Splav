@@ -17,6 +17,7 @@ export type MainNavigationTab =
   | 'preparation' 
   | 'mytrip' 
   | 'cabinet' 
+  | 'knowledge'
   | 'admin';
 
 interface NavbarProps {
@@ -88,7 +89,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <Users className="w-4 h-4 text-[#2D5A27]" />
-              <span>Походы</span>
+              <span>Сплавы</span>
             </button>
 
             <button
@@ -114,7 +115,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <ShieldCheck className="w-4 h-4 text-[#2D5A27]" />
-              <span>Мой поход</span>
+              <span>Мой сплав</span>
             </button>
           </nav>
 
@@ -202,7 +203,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           }`}
         >
           <Users className={`w-5 h-5 ${activeTab === 'companions' ? 'stroke-[2.5]' : 'stroke-2'}`} />
-          <span className="text-[10px] mt-0.5 leading-none">Походы</span>
+          <span className="text-[10px] mt-0.5 leading-none">Сплавы</span>
         </button>
 
         <button
@@ -224,7 +225,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           }`}
         >
           <ShieldCheck className={`w-5 h-5 ${activeTab === 'mytrip' ? 'stroke-[2.5]' : 'stroke-2'}`} />
-          <span className="text-[10px] mt-0.5 leading-none">Мой поход</span>
+          <span className="text-[10px] mt-0.5 leading-none">Мой сплав</span>
         </button>
 
         <button

@@ -423,7 +423,7 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
 
         </div>
 
-        {/* 7, 8, 9. ACTION BAR & FOOTER (GPX, Мой поход, Попутчики) */}
+        {/* 7, 8, 9. ACTION BAR & FOOTER (GPX, Мой сплав, Попутчики) */}
         <div className="p-4 sm:p-6 bg-[#F9F7F4] border-t border-[#E5E0D8] rounded-b-[28px] flex flex-wrap items-center justify-between gap-3 shrink-0">
           
           <div className="flex items-center gap-2 flex-wrap">
@@ -472,7 +472,7 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
                 className="px-4 py-2.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 transition-all"
               >
                 <ShieldCheck className="w-4 h-4" />
-                <span>Создать мой поход</span>
+                <span>Создать мой сплав</span>
               </button>
             )}
           </div>

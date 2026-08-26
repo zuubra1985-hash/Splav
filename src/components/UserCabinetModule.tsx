@@ -82,7 +82,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
         </div>
         <h2 className="text-xl font-black text-[#1A1F1A]">Личный кабинет туриста</h2>
         <p className="text-xs text-[#6B665F]">
-          Войдите или зарегистрируйтесь, чтобы сохранять маршруты, вести подготовку походов и находить попутчиков.
+          Войдите или зарегистрируйтесь, чтобы сохранять маршруты, вести подготовку сплавов и находить попутчиков.
         </p>
         <button
           onClick={onOpenAuth}
@@ -101,7 +101,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
   const authoredRoutes = routes.filter((r) => r.authorId === currentUser.id);
 
   // User's Trips from CompanionTrip & MyTrips
-  const myCompanionTrips = trips.filter((t) => t.organizer.id === currentUser.id || t.participants.some(p => p.id === currentUser.id));
+  const myCompanionTrips = trips.filter((t) => t.organizer.userId === currentUser.id || t.participants.some(p => p.userId === currentUser.id));
   const myPlannerTrips = MyTripsStore.getMyTrips(currentUser.id);
 
   // User's Trip applications
@@ -240,17 +240,17 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <button
               onClick={() => setIsEditingProfile(!isEditingProfile)}
-              className="px-3.5 py-2 bg-[#F9F7F4] hover:bg-[#EAE7E2] text-[#1A1F1A] border border-[#E5E0D8] text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors"
+              className="px-3.5 py-2 bg-[#F9F7F4] hover:bg-[#EAE7E2] text-[#1A1F1A] border border-[#E5E0D8] text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors"
             >
               <Edit3 className="w-3.5 h-3.5" />
               <span>{isEditingProfile ? 'Отмена' : 'Редактировать'}</span>
             </button>
             <button
               onClick={onLogout}
-              className="px-3.5 py-2 bg-red-50 hover:bg-red-100 text-[#E54B4B] text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors"
+              className="px-3.5 py-2 bg-red-50 hover:bg-red-100 text-[#E54B4B] text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors"
             >
               <LogOut className="w-3.5 h-3.5" />
               <span>Выйти</span>
@@ -258,11 +258,11 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
           </div>
         </div>
 
-        {/* Section Tabs */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-t border-[#EEEBE6] pt-3">
+        {/* Section Tabs - Column on mobile, flex on larger screens */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:flex lg:flex-wrap gap-2 border-t border-[#EEEBE6] pt-3">
           {[
             { id: 'profile', label: 'Мой профиль', icon: User },
-            { id: 'trips', label: 'Мои походы', count: myPlannerTrips.length + myCompanionTrips.length, icon: Compass },
+            { id: 'trips', label: 'Мои сплавы', count: myPlannerTrips.length + myCompanionTrips.length, icon: Compass },
             { id: 'routes', label: 'Мои маршруты', count: authoredRoutes.length, icon: MapPin },
             { id: 'applications', label: 'Заявки', count: myApplications.length, icon: Users },
             { id: 'favorites', label: 'Избранное', count: favoriteRoutes.length, icon: Heart },
@@ -274,16 +274,18 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-1.5 transition-all ${
+                className={`w-full lg:w-auto px-4 py-2.5 sm:py-2 rounded-xl text-xs font-bold flex items-center justify-between sm:justify-start gap-2.5 transition-all ${
                   isActive
                     ? 'bg-[#2D5A27] text-white shadow-2xs'
                     : 'bg-[#F9F7F4] text-[#6B665F] hover:bg-[#EAE7E2]'
                 }`}
               >
-                <Icon className="w-3.5 h-3.5" />
-                <span>{tab.label}</span>
+                <div className="flex items-center gap-2">
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span>{tab.label}</span>
+                </div>
                 {tab.count !== undefined && (
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${
+                  <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${
                     isActive ? 'bg-white/20 text-white' : 'bg-[#E5E0D8] text-[#2D332D]'
                   }`}>
                     {tab.count}
@@ -374,7 +376,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
-                  <div className="text-[10px] uppercase font-bold text-[#8B7E6D]">Опыт походов</div>
+                  <div className="text-[10px] uppercase font-bold text-[#8B7E6D]">Опыт сплавов</div>
                   <div className="text-xs font-bold text-[#1A1F1A] mt-1">{currentUser.experience || 'Любитель (1-3 сезона)'}</div>
                 </div>
                 <div className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
@@ -399,20 +401,20 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
       {activeTab === 'trips' && (
         <div className="bg-white p-5 sm:p-7 rounded-3xl border border-[#E5E0D8] shadow-2xs space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-black text-[#1A1F1A]">Мои активные и запланированные походы</h2>
+            <h2 className="text-base font-black text-[#1A1F1A]">Мои активные и запланированные сплавы</h2>
             {onOpenMyTrip && (
               <button
                 onClick={onOpenMyTrip}
                 className="px-3.5 py-1.5 bg-[#2D5A27] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs"
               >
                 <Compass className="w-3.5 h-3.5" />
-                <span>Открыть «Мой поход»</span>
+                <span>Открыть «Мой сплав»</span>
               </button>
             )}
           </div>
 
           {myPlannerTrips.length === 0 && myCompanionTrips.length === 0 ? (
-            <p className="text-xs text-[#6B665F]">У вас пока нет активных походов. Выберите маршрут в каталоге и начните подготовку.</p>
+            <p className="text-xs text-[#6B665F]">У вас пока нет активных сплавов. Выберите маршрут в каталоге и начните подготовку.</p>
           ) : (
             <div className="space-y-3">
               {myPlannerTrips.map((pt) => (

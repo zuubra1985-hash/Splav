@@ -17,7 +17,7 @@ const INITIAL_SECTIONS: SectionSyncInfo[] = [
   },
   {
     id: 'trips',
-    title: 'Походы & экипажи (Поиск попутчиков)',
+    title: 'Сплавы & экипажи (Поиск попутчиков)',
     description: 'Экспедиции, заявки участников, роли в экипаже, чаты и статусы набора',
     category: 'cloud',
     collectionOrTable: 'Firestore: /trips + CloudSQL trips',
@@ -62,7 +62,7 @@ const INITIAL_SECTIONS: SectionSyncInfo[] = [
   {
     id: 'users',
     title: 'Профиль & Карточки участников',
-    description: 'Личные данные, снаряжение, опыт сплавов, избранные реки и журнал походов',
+    description: 'Личные данные, снаряжение, опыт сплавов, избранные реки и журнал сплавов',
     category: 'cloud',
     collectionOrTable: 'Firestore: /users + CloudSQL users',
     lastUploadedAt: null,

@@ -61,7 +61,7 @@ const VESSEL_LABELS: Record<VesselType, { name: string; emoji: string; desc: str
 const DEFAULT_BADGES_MAP: Record<string, { label: string; icon: string; color: string; desc: string }> = {
   '🔥 Мастер костра': { label: 'Мастер костра', icon: '🔥', color: 'bg-amber-500/10 text-amber-600 border-amber-500/30', desc: 'Разведет костер в любой дождь и мороз' },
   '🧭 Надежный штурман': { label: 'Надежный штурман', icon: '🧭', color: 'bg-blue-500/10 text-blue-600 border-blue-500/30', desc: 'Безупречное чтение лоции и карты' },
-  '🍲 Шеф-повар похода': { label: 'Шеф-повар', icon: '🍲', color: 'bg-orange-500/10 text-orange-600 border-orange-500/30', desc: 'Вкусно накормит экипаж в тайге' },
+  '🍲 Шеф-повар сплава': { label: 'Шеф-повар', icon: '🍲', color: 'bg-orange-500/10 text-orange-600 border-orange-500/30', desc: 'Вкусно накормит экипаж в тайге' },
   '⚓ Капитан судна': { label: 'Капитан судна', icon: '⚓', color: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30', desc: 'Опыт руководства экипажем на воде' },
   '💪 Мощный гребец': { label: 'Мощный гребец', icon: '💪', color: 'bg-red-500/10 text-red-600 border-red-500/30', desc: 'Вынослив на многокилометровых переходах' },
   '⛺ Знаток стоянок': { label: 'Знаток стоянок', icon: '⛺', color: 'bg-teal-500/10 text-teal-600 border-teal-500/30', desc: 'Найдет сухую и укрытую поляну' },
@@ -74,7 +74,7 @@ const DEFAULT_BADGES_MAP: Record<string, { label: string; icon: string; color: s
 const AVAILABLE_REVIEW_TAGS = [
   '💪 Мощный гребец',
   '🔥 Мастер костра',
-  '🍲 Шеф-повар похода',
+  '🍲 Шеф-повар сплава',
   '🧭 Надежный штурман',
   '🎸 Душа компании',
   '⛺ Быстро ставит лагерь',
@@ -288,10 +288,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               {user.isReadyForExpeditions !== false ? (
                 <span
                   className="absolute -bottom-1.5 -right-1.5 px-2 sm:px-2.5 py-0.5 rounded-full bg-emerald-500 text-white font-black text-[9px] sm:text-[10px] shadow-md border-2 border-white flex items-center gap-1"
-                  title="Готов к участию в походах и сплавах"
+                  title="Готов к участию в сплавах и экспедициях"
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                  Готов к походу
+                  Готов к сплаву
                 </span>
               ) : (
                 <span
@@ -345,7 +345,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
               {/* Experience subtitle */}
               <p className="text-[11px] sm:text-xs text-white/80 font-medium line-clamp-1">
-                {user.experienceLevel || 'Любитель водных походов'} • В сообществе с {user.registeredAt || '2026 г.'}
+                {user.experienceLevel || 'Любитель водных сплавов'} • В сообществе с {user.registeredAt || '2026 г.'}
               </p>
             </div>
           </div>
@@ -353,7 +353,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           {/* Quick Metrics Ribbon */}
           <div className="mt-3.5 sm:mt-5 grid grid-cols-3 gap-1.5 sm:gap-2 text-center text-xs">
             <div className="bg-black/30 backdrop-blur-xs rounded-xl sm:rounded-2xl p-1.5 sm:p-2.5 border border-white/10">
-              <span className="block text-[9px] sm:text-[10px] text-white/70 font-semibold truncate">Организовал походов</span>
+              <span className="block text-[9px] sm:text-[10px] text-white/70 font-semibold truncate">Организовал сплавов</span>
               <strong className="text-xs sm:text-base font-black text-white">{userOrganizedTrips.length}</strong>
             </div>
             <div className="bg-black/30 backdrop-blur-xs rounded-xl sm:rounded-2xl p-1.5 sm:p-2.5 border border-white/10">
@@ -384,7 +384,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           <div className="space-y-2 pt-1 first:pt-0">
             <h3 className="text-xs font-bold uppercase tracking-wider text-[#8B7E6D] flex items-center gap-1.5">
               <User className="w-3.5 h-3.5 text-[#2D5A27]" />
-              О себе и походном стиле
+              О себе и стиле сплавов
             </h3>
             {user.bio ? (
               <p className="text-xs sm:text-sm text-[#2D332D] leading-relaxed bg-[#F9F7F4] p-3 sm:p-3.5 rounded-2xl border border-[#EEEBE6] whitespace-pre-line">
@@ -392,7 +392,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               </p>
             ) : (
               <p className="text-xs text-[#8B7E6D] italic bg-[#F9F7F4] p-3 rounded-2xl border border-[#EEEBE6]">
-                Турист еще не заполнил подробное описание своего походного опыта.
+                Турист еще не заполнил подробное описание своего опыта сплавов.
               </p>
             )}
           </div>
@@ -402,7 +402,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             <div className="space-y-2 pt-3.5">
               <h3 className="text-xs font-bold uppercase tracking-wider text-[#8B7E6D] flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                Знаки отличия и походные навыки
+                Знаки отличия и сплавные навыки
               </h3>
               <div className="flex flex-wrap gap-1.5 sm:gap-2">
                 {(user.badges || []).map((badgeKey, idx) => {
@@ -465,7 +465,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             <div className="space-y-2 pt-3.5">
               <h3 className="text-xs font-bold uppercase tracking-wider text-[#8B7E6D] flex items-center gap-1.5">
                 <ShieldCheck className="w-3.5 h-3.5 text-[#2D5A27]" />
-                Личный походный арсенал & Снаряжение
+                Личный сплавной арсенал & Снаряжение
               </h3>
               <div className="flex flex-wrap gap-1.5">
                 {user.gearInventory.map((item, idx) => (
@@ -569,7 +569,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
                 <div>
                   <label className="block text-[11px] font-bold text-[#4A443E] mb-1">
-                    Поход / Река (необязательно)
+                    Сплав / Река (необязательно)
                   </label>
                   <input
                     type="text"
@@ -700,7 +700,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 {/* Review text */}
                 <div>
                   <label className="block text-[11px] font-bold text-[#4A443E] mb-1">
-                    Ваш отзыв и впечатления о совместном походе:
+                    Ваш отзыв и впечатления о совместном сплаве:
                   </label>
                   <textarea
                     rows={3}
@@ -736,7 +736,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               <div className="bg-[#F9F7F4] p-4 rounded-2xl border border-[#EEEBE6] text-center text-xs text-[#8B7E6D] space-y-1.5">
                 <p>О туристе пока нет публичных отзывов от соратников по сплавам.</p>
                 <p className="text-[11px]">
-                  Участники совместных походов могут оставить отзыв прямо здесь или в модуле «Заметки и отзывы».
+                  Участники совместных сплавов могут оставить отзыв прямо здесь или в модуле «Заметки и отзывы».
                 </p>
                 {!isSelf && (
                   <button

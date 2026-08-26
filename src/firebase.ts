@@ -161,7 +161,7 @@ export const TripsSyncService = {
         });
         syncTracker.recordDownload('trips', {
           count: remoteTrips.length,
-          message: `Получено ${remoteTrips.length} походов из Firestore`
+          message: `Получено ${remoteTrips.length} сплавов из Firestore`
         });
         onUpdate(remoteTrips);
       },
@@ -180,7 +180,7 @@ export const TripsSyncService = {
       const tripDoc = doc(db, 'trips', trip.id);
       await setDoc(tripDoc, cleaned, { merge: true });
       syncTracker.recordUpload('trips', {
-        message: `Поход "${trip.riverName || trip.title}" сохранен в облако`
+        message: `Сплав "${trip.riverName || trip.title}" сохранен в облако`
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `trips/${trip.id}`);
@@ -195,7 +195,7 @@ export const TripsSyncService = {
       const tripDoc = doc(db, 'trips', tripId);
       await deleteDoc(tripDoc);
       syncTracker.recordUpload('trips', {
-        message: `Поход ${tripId} удален из облака`
+        message: `Сплав ${tripId} удален из облака`
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `trips/${tripId}`);

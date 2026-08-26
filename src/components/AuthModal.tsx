@@ -47,7 +47,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [regCity, setRegCity] = useState<string>('Сургут');
   const [regPassword, setRegPassword] = useState<string>('');
   const [regConfirmPassword, setRegConfirmPassword] = useState<string>('');
-  const [regExperience, setRegExperience] = useState<string>('Любитель водных походов');
+  const [regExperience, setRegExperience] = useState<string>('Любитель водных сплавов');
   const [regTelegram, setRegTelegram] = useState<string>('');
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -163,7 +163,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         name: cleanName,
         phone: regPhone.trim(),
         city: regCity.trim() || 'Югра / Ямал',
-        experienceLevel: regExperience || 'Любитель водных походов',
+        experienceLevel: regExperience || 'Любитель водных сплавов',
         telegram: cleanTg || (tgTourist?.username ? `@${tgTourist.username}` : '')
       });
 

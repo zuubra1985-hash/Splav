@@ -53,9 +53,10 @@ export const KnowledgeBaseModule: React.FC<KnowledgeBaseModuleProps> = ({
   // Filtered Articles / Reports / Pilot Guides
   const filteredArticles = useMemo(() => {
     return articles.filter((art) => {
+      const contentStr = art.content || (Array.isArray(art.fullContent) ? art.fullContent.join(' ') : '') || art.summary || '';
       const matchesSearch = !searchQuery || 
         art.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        art.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        contentStr.toLowerCase().includes(searchQuery.toLowerCase()) ||
         art.tags?.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
 
       const matchesRegion = selectedRegion === 'ALL' || art.region === selectedRegion;
@@ -77,12 +78,13 @@ export const KnowledgeBaseModule: React.FC<KnowledgeBaseModuleProps> = ({
   // Filtered Travel Notes
   const filteredNotes = useMemo(() => {
     return travelNotes.filter((note) => {
+      const locationStr = note.locationName || note.riverName || '';
       const matchesSearch = !searchQuery || 
         note.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
         note.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        note.locationName.toLowerCase().includes(searchQuery.toLowerCase());
+        locationStr.toLowerCase().includes(searchQuery.toLowerCase());
 
-      const matchesRegion = selectedRegion === 'ALL' || note.region === selectedRegion;
+      const matchesRegion = selectedRegion === 'ALL' || !note.region || note.region === selectedRegion;
       return matchesSearch && matchesRegion;
     });
   }, [travelNotes, searchQuery, selectedRegion]);
@@ -187,8 +189,8 @@ export const KnowledgeBaseModule: React.FC<KnowledgeBaseModuleProps> = ({
 
         </div>
 
-        {/* Section Tabs */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-t border-[#EEEBE6] pt-3">
+        {/* Section Tabs - Column on mobile, grid/flex on larger screens */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:flex lg:flex-wrap gap-2 border-t border-[#EEEBE6] pt-3">
           {[
             { id: 'all', label: 'Все материалы', count: articles.length + travelNotes.length },
             { id: 'articles', label: 'Статьи и гайды', count: articles.length },
@@ -203,7 +205,7 @@ export const KnowledgeBaseModule: React.FC<KnowledgeBaseModuleProps> = ({
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-1.5 transition-all ${
+                className={`w-full lg:w-auto px-4 py-2.5 sm:py-2 rounded-xl text-xs font-bold flex items-center justify-between sm:justify-start gap-2.5 transition-all ${
                   isActive
                     ? 'bg-[#2D5A27] text-white shadow-2xs'
                     : 'bg-[#F9F7F4] text-[#6B665F] hover:bg-[#EAE7E2]'
@@ -211,7 +213,7 @@ export const KnowledgeBaseModule: React.FC<KnowledgeBaseModuleProps> = ({
               >
                 <span>{tab.label}</span>
                 {tab.count > 0 && (
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${
+                  <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${
                     isActive ? 'bg-white/20 text-white' : 'bg-[#E5E0D8] text-[#2D332D]'
                   }`}>
                     {tab.count}
@@ -329,13 +331,13 @@ export const KnowledgeBaseModule: React.FC<KnowledgeBaseModuleProps> = ({
                           {article.title}
                         </h3>
                         <p className="text-xs text-[#6B665F] line-clamp-2">
-                          {article.summary || article.content.slice(0, 100)}
+                          {article.summary || (article.content ? article.content.slice(0, 100) : (Array.isArray(article.fullContent) ? article.fullContent[0] : ''))}
                         </p>
                       </div>
 
                       <div className="pt-3 border-t border-[#EEEBE6] flex items-center justify-between text-[11px] text-[#8B7E6D]">
                         <span className="truncate">{article.author}</span>
-                        <span>{article.readTimeMinutes || 5} мин</span>
+                        <span>{article.readTimeMin || article.readTimeMinutes || 5} мин</span>
                       </div>
                     </div>
                   </div>
@@ -370,16 +372,16 @@ export const KnowledgeBaseModule: React.FC<KnowledgeBaseModuleProps> = ({
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#E8F1E7] text-[#2D5A27]">
-                        {note.region} • {note.locationName}
+                        {note.region ? `${note.region} • ` : ''}{note.locationName || note.riverName || 'Север'}
                       </span>
-                      <span className="text-[10px] text-[#8B7E6D]">{note.date}</span>
+                      <span className="text-[10px] text-[#8B7E6D]">{note.date || note.createdAt?.slice(0, 10)}</span>
                     </div>
 
                     <h4 className="text-xs font-bold text-[#1A1F1A]">{note.title}</h4>
                     <p className="text-xs text-[#4A443E] line-clamp-3 leading-relaxed">{note.content}</p>
 
                     <div className="pt-2 border-t border-[#EEEBE6] text-[11px] text-[#8B7E6D] flex items-center justify-between">
-                      <span>Автор: {note.authorName}</span>
+                      <span>Автор: {note.authorName || 'Турист'}</span>
                     </div>
                   </div>
                 ))}
@@ -395,7 +397,7 @@ export const KnowledgeBaseModule: React.FC<KnowledgeBaseModuleProps> = ({
                   <h2 className="text-base font-black text-[#1A1F1A]">
                     Вопросы и ответы (FAQ)
                   </h2>
-                  <p className="text-xs text-[#6B665F]">Ответы на частые вопросы по организации водных походов</p>
+                  <p className="text-xs text-[#6B665F]">Ответы на частые вопросы по организации водных сплавов</p>
                 </div>
               </div>
 
@@ -452,7 +454,7 @@ export const KnowledgeBaseModule: React.FC<KnowledgeBaseModuleProps> = ({
             <div className="text-xs text-[#8B7E6D]">Автор: {selectedArticle.author} • {selectedArticle.date}</div>
 
             <div className="text-xs sm:text-sm text-[#2D332D] leading-relaxed whitespace-pre-line pt-2">
-              {selectedArticle.content}
+              {selectedArticle.content || (Array.isArray(selectedArticle.fullContent) ? selectedArticle.fullContent.join('\n\n') : '') || selectedArticle.summary}
             </div>
           </div>
         </div>
