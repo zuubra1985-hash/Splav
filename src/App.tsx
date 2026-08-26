@@ -5,16 +5,19 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { ArrowUp, WifiOff, Wifi, RefreshCw, Zap } from 'lucide-react';
-import { Navbar } from './components/Navbar';
+import { Navbar, MainNavigationTab } from './components/Navbar';
 import { MapModule } from './components/MapModule';
 import { RouteDetailModal } from './components/RouteDetailModal';
-import { MchsModule } from './components/MchsModule';
+import { RouteSuitabilityModal } from './components/RouteSuitabilityModal';
 import { CompanionsModule } from './components/CompanionsModule';
-import { ArticlesModule } from './components/ArticlesModule';
-import { TravelNotesModule } from './components/TravelNotesModule';
+import { PreparationModule } from './components/PreparationModule';
+import { KnowledgeBaseModule } from './components/KnowledgeBaseModule';
+import { MyTripModule } from './components/MyTripModule';
 import { UserCabinetModule } from './components/UserCabinetModule';
+import { AdminPanelModule } from './components/AdminPanelModule';
 import { AuthModal } from './components/AuthModal';
 import { RiverPassportEditorModal } from './components/RiverPassportEditorModal';
+import { MyTripsStore } from './services/myTripsStore';
 
 import { RIVERS_DATA } from './data/riversData';
 import { WEATHER_POINTS_DATA } from './data/weatherData';
@@ -22,7 +25,7 @@ import { COMPANION_TRIPS_DATA } from './data/tripsData';
 import { SAFETY_GUIDES_DATA } from './data/safetyGuideData';
 import { ARTICLES_DATA } from './data/articlesData';
 
-import { RiverRoute, Region, CompanionTrip, ArticleReport, AppUser, UserRole, FaqDataConfig, TravelNotesConfig, CrewReview, TravelNote, RiverReview } from './types';
+import { RiverRoute, Region, CompanionTrip, ArticleReport, AppUser, UserRole, FaqDataConfig, TravelNotesConfig, CrewReview, TravelNote, RiverReview, Article } from './types';
 import { TripsSyncService, RoutesSyncService, UsersSyncService, ArticlesSyncService, FaqSyncService, TravelNotesSyncService } from './firebase';
 import { CloudSqlDbService } from './services/cloudSqlDb';
 import { INITIAL_FAQ_DATA } from './data/faqData';
@@ -71,7 +74,7 @@ const INITIAL_USERS: AppUser[] = [
   }
 ];
 
-const VALID_TABS = ['routes', 'companions', 'mchs_safety', 'articles', 'logbook', 'cabinet'] as const;
+const VALID_TABS = ['routes', 'companions', 'preparation', 'knowledge', 'mytrip', 'cabinet', 'admin'] as const;
 type AppTab = typeof VALID_TABS[number];
 
 const getInitialTab = (): AppTab => {
@@ -1163,10 +1166,12 @@ export default function App() {
     handleClearAllUserCards();
   };
 
-  // Selected route state
+  // Selected route & modal states
   const [selectedRoute, setSelectedRoute] = useState<RiverRoute | null>(null);
   const [detailModalRoute, setDetailModalRoute] = useState<RiverRoute | null>(null);
-  const [mchsInitialRoute, setMchsInitialRoute] = useState<RiverRoute | null>(null);
+  const [suitabilityModalRoute, setSuitabilityModalRoute] = useState<RiverRoute | null>(null);
+  const [myTripSelectedTripId, setMyTripSelectedTripId] = useState<string | null>(null);
+  const [preparationInitialRoute, setPreparationInitialRoute] = useState<RiverRoute | null>(null);
   const [isPassportEditorOpen, setIsPassportEditorOpen] = useState<boolean>(false);
   const [passportEditorRoute, setPassportEditorRoute] = useState<RiverRoute | null>(null);
   const [cabinetInitialTab, setCabinetInitialTab] = useState<'profile' | 'applications' | 'routes' | 'articles' | 'trips' | 'faq' | 'users' | 'travel_notes' | 'backup' | 'sync_history'>('profile');
@@ -1174,13 +1179,15 @@ export default function App() {
 
   // Telegram Native BackButton integration
   useEffect(() => {
-    const hasModal = Boolean(selectedRoute || isPassportEditorOpen || isAuthModalOpen);
+    const hasModal = Boolean(selectedRoute || isPassportEditorOpen || isAuthModalOpen || suitabilityModalRoute || detailModalRoute);
     if (hasModal) {
       return setupTelegramBackButton(() => {
         telegramHaptic('light');
-        if (selectedRoute) setSelectedRoute(null);
-        if (isPassportEditorOpen) setIsPassportEditorOpen(false);
-        if (isAuthModalOpen) setIsAuthModalOpen(false);
+        if (suitabilityModalRoute) setSuitabilityModalRoute(null);
+        else if (detailModalRoute) setDetailModalRoute(null);
+        else if (selectedRoute) setSelectedRoute(null);
+        else if (isPassportEditorOpen) setIsPassportEditorOpen(false);
+        else if (isAuthModalOpen) setIsAuthModalOpen(false);
       });
     } else if (activeTab !== 'routes') {
       return setupTelegramBackButton(() => {
@@ -1188,7 +1195,7 @@ export default function App() {
         setActiveTab('routes');
       });
     }
-  }, [selectedRoute, isPassportEditorOpen, isAuthModalOpen, activeTab]);
+  }, [selectedRoute, isPassportEditorOpen, isAuthModalOpen, suitabilityModalRoute, detailModalRoute, activeTab]);
 
   // Superadmin & Admin status
   const isSuperAdmin = currentUser?.role === 'superadmin';
@@ -1196,44 +1203,16 @@ export default function App() {
 
   const handleOpenFaqEditor = () => {
     if (!isAdmin) return;
-    setCabinetInitialTab('faq');
-    setActiveTab('cabinet');
+    setActiveTab('admin');
   };
 
   const handleOpenArticleEditor = (article?: ArticleReport) => {
     if (!isAdmin) return;
-    setCabinetInitialTab('articles');
-    if (article) {
-      setCabinetInitialArticle(article);
-    } else {
-      setCabinetInitialArticle({
-        id: `art-${Date.now()}`,
-        title: '',
-        subtitle: '',
-        riverName: '',
-        region: 'ХМАО',
-        author: currentUser?.name || 'Главный Администратор',
-        authorRank: 'Главный Администратор',
-        date: new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }),
-        readTimeMin: 5,
-        coverImage: 'https://images.unsplash.com/photo-1510312305653-8ed496efae75?auto=format&fit=crop&w=1000&q=80',
-        summary: '',
-        fullContent: [''],
-        tags: ['локация', 'хмао', 'каякинг'],
-        stats: {
-          distanceKm: 80,
-          days: 3,
-          vessel: 'Байдарки',
-          bestMonth: 'Июль'
-        },
-        gallery: []
-      });
-    }
-    setActiveTab('cabinet');
+    setActiveTab('admin');
   };
 
   const handleSavePassport = (savedRoute: RiverRoute) => {
-    if (!isAdmin) return;
+    if (!isAdmin && !(currentUser && savedRoute.authorId === currentUser.id)) return;
     setRoutes((prev) => {
       const exists = prev.some((r) => r.id === savedRoute.id);
       const updated = exists ? prev.map((r) => (r.id === savedRoute.id ? savedRoute : r)) : [savedRoute, ...prev];
@@ -1259,8 +1238,23 @@ export default function App() {
   };
 
   const handleSelectForMchs = (route: RiverRoute) => {
-    setMchsInitialRoute(route);
-    setActiveTab('mchs_safety');
+    setPreparationInitialRoute(route);
+    setActiveTab('preparation');
+    setDetailModalRoute(null);
+  };
+
+  const handleCreateMyTripFromRoute = (route: RiverRoute) => {
+    const trip = MyTripsStore.createFromRoute(route, currentUser);
+    setMyTripSelectedTripId(trip.id);
+    setActiveTab('mytrip');
+    setDetailModalRoute(null);
+    setSuitabilityModalRoute(null);
+  };
+
+  const handleFindCompanionsFromRoute = (route: RiverRoute) => {
+    setActiveTab('companions');
+    setDetailModalRoute(null);
+    setSuitabilityModalRoute(null);
   };
 
   const handleCreateNewTrip = (newTrip: CompanionTrip) => {
@@ -1454,7 +1448,6 @@ export default function App() {
             onUpdateTrip={handleUpdateTrip}
             onViewOnMainMap={handleViewTripOnMainMap}
             onOpenCabinetApplications={() => {
-              setCabinetInitialTab('applications');
               setActiveTab('cabinet');
             }}
             onAddCrewReview={(newRev) => {
@@ -1503,83 +1496,101 @@ export default function App() {
           />
         )}
 
-        {/* 3. FAQ & MCHS & WILDERNESS SAFETY */}
-        {activeTab === 'mchs_safety' && (
-          <MchsModule
+        {/* 3. PREPARATION (CHECKLISTS, MCHS, RADIO & SAFETY) */}
+        {activeTab === 'preparation' && (
+          <PreparationModule
             routes={routes}
             safetyGuides={faqData.safetyGuides || SAFETY_GUIDES_DATA}
-            initialRoute={mchsInitialRoute}
+            initialRoute={preparationInitialRoute}
             faqData={faqData}
-            isAdmin={isAdmin}
-            onOpenFaqEditor={handleOpenFaqEditor}
-          />
-        )}
-
-        {/* 4. ARTICLES & RIVER PILOT GUIDES */}
-        {activeTab === 'articles' && (
-          <ArticlesModule
-            articles={articles}
-            selectedRegion={selectedRegion}
             currentUser={currentUser}
-            onOpenArticleEditor={handleOpenArticleEditor}
+            isAdmin={isAdmin}
+            onOpenMyTrip={() => setActiveTab('mytrip')}
+            onSelectRouteForTrip={handleCreateMyTripFromRoute}
           />
         )}
 
-        {/* 5. TRAVEL NOTES, PACKING CHECKLIST & LOGBOOK */}
-        {activeTab === 'logbook' && (
-          <TravelNotesModule
+        {/* 4. KNOWLEDGE BASE (ARTICLES, WATERWAY GUIDES, TRAVEL NOTES, FAQ) */}
+        {activeTab === 'knowledge' && (
+          <KnowledgeBaseModule
+            articles={articles as any}
+            travelNotes={notesConfig.notes || []}
             routes={routes}
+            trips={trips}
+            faqData={faqData}
             currentUser={currentUser}
-            registeredUsers={registeredUsers}
-            onOpenAuth={() => setIsAuthModalOpen(true)}
-            isAdmin={isAdmin}
-            notesConfig={notesConfig}
-            setNotesConfig={setNotesConfig}
-            onOpenAdminNotesManager={() => {
-              setCabinetInitialTab('travel_notes');
-              setActiveTab('cabinet');
-            }}
+            onOpenRouteDetails={(r) => setDetailModalRoute(r)}
           />
         )}
 
-        {/* 6. PERSONAL ACCOUNT & SUPER ADMIN CABINET */}
+        {/* 5. MY TRIP (PLANNING & IN-EXPEDITION MODE) */}
+        {activeTab === 'mytrip' && (
+          <MyTripModule
+            currentUser={currentUser}
+            routes={routes}
+            initialSelectedTripId={myTripSelectedTripId}
+            onOpenRouteDetails={(r) => setDetailModalRoute(r)}
+            onOpenMchsRegistration={(r) => {
+              if (r) setPreparationInitialRoute(r);
+              setActiveTab('preparation');
+            }}
+            onOpenCompanions={() => setActiveTab('companions')}
+          />
+        )}
+
+        {/* 6. PERSONAL ACCOUNT (USER CABINET) */}
         {activeTab === 'cabinet' && (
           <UserCabinetModule
             currentUser={currentUser}
             onLogout={handleLogout}
             onOpenAuth={() => setIsAuthModalOpen(true)}
             onUpdateCurrentUser={handleUpdateCurrentUser}
-            registeredUsers={registeredUsers}
-            onUpdateUserRole={handleUpdateUserRole}
-            onDeleteUser={handleDeleteUser}
             routes={routes}
-            setRoutes={setRoutes}
-            articles={articles}
-            setArticles={setArticles}
             trips={trips}
-            setTrips={setTrips}
-            faqData={faqData}
-            setFaqData={setFaqData}
-            notesConfig={notesConfig}
-            setNotesConfig={setNotesConfig}
-            onResetToDefaults={handleResetToDefaults}
-            onClearAllUserCards={handleClearAllUserCards}
-            onSelectRoute={(r) => {
-              setSelectedRoute(r);
-              setActiveTab('routes');
-            }}
+            onOpenMyTrip={() => setActiveTab('mytrip')}
             onOpenRouteDetails={(r) => setDetailModalRoute(r)}
-            onOpenPassportEditor={(r) => {
-              setPassportEditorRoute(r || null);
-              setIsPassportEditorOpen(true);
+            onToggleFavorite={handleToggleFavoriteRoute}
+            onAddCustomRoute={(newRoute) => {
+              setRoutes(prev => [newRoute, ...prev]);
+              try {
+                localStorage.setItem('splav86_custom_routes_v5', JSON.stringify([newRoute, ...routes]));
+              } catch (e) {}
+              RoutesSyncService.saveRoute(newRoute).catch(console.warn);
             }}
-            initialCabinetTab={cabinetInitialTab}
-            initialEditingArticle={cabinetInitialArticle}
-            onClearInitialArticle={() => setCabinetInitialArticle(null)}
           />
         )}
 
-        {/* Compact Footer (hidden on full-screen map to avoid unnecessary scrolling) */}
+        {/* 7. ADMIN PANEL (DEDICATED ADMIN ONLY) */}
+        {activeTab === 'admin' && (
+          isAdmin ? (
+            <AdminPanelModule
+              currentUser={currentUser}
+              routes={routes}
+              trips={trips}
+              articles={articles as any}
+              travelNotes={notesConfig.notes || []}
+              registeredUsers={registeredUsers}
+              faqData={faqData}
+              notesConfig={notesConfig}
+              onUpdateRoutes={setRoutes}
+              onUpdateTrips={setTrips}
+              onUpdateArticles={setArticles as any}
+              onUpdateUserRole={handleUpdateUserRole}
+              onDeleteUser={handleDeleteUser}
+              onOpenPassportEditor={(r) => {
+                setPassportEditorRoute(r || null);
+                setIsPassportEditorOpen(true);
+              }}
+              onOpenFaqEditor={handleOpenFaqEditor}
+            />
+          ) : (
+            <div className="max-w-md mx-auto py-16 text-center text-xs text-[#6B665F]">
+              Доступ ограничен. Только для администраторов системы.
+            </div>
+          )
+        )}
+
+        {/* Compact Footer */}
         {activeTab !== 'routes' && (
           <footer className="mt-4 py-3 border-t border-[#E5E0D8] text-center text-xs text-[#8B7E6D]">
             <div className="flex items-center justify-center gap-2 max-w-7xl mx-auto px-4">
@@ -1613,6 +1624,9 @@ export default function App() {
           onClose={() => setDetailModalRoute(null)}
           onSelectForMchs={handleSelectForMchs}
           onToggleFavorite={handleToggleFavoriteRoute}
+          onOpenSuitabilityModal={(r) => setSuitabilityModalRoute(r)}
+          onCreateMyTrip={handleCreateMyTripFromRoute}
+          onFindCompanions={handleFindCompanionsFromRoute}
           onEditRoute={
             (isAdmin || (currentUser && detailModalRoute.authorId && detailModalRoute.authorId === currentUser.id))
               ? (r) => {
@@ -1621,6 +1635,16 @@ export default function App() {
                 }
               : undefined
           }
+        />
+      )}
+
+      {/* Route Suitability Modal ("Подходит ли мне?") */}
+      {suitabilityModalRoute && (
+        <RouteSuitabilityModal
+          route={suitabilityModalRoute}
+          onClose={() => setSuitabilityModalRoute(null)}
+          onCreateMyTrip={handleCreateMyTripFromRoute}
+          onFindCompanions={handleFindCompanionsFromRoute}
         />
       )}
 

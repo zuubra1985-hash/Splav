@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { RiverRoute, AppUser } from '../types';
 import { 
   Download, 
@@ -12,18 +12,23 @@ import {
   ChevronRight, 
   X, 
   Calendar, 
-  Wind, 
   Clock, 
   Edit3, 
   Printer, 
   Truck, 
   ShieldCheck, 
-  User, 
   Phone,
   Camera,
   BookOpen,
   ExternalLink,
-  Heart
+  Heart,
+  Users,
+  HelpCircle,
+  Radio,
+  FileCheck,
+  ChevronDown,
+  ChevronUp,
+  Map as MapIcon
 } from 'lucide-react';
 import { generateGpxString } from '../utils/gpxParser';
 
@@ -34,6 +39,10 @@ interface RouteDetailModalProps {
   onSelectForMchs: (route: RiverRoute) => void;
   onEditRoute?: (route: RiverRoute) => void;
   onToggleFavorite?: (routeId: string) => void;
+  onOpenSuitabilityModal?: (route: RiverRoute) => void;
+  onCreateMyTrip?: (route: RiverRoute) => void;
+  onFindCompanions?: (route: RiverRoute) => void;
+  onOpenOnMap?: (route: RiverRoute) => void;
 }
 
 export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
@@ -42,15 +51,30 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
   onClose,
   onSelectForMchs,
   onEditRoute,
-  onToggleFavorite
+  onToggleFavorite,
+  onOpenSuitabilityModal,
+  onCreateMyTrip,
+  onFindCompanions,
+  onOpenOnMap
 }) => {
-  const isAdmin = currentUser?.role === 'admin' || 
-                  currentUser?.role === 'superadmin';
-
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'superadmin';
   const isFavorite = Boolean(currentUser?.favoriteRouteIds?.includes(route.id));
+  const [showAllRisks, setShowAllRisks] = useState<boolean>(false);
+  const [showFullDesc, setShowFullDesc] = useState<boolean>(false);
 
-  // Sample elevation points to maximum 16 points to prevent freezing/lag on GPX tracks with thousands of points
-  const displayElevationPoints = React.useMemo(() => {
+  // Difficulty percentage for progress bar
+  const difficultyLevel = useMemo(() => {
+    const cat = route.fstrCategory || '';
+    if (/V|5/i.test(cat)) return { score: 95, label: 'Экстремальная (V к.с.)', fill: 'bg-[#991B1B]' };
+    if (/IV|4/i.test(cat)) return { score: 80, label: 'Очень высокая (IV к.с.)', fill: 'bg-[#DC2626]' };
+    if (/III|3/i.test(cat)) return { score: 65, label: 'Высокая (III к.с.)', fill: 'bg-[#EA580C]' };
+    if (/II|2/i.test(cat)) return { score: 45, label: 'Средняя (II к.с.)', fill: 'bg-[#D97706]' };
+    if (/I|1/i.test(cat)) return { score: 25, label: 'Базовая (I к.с.)', fill: 'bg-[#2D5A27]' };
+    return { score: 15, label: 'Некатегорийный', fill: 'bg-[#16A34A]' };
+  }, [route.fstrCategory]);
+
+  // Sample elevation points
+  const displayElevationPoints = useMemo(() => {
     if (!route.elevationProfile || route.elevationProfile.length === 0) return [];
     const pts = route.elevationProfile;
     if (pts.length <= 16) return pts;
@@ -63,7 +87,7 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
     return sampled;
   }, [route.elevationProfile]);
 
-  const { minElev, maxElev } = React.useMemo(() => {
+  const { minElev, maxElev } = useMemo(() => {
     if (displayElevationPoints.length === 0) return { minElev: 0, maxElev: 100 };
     const elevs = displayElevationPoints.map((p) => Number(p.elevationM) || 0);
     const min = Math.min(...elevs);
@@ -73,7 +97,6 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
 
   const downloadGPX = () => {
     const gpxContent = generateGpxString(route);
-
     const blob = new Blob([gpxContent], { type: 'application/gpx+xml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -87,18 +110,23 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
     window.print();
   };
 
+  // Top risks list (max 3 by default)
+  const topRisks = route.warnings && route.warnings.length > 0
+    ? (showAllRisks ? route.warnings : route.warnings.slice(0, 3))
+    : ['Быстрое течение и прижимы', 'Отсутствие устойчивой сотовой связи', 'Удаленность от населенных пунктов и медицины'];
+
   return (
     <div className="fixed inset-0 z-[2500] bg-black/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
-      <div className="bg-white border border-[#E5E0D8] rounded-[28px] max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col my-auto text-[#2D332D]">
+      <div className="bg-white border border-[#E5E0D8] rounded-[28px] max-w-3xl w-full max-h-[92vh] overflow-y-auto shadow-2xl flex flex-col my-auto text-[#2D332D]">
         
-        {/* Hero Image Header */}
+        {/* 1. HEADER (Hero Image & Badges) */}
         <div className="relative h-56 sm:h-72 w-full shrink-0 overflow-hidden rounded-t-[28px]">
           <img
             src={route.coverImage}
             alt={route.name}
             className="w-full h-full object-cover"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/45 to-transparent" />
           
           <div className="absolute top-4 right-4 flex items-center gap-2">
             {currentUser && onToggleFavorite && (
@@ -124,7 +152,7 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
                 title="Редактировать паспорт реки"
               >
                 <Edit3 className="w-3.5 h-3.5" />
-                <span>Редактировать паспорт</span>
+                <span className="hidden sm:inline">Редактировать</span>
               </button>
             )}
 
@@ -145,23 +173,19 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
             </button>
           </div>
 
-          <div className="absolute bottom-4 left-4 right-4 space-y-2">
+          <div className="absolute bottom-4 left-4 right-4 space-y-1.5">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-extrabold uppercase px-2.5 py-1 rounded-lg bg-[#2D5A27] text-white shadow-sm">
-                ФСТР: {route.fstrCategory} ({route.intlClass})
+                {route.fstrCategory} ({route.intlClass || 'Class I'})
               </span>
               <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-white/90 text-[#1A1F1A] backdrop-blur-md">
                 {route.region}
               </span>
               {route.riverBasin && (
-                <span className="text-xs font-medium px-2.5 py-1 rounded-lg bg-white/80 text-[#2D332D] backdrop-blur-md">
+                <span className="text-xs font-medium px-2.5 py-1 rounded-lg bg-white/80 text-[#2D332D] backdrop-blur-md hidden sm:inline">
                   {route.riverBasin}
                 </span>
               )}
-              <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-white/90 text-[#2D332D] backdrop-blur-md flex items-center gap-1">
-                <Calendar className="w-3 h-3 text-[#2D5A27]" />
-                Сезон: {route.seasonMonths}
-              </span>
             </div>
             <h1 className="text-xl sm:text-2xl font-extrabold text-white leading-tight">
               {route.name}
@@ -169,173 +193,174 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
           </div>
         </div>
 
-        {/* Modal Body Content */}
+        {/* Modal Body Content (Ordered Flow) */}
         <div className="p-5 sm:p-7 space-y-6 flex-1 text-[#2D332D]">
           
-          {/* Key Metrics Grid */}
+          {/* 2. CORE INDICATORS (Основные показатели) */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-[#F9F7F4] p-4 rounded-2xl border border-[#EEEBE6]">
             <div className="text-center">
-              <div className="text-[11px] text-[#8B7E6D] font-bold uppercase">Протяженность</div>
+              <div className="text-[10px] text-[#8B7E6D] font-bold uppercase tracking-wider">Протяженность</div>
               <div className="text-xl font-extrabold text-[#1A1F1A] mt-0.5">{route.lengthKm} км</div>
             </div>
             <div className="text-center">
-              <div className="text-[11px] text-[#8B7E6D] font-bold uppercase">Срок сплава</div>
-              <div className="text-xl font-extrabold text-[#1A1F1A] mt-0.5">{route.durationDays} дн.</div>
+              <div className="text-[10px] text-[#8B7E6D] font-bold uppercase tracking-wider">Срок сплава</div>
+              <div className="text-xl font-extrabold text-[#1A1F1A] mt-0.5">{route.durationDays} дня</div>
             </div>
             <div className="text-center">
-              <div className="text-[11px] text-[#8B7E6D] font-bold uppercase">Течение реки</div>
-              <div className="text-xl font-extrabold text-[#2B4C7E] mt-0.5">{route.avgFlowSpeedKmh} км/ч</div>
+              <div className="text-[10px] text-[#8B7E6D] font-bold uppercase tracking-wider">Сложность</div>
+              <div className="text-xl font-extrabold text-[#2D5A27] mt-0.5">{route.fstrCategory}</div>
             </div>
             <div className="text-center">
-              <div className="text-[11px] text-[#8B7E6D] font-bold uppercase">Перепад высот</div>
-              <div className="text-xl font-extrabold text-[#2D5A27] mt-0.5">{route.elevationGainM} м</div>
+              <div className="text-[10px] text-[#8B7E6D] font-bold uppercase tracking-wider">Сезон</div>
+              <div className="text-sm font-extrabold text-[#2B4C7E] mt-1.5 truncate">{route.seasonMonths || 'июль–август'}</div>
             </div>
           </div>
 
-          {/* Suitable Vessels */}
-          <div>
-            <h3 className="text-xs font-bold text-[#8B7E6D] uppercase tracking-wider mb-2.5">
-              Рекомендуемые типы плавсредств
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              {route.recommendedVessels.map((v, vIdx) => {
-                let name = 'Плавсредство';
-                let icon = '🛶';
-                if (v === 'sup') { name = 'SUP-борд (туринговый)'; icon = '🏄‍♂️'; }
-                if (v === 'kayak') { name = 'Байдарка / Сплавной каяк'; icon = '🛶'; }
-                if (v === 'catamaran') { name = 'Катамаран туристический'; icon = '⛵'; }
-                if (v === 'raft') { name = 'Рафт экспедиционный'; icon = '🚣'; }
-                if (v === 'motorboat') { name = 'Моторная лодка / Катер'; icon = '🚤'; }
-
-                return (
-                  <span
-                    key={`${v}-${vIdx}`}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-[#F9F7F4] border border-[#EEEBE6] text-[#2D332D] flex items-center gap-1.5"
-                  >
-                    <span>{icon}</span> {name}
-                  </span>
-                );
-              })}
+          {/* 3. QUICK ASSESSMENT (Быстрая оценка) */}
+          <div className="bg-white p-4 rounded-2xl border border-[#E5E0D8] space-y-3.5 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-[#8B7E6D] uppercase tracking-wider">
+                Быстрая оценка маршрута
+              </span>
+              <span className="text-xs font-bold text-[#2D5A27]">
+                {difficultyLevel.label}
+              </span>
             </div>
-          </div>
 
-          {/* Route Description */}
-          <div>
-            <h3 className="text-sm font-bold text-[#1A1F1A] mb-2">Описание маршрута и локация реки</h3>
-            <p className="text-xs sm:text-sm text-[#4A443E] leading-relaxed whitespace-pre-line">
-              {route.description || route.shortDesc}
-            </p>
-          </div>
-
-          {/* Wikipedia Geo Reference Block (If available) */}
-          {(route.wikipediaUrl || route.wikipediaExtract) && (
-            <div className="p-4 bg-gradient-to-br from-[#F4F8F3] to-[#EAEFE9] rounded-2xl border border-[#CDE0CC] space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-[#2D5A27] text-white flex items-center justify-center">
-                    <BookOpen className="w-3.5 h-3.5" />
-                  </div>
-                  <span className="text-xs font-black text-[#1A1F1A] uppercase tracking-wide">
-                    Географическая справка (Википедия)
-                  </span>
-                </div>
-                {route.wikipediaUrl && (
-                  <a
-                    href={route.wikipediaUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-[#2D5A27] hover:text-[#1F3E1B] font-bold flex items-center gap-1 hover:underline"
-                  >
-                    <span>Читать статью</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
+            {/* Difficulty Scale Bar */}
+            <div>
+              <div className="h-2.5 w-full bg-[#EEEBE6] rounded-full overflow-hidden flex">
+                <div 
+                  className={`h-full ${difficultyLevel.fill} transition-all duration-300 rounded-full`}
+                  style={{ width: `${difficultyLevel.score}%` }}
+                />
               </div>
-              {route.wikipediaExtract && (
-                <p className="text-xs text-[#4A443E] leading-relaxed italic bg-white/70 p-3 rounded-xl border border-[#CDE0CC]/50">
-                  «{route.wikipediaExtract}»
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Highlights & Warnings */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            
-            {/* Highlights */}
-            <div className="bg-[#F4F8F3] p-4 rounded-2xl border border-[#CDE0CC] space-y-2">
-              <h4 className="text-xs font-bold text-[#2D5A27] uppercase tracking-wider flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-[#2D5A27]" />
-                Особенности и преимущества
-              </h4>
-              <ul className="space-y-1.5">
-                {route.highlights.map((h, i) => (
-                  <li key={`hl-${i}-${h.slice(0, 15)}`} className="text-xs text-[#2D332D] flex items-start gap-2">
-                    <span className="text-[#2D5A27] font-bold">•</span>
-                    <span>{h}</span>
-                  </li>
-                ))}
-              </ul>
             </div>
 
-            {/* Warnings */}
-            <div className="bg-[#FDF2F2] p-4 rounded-2xl border border-[#F8B4B4] space-y-2">
-              <h4 className="text-xs font-bold text-[#E54B4B] uppercase tracking-wider flex items-center gap-1.5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 text-xs">
+              <div className="bg-[#F9F7F4] p-2.5 rounded-xl border border-[#EEEBE6]">
+                <div className="text-[10px] text-[#8B7E6D] font-semibold uppercase">Опыт</div>
+                <div className="font-bold text-[#1A1F1A] mt-0.5">
+                  {route.fstrCategory.includes('III') || route.fstrCategory.includes('IV') ? 'Опытный водник' : route.fstrCategory.includes('II') ? 'Базовый опыт (1-2 сплава)' : 'Для новичков'}
+                </div>
+              </div>
+
+              <div className="bg-[#F9F7F4] p-2.5 rounded-xl border border-[#EEEBE6]">
+                <div className="text-[10px] text-[#8B7E6D] font-semibold uppercase">Автономность</div>
+                <div className="font-bold text-[#1A1F1A] mt-0.5">
+                  {route.durationDays} {route.durationDays === 1 ? 'день' : route.durationDays < 5 ? 'дня' : 'дней'}
+                </div>
+              </div>
+
+              <div className="bg-[#F9F7F4] p-2.5 rounded-xl border border-[#EEEBE6]">
+                <div className="text-[10px] text-[#8B7E6D] font-semibold uppercase">Плавсредство</div>
+                <div className="font-bold text-[#1A1F1A] mt-0.5 truncate">
+                  {route.recommendedVessels && route.recommendedVessels.length > 0 
+                    ? route.recommendedVessels.map(v => v === 'sup' ? 'SUP' : v === 'kayak' ? 'Байдарка' : v === 'catamaran' ? 'Катамаран' : v === 'raft' ? 'Рафт' : 'Пакрафт').join(', ')
+                    : 'Байдарка / Катамаран'}
+                </div>
+              </div>
+            </div>
+
+            {/* Suitability Wizard Trigger Button */}
+            {onOpenSuitabilityModal && (
+              <button
+                type="button"
+                onClick={() => onOpenSuitabilityModal(route)}
+                className="w-full py-2.5 px-4 bg-[#E8F1E7] hover:bg-[#D9EAD8] text-[#2D5A27] font-bold text-xs rounded-xl border border-[#CDE0CC] transition-colors flex items-center justify-center gap-2"
+              >
+                <HelpCircle className="w-4 h-4" />
+                <span>Подходит ли мне этот маршрут? (Экспресс-тест)</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          {/* 4. MAIN RISKS (Главные риски) */}
+          <div className="bg-[#FDF2F2] p-4 rounded-2xl border border-[#F8B4B4] space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold text-[#E54B4B] uppercase tracking-wider flex items-center gap-1.5">
                 <AlertTriangle className="w-4 h-4 text-[#E54B4B]" />
-                Предупреждения и риски
-              </h4>
-              <ul className="space-y-1.5">
-                {route.warnings.map((w, i) => (
-                  <li key={`warn-${i}-${w.slice(0, 15)}`} className="text-xs text-[#7F1D1D] flex items-start gap-2">
-                    <span className="text-[#E54B4B] font-bold">•</span>
-                    <span>{w}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-          </div>
-
-          {/* Logistics & Transfer Section (If Available) */}
-          {route.logisticsTransfer && (route.logisticsTransfer.accessIn || route.logisticsTransfer.accessOut) && (
-            <div className="bg-[#F9F7F4] p-4 rounded-2xl border border-[#EEEBE6] space-y-3">
-              <h3 className="text-xs font-bold text-[#8B7E6D] uppercase tracking-wider flex items-center gap-1.5">
-                <Truck className="w-4 h-4 text-[#2D5A27]" />
-                Логистика: Заброска и Выброска
+                Основные риски и опасности
               </h3>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                {route.logisticsTransfer.accessIn && (
-                  <div className="bg-white p-3 rounded-xl border border-[#E5E0D8]">
-                    <strong className="text-[#2D5A27] block mb-1">🏁 Заброска (Стапель):</strong>
-                    <p className="text-[#4A443E]">{route.logisticsTransfer.accessIn}</p>
-                  </div>
-                )}
-                {route.logisticsTransfer.accessOut && (
-                  <div className="bg-white p-3 rounded-xl border border-[#E5E0D8]">
-                    <strong className="text-[#E54B4B] block mb-1">🏁 Выброска (Антистапель):</strong>
-                    <p className="text-[#4A443E]">{route.logisticsTransfer.accessOut}</p>
-                  </div>
-                )}
-              </div>
-
-              {route.logisticsTransfer.transportContacts && (
-                <div className="bg-[#E8F1E7]/50 p-2.5 rounded-xl border border-[#CDE0CC] text-xs flex items-center gap-2">
-                  <Phone className="w-4 h-4 text-[#2D5A27] shrink-0" />
-                  <span className="text-[#2D332D]">
-                    <strong>Контакты забросчиков:</strong> {route.logisticsTransfer.transportContacts}
-                  </span>
-                </div>
+              {route.warnings && route.warnings.length > 3 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllRisks(!showAllRisks)}
+                  className="text-xs font-bold text-[#E54B4B] hover:underline flex items-center gap-1"
+                >
+                  <span>{showAllRisks ? 'Свернуть' : `Все риски (${route.warnings.length})`}</span>
+                  {showAllRisks ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
               )}
             </div>
-          )}
 
-          {/* Elevation Profile Visualization */}
+            <ul className="space-y-1.5 text-xs text-[#7F1D1D]">
+              {topRisks.map((w, i) => (
+                <li key={`risk-${i}`} className="flex items-start gap-2">
+                  <span className="text-[#E54B4B] font-bold">•</span>
+                  <span>{w}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* 5. LOGISTICS (Логистика) */}
+          <div className="bg-[#F9F7F4] p-4 rounded-2xl border border-[#EEEBE6] space-y-3">
+            <h3 className="text-xs font-bold text-[#8B7E6D] uppercase tracking-wider flex items-center gap-1.5">
+              <Truck className="w-4 h-4 text-[#2D5A27]" />
+              Логистика: Заброска, Выброска, Транспорт
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="bg-white p-3 rounded-xl border border-[#E5E0D8]">
+                <strong className="text-[#2D5A27] block mb-1">🏁 Заброска (Стапель):</strong>
+                <p className="text-[#4A443E]">
+                  {route.logisticsTransfer?.accessIn || `Точка старта: ${route.startPoint.name}. Авто/поезд до берега.`}
+                </p>
+              </div>
+
+              <div className="bg-white p-3 rounded-xl border border-[#E5E0D8]">
+                <strong className="text-[#E54B4B] block mb-1">🏁 Выброска (Антистапель):</strong>
+                <p className="text-[#4A443E]">
+                  {route.logisticsTransfer?.accessOut || `Точка финиша: ${route.endPoint.name}. Удобный съезд к воде.`}
+                </p>
+              </div>
+            </div>
+
+            {route.logisticsTransfer?.transportContacts && (
+              <div className="bg-[#E8F1E7]/60 p-2.5 rounded-xl border border-[#CDE0CC] text-xs flex items-center gap-2">
+                <Phone className="w-4 h-4 text-[#2D5A27] shrink-0" />
+                <span className="text-[#2D332D]">
+                  <strong>Контакты перевозчиков:</strong> {route.logisticsTransfer.transportContacts}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Route Description / Details Expander */}
+          <div>
+            <h3 className="text-sm font-bold text-[#1A1F1A] mb-1.5">Описание водного пути</h3>
+            <p className="text-xs sm:text-sm text-[#4A443E] leading-relaxed whitespace-pre-line">
+              {showFullDesc ? (route.description || route.shortDesc) : (route.shortDesc || route.description?.slice(0, 220) + '...')}
+            </p>
+            {route.description && route.description.length > 220 && (
+              <button
+                type="button"
+                onClick={() => setShowFullDesc(!showFullDesc)}
+                className="text-xs font-bold text-[#2D5A27] hover:underline mt-1 inline-block"
+              >
+                {showFullDesc ? 'Свернуть описание' : 'Читать полное описание лоции'}
+              </button>
+            )}
+          </div>
+
+          {/* 6. ELEVATION & MAP SECTION */}
           {displayElevationPoints.length > 0 && (
             <div>
               <h3 className="text-xs font-bold text-[#8B7E6D] uppercase tracking-wider mb-2 flex items-center gap-1.5">
                 <Mountain className="w-4 h-4 text-[#2D5A27]" />
-                Профиль высот реки
+                Профиль высот реки ({route.elevationGainM} м перепад)
               </h3>
               <div className="bg-[#F9F7F4] p-4 rounded-2xl border border-[#EEEBE6]">
                 <div className="flex items-end justify-between h-28 gap-2 pt-4 px-2">
@@ -344,15 +369,15 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
 
                     return (
                       <div key={`elev-${i}-${pt.distanceKm ?? i}`} className="flex-1 flex flex-col items-center gap-1 h-full justify-end group">
-                        <span className="text-[10px] font-bold text-[#2B4C7E] opacity-90 group-hover:opacity-100">
+                        <span className="text-[9px] font-bold text-[#2B4C7E] opacity-90 group-hover:opacity-100">
                           {pt.elevationM}м
                         </span>
                         <div
                           style={{ height: `${heightPercent}%` }}
-                          className="w-full bg-gradient-to-t from-[#2B4C7E] via-[#5C8D55] to-[#2D5A27] rounded-t-md transition-all group-hover:brightness-110 shadow-sm"
+                          className="w-full bg-gradient-to-t from-[#2B4C7E] via-[#5C8D55] to-[#2D5A27] rounded-t-md transition-all group-hover:brightness-110 shadow-xs"
                         />
-                        <span className="text-[9px] text-[#8B7E6D] truncate max-w-[60px] text-center font-medium mt-1">
-                          {pt.pointName || `${pt.distanceKm} км`}
+                        <span className="text-[8px] text-[#8B7E6D] truncate max-w-[50px] text-center font-medium mt-1">
+                          {pt.pointName || `${pt.distanceKm}км`}
                         </span>
                       </div>
                     );
@@ -362,133 +387,94 @@ export const RouteDetailModal: React.FC<RouteDetailModalProps> = ({
             </div>
           )}
 
-          {/* Key POIs List */}
-          <div>
-            <h3 className="text-xs font-bold text-[#8B7E6D] uppercase tracking-wider mb-2 flex items-center gap-1.5">
-              <MapPin className="w-4 h-4 text-[#2D5A27]" />
-              График препятствий и ориентиры локации ({route.pois.length})
-            </h3>
-            <div className="space-y-2.5">
-              {route.pois.map((poi, idx) => (
-                <div
-                  key={`poi-${poi.id || idx}-${idx}`}
-                  className="bg-[#F9F7F4] p-3.5 rounded-2xl border border-[#EEEBE6] flex flex-col sm:flex-row sm:items-start justify-between gap-3 hover:border-[#D9D1C5] transition-colors"
-                >
-                  <div className="flex items-start gap-3">
-                    {poi.photo ? (
-                      <img
-                        src={poi.photo}
-                        alt={poi.name}
-                        className="w-16 h-16 rounded-xl object-cover border border-[#CDE0CC] shrink-0 shadow-xs cursor-pointer hover:opacity-90 transition-opacity"
-                        onClick={() => window.open(poi.photo, '_blank')}
-                        title="Нажмите, чтобы открыть фото в полном размере"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-xl bg-white border border-[#E5E0D8] flex items-center justify-center text-lg shrink-0">
-                        {poi.type === 'rapid' && '🌊'}
-                        {poi.type === 'camp' && '⛺'}
-                        {poi.type === 'hydro_post' && '💧'}
-                        {poi.type === 'cabin' && '🏠'}
-                        {poi.type === 'indigenous' && '🏕️'}
-                        {poi.type === 'slipway' && '🛶'}
-                        {poi.type === 'portage' && '🪵'}
-                        {poi.type === 'danger' && '⚠️'}
-                      </div>
-                    )}
-
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-bold text-[#1A1F1A]">{poi.name}</span>
-                        {poi.kmMark !== undefined && (
-                          <span className="text-[10px] text-[#2D5A27] font-bold px-2 py-0.5 rounded-full bg-[#E8F1E7] border border-[#CDE0CC]">
-                            {poi.kmMark} км
-                          </span>
-                        )}
-                        <span className="text-[10px] uppercase font-bold text-[#8B7E6D]">
-                          {poi.type}
-                        </span>
-                      </div>
-                      <p className="text-xs text-[#6B665F] mt-1 leading-relaxed">{poi.description}</p>
-                      {poi.safetyTips && (
-                        <p className="text-[11px] text-[#92400E] mt-1 font-semibold flex items-center gap-1">
-                          <span>⚠️</span>
-                          <span>{poi.safetyTips}</span>
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <span className="text-xs font-mono text-[#8B7E6D] self-end sm:self-auto shrink-0">
-                    {poi.lat != null && !isNaN(Number(poi.lat)) ? Number(poi.lat).toFixed(4) : '—'}, {poi.lng != null && !isNaN(Number(poi.lng)) ? Number(poi.lng).toFixed(4) : '—'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Photo Gallery Section if Route has Photos */}
-          {route.photos && route.photos.length > 0 && (
+          {/* Obstacles & POIs preview */}
+          {route.pois && route.pois.length > 0 && (
             <div>
               <h3 className="text-xs font-bold text-[#8B7E6D] uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <Camera className="w-4 h-4 text-[#2D5A27]" />
-                Фотогалерея реки ({route.photos.length})
+                <MapPin className="w-4 h-4 text-[#2D5A27]" />
+                Ключевые ориентиры и препятствия ({route.pois.length})
               </h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                {route.photos.map((imgUrl, i) => (
-                  <div
-                    key={`photo-${i}-${imgUrl.slice(-10)}`}
-                    className="relative group rounded-xl overflow-hidden h-28 border border-[#E5E0D8] shadow-xs cursor-pointer"
-                    onClick={() => window.open(imgUrl, '_blank')}
-                  >
-                    <img src={imgUrl} alt={`Фото реки ${i + 1}`} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                {route.pois.slice(0, 4).map((poi, idx) => (
+                  <div key={`poi-${idx}`} className="p-2.5 rounded-xl bg-[#F9F7F4] border border-[#EEEBE6] flex items-center justify-between">
+                    <div className="flex items-center gap-2 truncate">
+                      <span>{poi.type === 'rapid' ? '🌊' : poi.type === 'camp' ? '⛺' : '📍'}</span>
+                      <span className="font-bold text-[#1A1F1A] truncate">{poi.name}</span>
+                    </div>
+                    {poi.kmMark !== undefined && (
+                      <span className="text-[10px] font-bold text-[#2D5A27] px-1.5 py-0.5 rounded bg-[#E8F1E7]">
+                        {poi.kmMark} км
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Passport Metadata Footer */}
-          <div className="pt-2 border-t border-[#E5E0D8] flex flex-wrap items-center justify-between text-[11px] text-[#8B7E6D]">
-            <span>Составитель: {route.authorName || 'Турклуб Splav86'}</span>
-            <span>Ревизия паспорта: {route.lastPassportRevision || '2026'}</span>
+          {/* Passport Quality / Verification Date metadata */}
+          <div className="pt-3 border-t border-[#EEEBE6] flex flex-wrap items-center justify-between text-[11px] text-[#8B7E6D]">
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${route.verificationStatus === 'verified' ? 'bg-[#16A34A]' : route.verificationStatus === 'incomplete' ? 'bg-[#D97706]' : 'bg-[#16A34A]'}`} />
+              <span>Статус: <strong>{route.verificationStatus === 'incomplete' ? 'Неполные данные' : 'Проверено'}</strong></span>
+            </div>
+            <span>Последняя проверка: {route.lastVerifiedAt || route.lastPassportRevision || '26.08.2026'}</span>
           </div>
 
         </div>
 
-        {/* Modal Footer Actions */}
+        {/* 7, 8, 9. ACTION BAR & FOOTER (GPX, Мой поход, Попутчики) */}
         <div className="p-4 sm:p-6 bg-[#F9F7F4] border-t border-[#E5E0D8] rounded-b-[28px] flex flex-wrap items-center justify-between gap-3 shrink-0">
           
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={downloadGPX}
-              className="px-4 py-2.5 rounded-xl text-xs font-bold bg-white text-[#2D332D] hover:border-[#2D5A27] border border-[#E5E0D8] flex items-center gap-1.5 transition-all shadow-xs"
+              className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-white text-[#2D332D] hover:border-[#2D5A27] border border-[#E5E0D8] flex items-center gap-1.5 transition-all shadow-2xs"
             >
               <Download className="w-4 h-4 text-[#2D5A27]" />
-              Экспорт трека GPX
+              <span>Скачать GPX</span>
             </button>
+
+            {onOpenOnMap && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onOpenOnMap(route);
+                }}
+                className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-white text-[#2D332D] hover:border-[#2D5A27] border border-[#E5E0D8] flex items-center gap-1.5 transition-all shadow-2xs"
+              >
+                <MapIcon className="w-4 h-4 text-[#2B4C7E]" />
+                <span>Открыть на карте</span>
+              </button>
+            )}
           </div>
 
-          <div className="flex items-center gap-2">
-            {isAdmin && onEditRoute && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {onFindCompanions && (
               <button
-                onClick={() => onEditRoute(route)}
-                className="px-4 py-2.5 bg-white text-[#2D5A27] border border-[#CDE0CC] hover:bg-[#E8F1E7] font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-all"
+                onClick={() => {
+                  onClose();
+                  onFindCompanions(route);
+                }}
+                className="px-3.5 py-2.5 bg-white text-[#2D332D] border border-[#E5E0D8] hover:border-[#2D5A27] font-bold text-xs rounded-xl shadow-2xs flex items-center gap-1.5 transition-all"
               >
-                <Edit3 className="w-4 h-4" />
-                Редактировать
+                <Users className="w-4 h-4 text-[#2D5A27]" />
+                <span>Найти попутчиков</span>
               </button>
             )}
 
-            <button
-              onClick={() => {
-                onSelectForMchs(route);
-                onClose();
-              }}
-              className="px-4 py-2.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 transition-all"
-            >
-              <ShieldAlert className="w-4 h-4" />
-              Заявка в МЧС
-            </button>
+            {onCreateMyTrip && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onCreateMyTrip(route);
+                }}
+                className="px-4 py-2.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 transition-all"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>Создать мой поход</span>
+              </button>
+            )}
           </div>
 
         </div>

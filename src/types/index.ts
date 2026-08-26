@@ -123,6 +123,19 @@ export interface RiverRoute {
   photos?: string[];
   wikipediaUrl?: string;
   wikipediaExtract?: string;
+  // Quality Control & Verification
+  verificationStatus?: 'verified' | 'incomplete' | 'needs_review';
+  lastVerifiedAt?: string;
+  nextVerificationDate?: string;
+  logisticsVerifiedAt?: string;
+  safetyVerifiedAt?: string;
+  dataSource?: string;
+  versionHistory?: {
+    version: number;
+    date: string;
+    changeNote: string;
+    authorName: string;
+  }[];
 }
 
 export interface WeatherPoint {
@@ -309,6 +322,8 @@ export interface ArticleReport {
   gallery: { url: string; caption: string }[];
 }
 
+export type Article = ArticleReport;
+
 export interface TravelNote {
   id: string;
   userId?: string;
@@ -475,4 +490,99 @@ export interface SyncLogEntry {
   message: string;
   count?: number;
 }
+
+export interface MyTripChecklistSection {
+  id: string;
+  title: string;
+  items: {
+    id: string;
+    text: string;
+    completed: boolean;
+    required?: boolean;
+    note?: string;
+  }[];
+}
+
+export interface MyTripCheckpoint {
+  id: string;
+  name: string;
+  date: string;
+  time?: string;
+  lat?: number;
+  lng?: number;
+  passed: boolean;
+  notes?: string;
+}
+
+export interface MyTripEmergencyContact {
+  name: string;
+  phone: string;
+  relation?: string;
+  satelliteMessenger?: string;
+  notes?: string;
+}
+
+export interface MyTrip {
+  id: string;
+  userId: string;
+  routeId: string;
+  routeName: string;
+  riverName: string;
+  region: 'ХМАО' | 'ЯНАО';
+  fstrCategory: string;
+  startDate: string;
+  endDate: string;
+  durationDays: number;
+  vessels: VesselType[];
+  participants: {
+    id: string;
+    name: string;
+    role: string;
+    phone?: string;
+    isConfirmed: boolean;
+  }[];
+  checklistSections: MyTripChecklistSection[];
+  checkpoints: MyTripCheckpoint[];
+  emergencyContact?: MyTripEmergencyContact;
+  mchsRegistered: boolean;
+  mchsRegistrationNumber?: string;
+  satelliteEquipment?: string;
+  radioFrequency?: string;
+  gpxFileName?: string;
+  notes?: string;
+  status: 'planning' | 'ready' | 'in_progress' | 'completed' | 'cancelled';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RouteSuitabilityQuery {
+  experience: 'none' | 'basic' | 'experienced';
+  vessel: VesselType;
+  autonomyDays: '1-2' | '3-5' | '5+';
+  readinessForHarshConditions: 'low' | 'medium' | 'high';
+}
+
+export interface RouteSuitabilityResult {
+  isSuitable: boolean;
+  score: number; // 0 to 100
+  title: string;
+  reasons: {
+    type: 'success' | 'warning' | 'error';
+    text: string;
+  }[];
+  recommendations: string[];
+}
+
+export type KnowledgeMaterialType = 'article' | 'report' | 'pilot_guide' | 'travel_note' | 'safety' | 'faq';
+
+export interface GlobalSearchResult {
+  id: string;
+  title: string;
+  subtitle: string;
+  type: 'route' | 'trip' | 'article' | 'report' | 'note' | 'settlement';
+  categoryBadge: string;
+  linkTab: 'routes' | 'companions' | 'knowledge' | 'preparation';
+  meta?: any;
+}
+
 

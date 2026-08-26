@@ -1,11 +1,34 @@
 import React from 'react';
-import { Compass, Waves, CloudRain, Users, BookOpen, User, LogIn, HelpCircle, BookmarkCheck, Edit3, Send } from 'lucide-react';
+import { 
+  Compass, 
+  Waves, 
+  Users, 
+  BookOpen, 
+  User, 
+  LogIn, 
+  ShieldCheck, 
+  Heart, 
+  CheckSquare, 
+  Map as MapIcon, 
+  Send,
+  Navigation,
+  Shield
+} from 'lucide-react';
 import { Region, AppUser } from '../types';
 import { isTelegramWebApp } from '../utils/telegramWebApp';
 
+export type MainNavigationTab = 
+  | 'routes' 
+  | 'companions' 
+  | 'preparation' 
+  | 'knowledge' 
+  | 'mytrip' 
+  | 'cabinet' 
+  | 'admin';
+
 interface NavbarProps {
-  activeTab: 'routes' | 'companions' | 'mchs_safety' | 'articles' | 'logbook' | 'cabinet';
-  setActiveTab: (tab: 'routes' | 'companions' | 'mchs_safety' | 'articles' | 'logbook' | 'cabinet') => void;
+  activeTab: MainNavigationTab;
+  setActiveTab: (tab: MainNavigationTab) => void;
   selectedRegion?: Region;
   setSelectedRegion?: (region: Region) => void;
   currentUser: AppUser | null;
@@ -20,13 +43,19 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAuth,
   isOnline = true
 }) => {
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'superadmin';
+  const favoritesCount = currentUser?.favoriteRouteIds?.length || 0;
+
   return (
     <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-[#E5E0D8] shadow-xs">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 sm:h-20">
           
           {/* Logo & Brand */}
-          <div className="flex items-center space-x-2.5 sm:space-x-3 cursor-pointer shrink-0" onClick={() => setActiveTab('routes')}>
+          <div 
+            className="flex items-center space-x-2.5 sm:space-x-3 cursor-pointer shrink-0" 
+            onClick={() => setActiveTab('routes')}
+          >
             <div className="relative flex items-center justify-center w-9 h-9 sm:w-11 sm:h-11 rounded-2xl bg-[#2D5A27] text-white shadow-md shadow-[#2D5A27]/20 shrink-0">
               <Waves className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
@@ -45,7 +74,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* Desktop Navigation Links */}
+          {/* Desktop Navigation Links (P0: 5 core sections + Мой поход) */}
           <nav className="hidden md:flex items-center space-x-1 lg:space-x-1.5">
             <button
               onClick={() => setActiveTab('routes')}
@@ -56,7 +85,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <Compass className="w-4 h-4 text-[#2D5A27]" />
-              <span>Карта и реки</span>
+              <span>Карта и Маршруты</span>
             </button>
 
             <button
@@ -72,39 +101,39 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             <button
-              onClick={() => setActiveTab('mchs_safety')}
+              onClick={() => setActiveTab('preparation')}
               className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
-                activeTab === 'mchs_safety'
+                activeTab === 'preparation'
                   ? 'bg-[#E8F1E7] text-[#2D5A27] border border-[#CDE0CC] shadow-2xs'
                   : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4]'
               }`}
             >
-              <HelpCircle className="w-4 h-4 text-[#2D5A27]" />
-              <span>FAQ</span>
+              <CheckSquare className="w-4 h-4 text-[#2D5A27]" />
+              <span>Подготовка</span>
             </button>
 
             <button
-              onClick={() => setActiveTab('articles')}
+              onClick={() => setActiveTab('knowledge')}
               className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
-                activeTab === 'articles'
+                activeTab === 'knowledge'
                   ? 'bg-[#E8F1E7] text-[#2D5A27] border border-[#CDE0CC] shadow-2xs'
                   : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4]'
               }`}
             >
               <BookOpen className="w-4 h-4 text-[#2D5A27]" />
-              <span>Статьи и отчеты</span>
+              <span>База знаний</span>
             </button>
 
             <button
-              onClick={() => setActiveTab('logbook')}
+              onClick={() => setActiveTab('mytrip')}
               className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
-                activeTab === 'logbook'
+                activeTab === 'mytrip'
                   ? 'bg-[#E8F1E7] text-[#2D5A27] border border-[#CDE0CC] shadow-2xs'
                   : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4]'
               }`}
             >
-              <Edit3 className="w-4 h-4 text-[#2D5A27]" />
-              <span>Путевые заметки</span>
+              <ShieldCheck className="w-4 h-4 text-[#2D5A27]" />
+              <span>Мой поход</span>
             </button>
           </nav>
 
@@ -129,6 +158,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="truncate">{isOnline ? 'Онлайн' : 'Офлайн'}</span>
             </div>
 
+            {/* Telegram App badge */}
             {isTelegramWebApp() && (
               <div 
                 className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-sky-50 text-[#0088cc] border border-sky-200"
@@ -137,6 +167,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <Send className="w-3 h-3 text-[#0088cc]" />
                 <span>Telegram</span>
               </div>
+            )}
+
+            {/* Admin Panel Button (Only visible if admin / superadmin) */}
+            {isAdmin && (
+              <button
+                onClick={() => setActiveTab('admin')}
+                className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
+                  activeTab === 'admin'
+                    ? 'bg-[#8A3B14] text-white shadow-xs'
+                    : 'bg-[#FDF3EB] text-[#8A3B14] border border-[#F3DAC9] hover:bg-[#FBE8DB]'
+                }`}
+                title="Панель администратора"
+              >
+                <Shield className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Администрирование</span>
+              </button>
             )}
 
             {/* Profile / Auth Button */}
@@ -162,17 +208,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <img
                     src={currentUser.avatar}
                     alt={currentUser.name}
-                    className="w-6 h-6 rounded-full object-cover border border-white/40"
+                    className="w-6 h-6 rounded-lg object-cover border border-white/20"
                   />
                 ) : (
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                    activeTab === 'cabinet' ? 'bg-white text-[#2D5A27]' : 'bg-[#2D5A27] text-white'
-                  }`}>
-                    {currentUser.name.slice(0, 1)}
+                  <div className="w-6 h-6 rounded-lg bg-[#2D5A27] text-white flex items-center justify-center text-[11px] font-bold">
+                    {currentUser.name.charAt(0).toUpperCase()}
                   </div>
                 )}
-                <span className="text-xs font-bold max-w-[110px] truncate">
-                  {currentUser.name.split(' ')[0]}
+                <span className="text-xs font-bold max-w-[100px] truncate hidden sm:inline">
+                  {currentUser.name}
                 </span>
               </button>
             )}
@@ -182,101 +226,58 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
 
-      {/* Mobile Sticky Bottom Navigation Bar */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/98 backdrop-blur-md border-t border-[#E5E0D8] px-1 py-1 flex items-center justify-around shadow-2xl pb-[max(0.375rem,env(safe-area-inset-bottom))]">
-        
+      {/* MOBILE BOTTOM NAVIGATION (Requirement 21) */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-md border-t border-[#E5E0D8] px-2 py-1.5 flex items-center justify-around shadow-lg">
         <button
           onClick={() => setActiveTab('routes')}
-          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
-            activeTab === 'routes'
-              ? 'text-[#2D5A27] font-black bg-[#E8F1E7]'
-              : 'text-[#6B665F] font-medium'
+          className={`flex flex-col items-center gap-0.5 p-1.5 rounded-xl transition-all ${
+            activeTab === 'routes' ? 'text-[#2D5A27] font-bold' : 'text-[#6B665F]'
           }`}
-          title="Каталог маршрутов и карта"
         >
-          <Compass className="w-4 h-4 mb-0.5" />
-          <span className="text-[9px] font-bold">Маршруты</span>
+          <Compass className="w-5 h-5" />
+          <span className="text-[10px]">Маршруты</span>
         </button>
 
         <button
           onClick={() => setActiveTab('companions')}
-          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
-            activeTab === 'companions'
-              ? 'text-[#2D5A27] font-black bg-[#E8F1E7]'
-              : 'text-[#6B665F] font-medium'
+          className={`flex flex-col items-center gap-0.5 p-1.5 rounded-xl transition-all ${
+            activeTab === 'companions' ? 'text-[#2D5A27] font-bold' : 'text-[#6B665F]'
           }`}
-          title="Поиск попутчиков и организация походов"
         >
-          <Users className="w-4 h-4 mb-0.5" />
-          <span className="text-[9px] font-bold">Попутчики</span>
+          <Users className="w-5 h-5" />
+          <span className="text-[10px]">Попутчики</span>
         </button>
 
         <button
-          onClick={() => setActiveTab('mchs_safety')}
-          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
-            activeTab === 'mchs_safety'
-              ? 'text-[#2D5A27] font-black bg-[#E8F1E7]'
-              : 'text-[#6B665F] font-medium'
+          onClick={() => setActiveTab('mytrip')}
+          className={`flex flex-col items-center gap-0.5 p-1.5 rounded-xl transition-all ${
+            activeTab === 'mytrip' ? 'text-[#2D5A27] font-bold' : 'text-[#6B665F]'
           }`}
-          title="FAQ: Безопасность, связь, МЧС и ответы на вопросы"
         >
-          <HelpCircle className="w-4 h-4 mb-0.5" />
-          <span className="text-[9px] font-bold">FAQ</span>
+          <ShieldCheck className="w-5 h-5" />
+          <span className="text-[10px]">Мой поход</span>
         </button>
 
         <button
-          onClick={() => setActiveTab('articles')}
-          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
-            activeTab === 'articles'
-              ? 'text-[#2D5A27] font-black bg-[#E8F1E7]'
-              : 'text-[#6B665F] font-medium'
+          onClick={() => setActiveTab('knowledge')}
+          className={`flex flex-col items-center gap-0.5 p-1.5 rounded-xl transition-all ${
+            activeTab === 'knowledge' ? 'text-[#2D5A27] font-bold' : 'text-[#6B665F]'
           }`}
-          title="Статьи, лоции и отчеты об экспедициях"
         >
-          <BookOpen className="w-4 h-4 mb-0.5" />
-          <span className="text-[9px] font-bold">Статьи</span>
+          <BookOpen className="w-5 h-5" />
+          <span className="text-[10px]">База знаний</span>
         </button>
 
         <button
-          onClick={() => setActiveTab('logbook')}
-          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
-            activeTab === 'logbook'
-              ? 'text-[#2D5A27] font-black bg-[#E8F1E7]'
-              : 'text-[#6B665F] font-medium'
+          onClick={() => currentUser ? setActiveTab('cabinet') : onOpenAuth()}
+          className={`flex flex-col items-center gap-0.5 p-1.5 rounded-xl transition-all ${
+            activeTab === 'cabinet' || activeTab === 'admin' ? 'text-[#2D5A27] font-bold' : 'text-[#6B665F]'
           }`}
-          title="Путевые заметки, чек-лист и бортовой журнал"
         >
-          <Edit3 className="w-4 h-4 mb-0.5" />
-          <span className="text-[9px] font-bold">Заметки</span>
+          <User className="w-5 h-5" />
+          <span className="text-[10px]">{currentUser ? 'Профиль' : 'Войти'}</span>
         </button>
-
-        <button
-          onClick={() => {
-            if (!currentUser) onOpenAuth();
-            else setActiveTab('cabinet');
-          }}
-          className={`flex flex-col items-center justify-center py-1 px-1.5 rounded-xl transition-all ${
-            activeTab === 'cabinet'
-              ? 'text-[#2D5A27] font-black bg-[#E8F1E7]'
-              : 'text-[#6B665F] font-medium'
-          }`}
-          title="Личный кабинет"
-        >
-          {currentUser?.avatar ? (
-            <img
-              src={currentUser.avatar}
-              alt={currentUser.name}
-              className="w-4 h-4 rounded-full object-cover mb-0.5 border border-[#2D5A27]"
-            />
-          ) : (
-            <User className="w-4 h-4 mb-0.5" />
-          )}
-          <span className="text-[9px] font-bold truncate max-w-[46px]">
-            {currentUser ? currentUser.name.split(' ')[0] : 'Войти'}
-          </span>
-        </button>
-
-      </nav>
+      </div>
 
     </header>
   );

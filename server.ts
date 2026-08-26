@@ -370,7 +370,7 @@ app.post('/api/auth/register', authLimiter, async (req: AuthenticatedRequest, re
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    const userId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const userId = `user-${crypto.randomUUID()}`;
     const role: UserRole = 'user';
 
     const newUser = await createRegisteredUser({
@@ -1090,7 +1090,7 @@ app.post(['/api/trips/:id/applications', '/api/db/trips/:id/applications'], requ
       });
     }
 
-    const appId = `app-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const appId = `app-${crypto.randomUUID()}`;
     const createdApp = await createTripApplicationInDb({
       id: appId,
       tripId,
@@ -1208,7 +1208,7 @@ app.post(['/api/trips/:id/participants', '/api/db/trips/:id/participants'], requ
       });
     }
 
-    const partId = `part-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const partId = `part-${crypto.randomUUID()}`;
     const added = await addTripParticipantInDb({
       id: partId,
       tripId,
