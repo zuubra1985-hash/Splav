@@ -2,54 +2,91 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
+    // Default deny-all catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Security helper primitives
     function isValidId(id) {
-      return id is string && id.size() <= 128;
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.]+$');
     }
 
-    // Default connection test doc
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email == 'zuubra1985@gmail.com' && request.auth.token.email_verified == true) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Safe connection test doc
     match /test/{docId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if false;
     }
 
-    // Community Trips & Expeditions
-    match /trips/{tripId} {
-      allow read, write, create, update, delete: if isValidId(tripId);
-    }
-
-    // River Passports and Catalog Routes
-    match /routes/{routeId} {
-      allow read, write, create, update, delete: if isValidId(routeId);
-    }
-
-    // User Accounts & Permissions
+    // Strict User Profiles (PII Protected: only owner or verified admin can read/write)
     match /users/{userId} {
-      allow read, write, create, update, delete: if isValidId(userId);
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if (isOwner(userId) || isAdmin()) && isValidId(userId);
+      allow update: if (isOwner(userId) || isAdmin()) && isValidId(userId);
+      allow delete: if isAdmin() && isValidId(userId);
     }
 
-    // Articles, Guides & Trip Reports
+    // Community River Routes & Waterway Passports
+    match /routes/{routeId} {
+      allow read: if isValidId(routeId);
+      allow create: if (isSignedIn() || isAdmin()) && isValidId(routeId);
+      allow update: if (isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid)) && isValidId(routeId);
+      allow delete: if (isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid)) && isValidId(routeId);
+    }
+
+    // Expeditions & Companion Search Trips
+    match /trips/{tripId} {
+      allow read: if isValidId(tripId);
+      allow create: if (isSignedIn() || isAdmin()) && isValidId(tripId);
+      allow update: if (isAdmin() || (isSignedIn() && resource.data.organizer.userId == request.auth.uid)) && isValidId(tripId);
+      allow delete: if (isAdmin() || (isSignedIn() && resource.data.organizer.userId == request.auth.uid)) && isValidId(tripId);
+
+      // Instant Trip Chat Subcollection
+      match /messages/{msgId} {
+        allow read: if isValidId(msgId);
+        allow create: if isSignedIn() && isValidId(msgId);
+        allow update, delete: if (isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid)) && isValidId(msgId);
+      }
+
+      // Live Presence Subcollection
+      match /presence/{userId} {
+        allow read: if isValidId(userId);
+        allow write: if (isOwner(userId) || isAdmin()) && isValidId(userId);
+      }
+    }
+
+    // Articles, Reports & River Guides
     match /articles/{articleId} {
-      allow read, write, create, update, delete: if isValidId(articleId);
-    }
-
-    // Hydrological Stations & Water Levels
-    match /hydro/{stationId} {
-      allow read, write, create, update, delete: if isValidId(stationId);
+      allow read: if isValidId(articleId);
+      allow write: if isAdmin() && isValidId(articleId);
     }
 
     // FAQ, Safety Handbook, Radio & Emergency Communications
     match /faq/{docId} {
-      allow read, write, create, update, delete: if isValidId(docId);
+      allow read: if isValidId(docId);
+      allow write: if isAdmin() && isValidId(docId);
     }
 
-    // Travel Notes, Checklists, Logbook & 5-Star Reviews
+    // Travel Notes, Checklists, Logbook & Reviews
     match /travel_notes/{docId} {
-      allow read, write, create, update, delete: if isValidId(docId);
-    }
-
-    // Catch-all for subcollections or nested paths
-    match /{document=**} {
-      allow read, write: if true;
+      allow read: if isValidId(docId);
+      allow write: if (isSignedIn() || isAdmin()) && isValidId(docId);
     }
   }
 }

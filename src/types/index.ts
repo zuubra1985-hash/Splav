@@ -2,7 +2,7 @@ export type Region = 'ALL' | 'ХМАО' | 'ЯНАО';
 
 export type VesselType = 'sup' | 'kayak' | 'catamaran' | 'motorboat' | 'raft' | 'packraft';
 
-export type UserRole = 'user' | 'admin' | 'superadmin';
+export type UserRole = 'user' | 'organizer' | 'moderator' | 'admin' | 'superadmin';
 
 export interface AppUser {
   id: string;
@@ -33,6 +33,33 @@ export interface AppUser {
     phone: string;
     relation?: string;
   };
+}
+
+export interface PublicUserDTO {
+  id: string;
+  name: string;
+  avatar?: string;
+  city?: string;
+  experienceLevel?: string;
+  badges?: string[];
+  bio?: string;
+  callsign?: string;
+  fstrRank?: string;
+  favoriteRivers?: string[];
+  vesselsOwned?: VesselType[];
+  isReadyForExpeditions?: boolean;
+  registeredAt?: string;
+  telegram?: string;
+  phone?: string;
+}
+
+export interface PrivateUserDTO extends Omit<AppUser, 'password'> {
+  // Never contains password or passwordHash
+}
+
+export interface AuthResponseDTO {
+  token: string;
+  user: PrivateUserDTO;
 }
 
 export interface RouteCoordinate {

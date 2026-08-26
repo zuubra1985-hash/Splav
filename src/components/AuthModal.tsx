@@ -1,23 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { AppUser, UserRole } from '../types';
+import { AppUser } from '../types';
 import { 
   ShieldCheck, 
   Mail, 
   Lock, 
-  Phone, 
-  MapPin, 
-  CheckCircle2, 
   X, 
   LogIn, 
   UserPlus, 
   AlertCircle, 
   Globe, 
   Send,
-  HelpCircle,
-  KeyRound
+  Loader2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { initTelegramWebApp, TelegramTourist, isTelegramWebApp } from '../utils/telegramWebApp';
+import { CloudSqlDbService } from '../services/cloudSqlDb';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -31,16 +28,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
   onClose,
   onLoginSuccess,
-  registeredUsers,
   onRegisterUser
 }) => {
   // Modes: 'login' (Вход по Email) or 'register' (Регистрация по Email)
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [tgTourist, setTgTourist] = useState<TelegramTourist | null>(null);
   const [isInTelegram, setIsInTelegram] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   
   // Login fields
-  const [loginEmail, setLoginEmail] = useState<string>(''); // Email (primary) or @telegram
+  const [loginEmail, setLoginEmail] = useState<string>('');
   const [loginPassword, setLoginPassword] = useState<string>('');
 
   // Register fields (Strict Email-first registration)
@@ -64,25 +61,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setIsInTelegram(inTg);
 
       if (tourist) {
-        // Pre-fill user name and telegram nick to make email registration swift
         const tgName = [tourist.first_name, tourist.last_name].filter(Boolean).join(' ');
         if (tgName) setRegName((prev) => prev || tgName);
         if (tourist.username) setRegTelegram((prev) => prev || `@${tourist.username}`);
       }
 
       setErrorMessage(null);
+      setIsLoading(false);
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
   // 1. Standard Login by Email (and Password)
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
-    const rawInput = loginEmail.trim();
-    const cleanEmail = rawInput.toLowerCase();
+    const cleanEmail = loginEmail.trim().toLowerCase();
     const cleanPassword = loginPassword.trim();
 
     if (!cleanEmail) {
@@ -94,104 +90,41 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    const isSuperAdminEmail = cleanEmail === 'zuubra1985@gmail.com' || cleanEmail.replace('@', '') === 'zuubra1985';
-    
-    // Check master superadmin credentials
-    if (isSuperAdminEmail) {
-      if (cleanPassword !== '110985DimA' && cleanPassword !== 'admin86') {
-        setErrorMessage('Неверный пароль администратора. Доступ запрещен.');
-        return;
-      }
+    setIsLoading(true);
 
-      const existingSuper = registeredUsers.find((u) => u.email.trim().toLowerCase() === 'zuubra1985@gmail.com');
-      const canonicalId = 'user-superadmin-zuubra';
-      const defaultName = 'Администратор (zuubra1985)';
-      
-      const superAdminUser: AppUser = existingSuper
-        ? {
-            ...existingSuper,
-            id: canonicalId,
-            name: existingSuper.name || defaultName,
-            telegramId: tgTourist?.id || existingSuper.telegramId,
-            telegram: tgTourist?.username ? `@${tgTourist.username}` : existingSuper.telegram || '@zuubra1985',
-            role: 'superadmin'
-          }
-        : {
-            id: canonicalId,
-            email: 'zuubra1985@gmail.com',
-            name: defaultName,
-            phone: '+7 (922) 000-00-86',
-            role: 'superadmin',
-            password: cleanPassword,
-            city: 'Ханты-Мансийск / Сургут',
-            telegram: tgTourist?.username ? `@${tgTourist.username}` : '@zuubra1985',
-            telegramId: tgTourist?.id,
-            avatar: tgTourist?.photo_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
-            experienceLevel: 'Эксперт / Инструктор-проводник',
-            registeredAt: '2026-01-01',
-            favoriteRouteIds: ['sob-polar-ural', 'sosva-nyaksimvol-berezovo'],
-            isReadyForExpeditions: true,
-            showContactsPublicly: true
-          };
-
-      onRegisterUser(superAdminUser);
-      onLoginSuccess(superAdminUser);
-      onClose();
-      try {
-        confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
-      } catch (e) {}
-      return;
-    }
-
-    // Strict single database lookup: by Email (or telegram nick if already linked)
-    const cleanUsername = cleanEmail.replace('@', '');
-    const matchedUser = registeredUsers.find((u) => {
-      const uEmail = (u.email || '').trim().toLowerCase();
-      const uTg = (u.telegram || '').trim().toLowerCase().replace('@', '');
-      const uTgId = u.telegramId ? String(u.telegramId) : '';
-
-      return (
-        uEmail === cleanEmail ||
-        (cleanUsername && uTg === cleanUsername) ||
-        (uTgId && uTgId === cleanEmail)
-      );
-    });
-
-    if (!matchedUser) {
-      setErrorMessage(`Пользователь с Email «${rawInput}» не найден в единой базе. Пожалуйста, пройдите быструю регистрацию на вкладке «Регистрация по Email».`);
-      return;
-    }
-
-    // Check user password if set
-    if (matchedUser.password && matchedUser.password.trim() !== '') {
-      if (matchedUser.password !== cleanPassword) {
-        setErrorMessage('Неверный пароль. Пожалуйста, проверьте правильность ввода.');
-        return;
-      }
-    }
-
-    // If logging in inside Telegram WebApp, link Telegram ID to this unified Email account
-    let userToLogin = matchedUser;
-    if (tgTourist) {
-      userToLogin = {
-        ...matchedUser,
-        telegramId: tgTourist.id,
-        telegram: tgTourist.username ? `@${tgTourist.username}` : matchedUser.telegram,
-        avatar: tgTourist.photo_url || matchedUser.avatar
-      };
-      onRegisterUser(userToLogin);
-    }
-
-    // Login successful
-    onLoginSuccess(userToLogin);
-    onClose();
     try {
-      confetti({ particleCount: 50, spread: 50, origin: { y: 0.6 } });
-    } catch (e) {}
+      const response = await CloudSqlDbService.login(cleanEmail, cleanPassword);
+      const user = response.user as AppUser;
+
+      // Link Telegram identity if in TMA
+      if (tgTourist) {
+        user.telegramId = tgTourist.id;
+        user.telegram = tgTourist.username ? `@${tgTourist.username}` : user.telegram;
+        user.avatar = tgTourist.photo_url || user.avatar;
+        try {
+          await CloudSqlDbService.updateCurrentUser({
+            telegram: user.telegram,
+            avatar: user.avatar
+          });
+        } catch {}
+      }
+
+      onRegisterUser(user);
+      onLoginSuccess(user);
+      onClose();
+
+      try {
+        confetti({ particleCount: 60, spread: 60, origin: { y: 0.6 } });
+      } catch {}
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Неверный email или пароль');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // 2. Strict Email-First Registration
-  const handleRegisterSubmit = (e: React.FormEvent) => {
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
@@ -217,56 +150,43 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     if (cleanConfirm && cleanPassword !== cleanConfirm) {
-      setErrorMessage('Введенные пароли не совпадают. Пожалуйста, проверьте подтверждение пароля.');
+      setErrorMessage('Введенные пароли не совпадают.');
       return;
     }
 
-    // Check Duplicate by Email in the unified database
-    const alreadyExists = registeredUsers.some((u) => {
-      const uEmail = (u.email || '').trim().toLowerCase();
-      return uEmail === cleanEmail;
-    });
+    setIsLoading(true);
 
-    if (alreadyExists) {
-      setErrorMessage(`Пользователь с Email «${cleanEmail}» уже зарегистрирован в единой базе! Перейдите на вкладку «Вход» и введите пароль.`);
-      return;
-    }
-
-    const isSuper = cleanEmail === 'zuubra1985@gmail.com';
-
-    // Fresh new unified tourist profile
-    const newUser: AppUser = {
-      id: `user-${Date.now()}`,
-      telegramId: tgTourist?.id,
-      email: cleanEmail,
-      name: cleanName,
-      password: cleanPassword,
-      phone: regPhone.trim(),
-      city: regCity.trim() || 'Югра / Ямал',
-      role: isSuper ? 'superadmin' : 'user',
-      avatar: tgTourist?.photo_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
-      experienceLevel: regExperience || 'Любитель водных походов',
-      registeredAt: new Date().toISOString().slice(0, 10),
-      favoriteRouteIds: [],
-      favoriteRivers: [],
-      vesselsOwned: [],
-      gearInventory: [],
-      badges: [],
-      bio: '',
-      callsign: '',
-      fstrRank: '',
-      telegram: cleanTg || (tgTourist?.username ? `@${tgTourist.username}` : ''),
-      vk: '',
-      isReadyForExpeditions: true,
-      showContactsPublicly: true
-    };
-
-    onRegisterUser(newUser);
-    onLoginSuccess(newUser);
-    onClose();
     try {
-      confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
-    } catch (e) {}
+      const response = await CloudSqlDbService.register({
+        email: cleanEmail,
+        password: cleanPassword,
+        name: cleanName,
+        phone: regPhone.trim(),
+        city: regCity.trim() || 'Югра / Ямал',
+        experienceLevel: regExperience || 'Любитель водных походов',
+        telegram: cleanTg || (tgTourist?.username ? `@${tgTourist.username}` : '')
+      });
+
+      const user = response.user as AppUser;
+
+      if (tgTourist) {
+        user.telegramId = tgTourist.id;
+        user.telegram = tgTourist.username ? `@${tgTourist.username}` : user.telegram;
+        user.avatar = tgTourist.photo_url || user.avatar;
+      }
+
+      onRegisterUser(user);
+      onLoginSuccess(user);
+      onClose();
+
+      try {
+        confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+      } catch {}
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Ошибка регистрации');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -284,7 +204,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 {authMode === 'login' ? 'Вход в SPLAV86' : 'Регистрация туриста'}
               </h2>
               <p className="text-xs text-[#8B7E6D]">
-                Единая авторизация по Email (Web + Telegram)
+                Единая защищенная авторизация по Email
               </p>
             </div>
           </div>
@@ -305,7 +225,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div className="leading-tight">
               <span>Вы вошли через Telegram: <strong>{tgTourist.first_name}</strong> {tgTourist.username ? `(@${tgTourist.username})` : ''}.</span>
               <p className="text-[11px] opacity-85 mt-0.5">
-                Авторизуйтесь по Email или зарегистрируйтесь один раз, и профиль навсегда свяжется с вашим Telegram!
+                Авторизуйтесь по Email или зарегистрируйтесь, и профиль навсегда свяжется с вашим Telegram!
               </p>
             </div>
           </div>
@@ -393,10 +313,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
             <button
               type="submit"
-              className="w-full py-3 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer text-xs"
+              disabled={isLoading}
+              className="w-full py-3 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer text-xs disabled:opacity-50"
             >
-              <LogIn className="w-4 h-4" />
-              Войти в Личный кабинет
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}
+              <span>{isLoading ? 'Вход...' : 'Войти в Личный кабинет'}</span>
             </button>
 
             <div className="text-center pt-1 text-xs">
@@ -533,10 +454,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
             <button
               type="submit"
-              className="w-full py-3 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isLoading}
+              className="w-full py-3 bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
-              <UserPlus className="w-4 h-4" />
-              Зарегистрировать аккаунт
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+              <span>{isLoading ? 'Регистрация...' : 'Зарегистрировать аккаунт'}</span>
             </button>
 
             <div className="text-center pt-1 text-xs">
@@ -562,7 +484,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <span>Строгая единая база пользователей</span>
           </div>
           <p className="leading-tight">
-            Один аккаунт — один Email. Ваши маршруты, заявки, снаряжение и экипажи будут одинаково доступны как с компьютера на сайте, так и из Telegram.
+            Один аккаунт — один Email. Ваши личные треки и заявки надежно защищены и доступны только вам.
           </p>
         </div>
 
