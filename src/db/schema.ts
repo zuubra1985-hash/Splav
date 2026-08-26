@@ -94,6 +94,49 @@ export const companionTrips = pgTable('companion_trips', {
   };
 });
 
+// P1: Dedicated Normalized Table for Trip Applications
+export const tripApplications = pgTable('trip_applications', {
+  id: text('id').primaryKey(),
+  tripId: text('trip_id').notNull(),
+  userId: text('user_id').notNull(),
+  applicantName: text('applicant_name').notNull(),
+  applicantPhone: text('applicant_phone').default('').notNull(),
+  applicantEmail: text('applicant_email').default('').notNull(),
+  applicantAvatar: text('applicant_avatar').default('').notNull(),
+  experienceLevel: text('experience_level').default('Любитель').notNull(),
+  vesselType: text('vessel_type').default('kayak').notNull(),
+  hasOwnGear: boolean('has_own_gear').default(false).notNull(),
+  notes: text('notes').default('').notNull(),
+  status: text('status').default('pending').notNull(), // 'pending' | 'accepted' | 'declined'
+  appliedAt: timestamp('applied_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull()
+}, (table) => {
+  return {
+    tripIdIdx: index('trip_apps_trip_id_idx').on(table.tripId),
+    userIdIdx: index('trip_apps_user_id_idx').on(table.userId),
+    statusIdx: index('trip_apps_status_idx').on(table.status)
+  };
+});
+
+// P1: Dedicated Normalized Table for Trip Participants
+export const tripParticipants = pgTable('trip_participants', {
+  id: text('id').primaryKey(),
+  tripId: text('trip_id').notNull(),
+  userId: text('user_id'),
+  name: text('name').notNull(),
+  role: text('role').default('Матрос').notNull(),
+  vessel: text('vessel').default('kayak').notNull(),
+  avatar: text('avatar').default('').notNull(),
+  phone: text('phone').default('').notNull(),
+  status: text('status').default('confirmed').notNull(),
+  joinedAt: timestamp('joined_at').defaultNow().notNull()
+}, (table) => {
+  return {
+    tripIdIdx: index('trip_parts_trip_id_idx').on(table.tripId),
+    userIdIdx: index('trip_parts_user_id_idx').on(table.userId)
+  };
+});
+
 export const customRoutes = pgTable('custom_routes', {
   id: text('id').primaryKey(),
   ownerId: text('owner_id').default('').notNull(),

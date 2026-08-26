@@ -42,9 +42,16 @@ export interface AuditLogData {
   details?: Record<string, any>;
 }
 
+function sanitizeLogMessage(msg: string): string {
+  if (!msg) return msg;
+  // P0-6: Mask email addresses in audit messages
+  return msg.replace(/[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+/g, '[REDACTED_EMAIL]');
+}
+
 export function logAudit(data: AuditLogData) {
   const timestamp = new Date().toISOString();
   const level = data.level || (data.eventType.includes('FAILED') || data.eventType.includes('VIOLATION') ? 'warn' : 'info');
+  const safeMessage = sanitizeLogMessage(data.message);
 
   const logEntry = {
     timestamp,
@@ -58,7 +65,7 @@ export function logAudit(data: AuditLogData) {
     method: data.method || null,
     path: data.path || null,
     status: data.status || null,
-    message: data.message,
+    message: safeMessage,
     details: data.details || {}
   };
 
@@ -82,7 +89,7 @@ export function logAudit(data: AuditLogData) {
       userRole: data.userRole || null,
       ip: data.ip || null,
       requestId: data.requestId || null,
-      message: data.message,
+      message: safeMessage,
       details: data.details || {},
       createdAt: new Date()
     }).catch((err) => {

@@ -41,8 +41,9 @@ export async function isTokenRevoked(token: string): Promise<boolean> {
     }
     return false;
   } catch (err) {
-    console.error('Error checking revoked token:', err);
-    return false;
+    console.error('Error checking revoked token in DB (failing closed):', err);
+    // P0-1: FAIL CLOSED — Never allow a token through on database error
+    return true;
   }
 }
 
@@ -112,23 +113,19 @@ export async function generateTokenPair(
     { expiresIn: `${REFRESH_TOKEN_EXPIRY_DAYS}d` }
   );
 
-  // Store refresh token in database
+  // Store refresh token in database strictly (P0-2: must throw on DB failure)
   const refreshHash = hashToken(refreshToken);
   const refreshId = `ref-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
 
-  try {
-    await db.insert(refreshTokens).values({
-      id: refreshId,
-      tokenHash: refreshHash,
-      userId: user.id,
-      expiresAt,
-      revoked: false,
-      createdAt: new Date()
-    });
-  } catch (err) {
-    console.error('Error storing refresh token:', err);
-  }
+  await db.insert(refreshTokens).values({
+    id: refreshId,
+    tokenHash: refreshHash,
+    userId: user.id,
+    expiresAt,
+    revoked: false,
+    createdAt: new Date()
+  });
 
   return {
     accessToken,

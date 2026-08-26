@@ -8,9 +8,11 @@ import {
   faqTable,
   refreshTokens,
   revokedTokens,
-  auditLogs
+  auditLogs,
+  tripApplications,
+  tripParticipants
 } from './schema.ts';
-import { eq, or, and, sql, desc } from 'drizzle-orm';
+import { eq, or, and, sql, desc, count } from 'drizzle-orm';
 import { AppUser, UserRole, PublicUserDTO, PrivateUserDTO } from '../types/index.ts';
 
 export interface PaginationOptions {
@@ -78,6 +80,39 @@ export function toPublicUserDTO(u: typeof users.$inferSelect): PublicUserDTO {
   };
 }
 
+// P0-5: Sanitize public trip output (strip PII like private phone, telegram, applications)
+export function sanitizeTripForPublic(trip: any, viewerId?: string, isAdmin?: boolean): any {
+  if (!trip) return trip;
+  const isOwner = viewerId && (trip.ownerId === viewerId || trip.organizer?.userId === viewerId);
+  const canSeePrivateDetails = isOwner || isAdmin;
+
+  const sanitized = { ...trip };
+
+  if (!canSeePrivateDetails) {
+    // Strip applications completely from public view
+    sanitized.applications = [];
+
+    // Sanitize organizer PII if not publicly shared
+    if (sanitized.organizer) {
+      sanitized.organizer = {
+        ...sanitized.organizer,
+        phone: sanitized.organizer.showContactsPublicly ? sanitized.organizer.phone : '',
+        telegram: sanitized.organizer.showContactsPublicly ? sanitized.organizer.telegram : ''
+      };
+    }
+
+    // Sanitize participant phone numbers
+    if (Array.isArray(sanitized.participants)) {
+      sanitized.participants = sanitized.participants.map((p: any) => ({
+        ...p,
+        phone: undefined
+      }));
+    }
+  }
+
+  return sanitized;
+}
+
 // 1. Find user by email (internal use for login verification)
 export async function findUserByEmail(email: string) {
   try {
@@ -101,54 +136,66 @@ export async function findUserById(id: string) {
   }
 }
 
-// 3. Get Public Users list with optional pagination
+// 3. Get Public Users list with SQL-level pagination (P3)
 export async function getPublicUsers(options?: PaginationOptions): Promise<PublicUserDTO[] | PaginatedResult<PublicUserDTO>> {
   try {
-    const list = await db.select().from(users).orderBy(desc(users.updatedAt));
-    const dtos = list.map(toPublicUserDTO);
-
     if (options && (options.page || options.limit)) {
       const page = Math.max(1, options.page || 1);
       const limit = Math.min(100, Math.max(1, options.limit || 20));
-      const total = dtos.length;
+      const offset = (page - 1) * limit;
+
+      const [totalCountResult] = await db.select({ total: sql<number>`count(*)::int` }).from(users);
+      const total = totalCountResult?.total || 0;
       const totalPages = Math.ceil(total / limit) || 1;
-      const start = (page - 1) * limit;
-      const items = dtos.slice(start, start + limit);
+
+      const list = await db
+        .select()
+        .from(users)
+        .orderBy(desc(users.updatedAt))
+        .limit(limit)
+        .offset(offset);
 
       return {
-        items,
+        items: list.map(toPublicUserDTO),
         pagination: { total, page, limit, totalPages }
       };
     }
 
-    return dtos;
+    const list = await db.select().from(users).orderBy(desc(users.updatedAt));
+    return list.map(toPublicUserDTO);
   } catch (error) {
     console.error('Error fetching public users from DB:', error);
     throw new Error('Database query failed for public users.');
   }
 }
 
-// 4. Get Admin Users list with optional pagination
+// 4. Get Admin Users list with SQL-level pagination (P3)
 export async function getAllUsersForAdmin(options?: PaginationOptions): Promise<PrivateUserDTO[] | PaginatedResult<PrivateUserDTO>> {
   try {
-    const list = await db.select().from(users).orderBy(desc(users.updatedAt));
-    const dtos = list.map(toPrivateUserDTO);
-
     if (options && (options.page || options.limit)) {
       const page = Math.max(1, options.page || 1);
       const limit = Math.min(100, Math.max(1, options.limit || 20));
-      const total = dtos.length;
+      const offset = (page - 1) * limit;
+
+      const [totalCountResult] = await db.select({ total: sql<number>`count(*)::int` }).from(users);
+      const total = totalCountResult?.total || 0;
       const totalPages = Math.ceil(total / limit) || 1;
-      const start = (page - 1) * limit;
-      const items = dtos.slice(start, start + limit);
+
+      const list = await db
+        .select()
+        .from(users)
+        .orderBy(desc(users.updatedAt))
+        .limit(limit)
+        .offset(offset);
 
       return {
-        items,
+        items: list.map(toPrivateUserDTO),
         pagination: { total, page, limit, totalPages }
       };
     }
 
-    return dtos;
+    const list = await db.select().from(users).orderBy(desc(users.updatedAt));
+    return list.map(toPrivateUserDTO);
   } catch (error) {
     console.error('Error fetching admin users from DB:', error);
     throw new Error('Database query failed for admin users.');
@@ -278,12 +325,23 @@ export async function deleteUserFromDb(userId: string) {
   });
 }
 
-// 10. Companion Trips DB helpers
-export async function findTripById(id: string) {
+// 10. Companion Trips DB helpers (with SQL Pagination and PII Sanitization)
+export async function findTripRecordById(id: string) {
+  try {
+    const list = await db.select().from(companionTrips).where(eq(companionTrips.id, id));
+    return list[0] || null;
+  } catch (error) {
+    console.error('Error finding trip record by id:', error);
+    return null;
+  }
+}
+
+export async function findTripById(id: string, viewerId?: string, isAdmin?: boolean) {
   try {
     const list = await db.select().from(companionTrips).where(eq(companionTrips.id, id));
     if (list.length === 0) return null;
-    return list[0].data as any;
+    const rawTrip = list[0].data as any;
+    return sanitizeTripForPublic(rawTrip, viewerId, isAdmin);
   } catch (error) {
     console.error('Error finding trip by id:', error);
     return null;
@@ -295,29 +353,44 @@ export async function getAllTripsFromDb(
   pagination?: PaginationOptions
 ): Promise<any[] | PaginatedResult<any>> {
   try {
-    const list = await db.select().from(companionTrips).orderBy(desc(companionTrips.updatedAt));
-    let trips = list.map(t => t.data as any);
+    const viewerId = filterOptions?.userId;
+    const isAdmin = filterOptions?.isAdmin || false;
 
-    // If filtering for non-admin, separate public trips and user's private trips
-    if (filterOptions && !filterOptions.isAdmin) {
-      trips = trips.filter(t => {
-        const isPrivate = t.isPrivate === true || t.isPersonal === true || t.visibility === 'private' || t.status === 'draft';
-        if (!isPrivate) return true;
-        // Private trips are only visible to the organizer/owner
-        if (filterOptions.userId && (t.ownerId === filterOptions.userId || t.organizer?.userId === filterOptions.userId)) {
-          return true;
-        }
-        return false;
-      });
+    // SQL Where conditions
+    let whereClause = undefined;
+    if (!isAdmin) {
+      if (viewerId) {
+        whereClause = or(
+          eq(companionTrips.visibility, 'public'),
+          eq(companionTrips.ownerId, viewerId)
+        );
+      } else {
+        whereClause = eq(companionTrips.visibility, 'public');
+      }
     }
 
     if (pagination && (pagination.page || pagination.limit)) {
       const page = Math.max(1, pagination.page || 1);
       const limit = Math.min(100, Math.max(1, pagination.limit || 20));
-      const total = trips.length;
+      const offset = (page - 1) * limit;
+
+      const totalCountQuery = db.select({ total: sql<number>`count(*)::int` }).from(companionTrips);
+      const [totalResult] = whereClause
+        ? await totalCountQuery.where(whereClause)
+        : await totalCountQuery;
+
+      const total = totalResult?.total || 0;
       const totalPages = Math.ceil(total / limit) || 1;
-      const start = (page - 1) * limit;
-      const items = trips.slice(start, start + limit);
+
+      const query = db
+        .select()
+        .from(companionTrips)
+        .orderBy(desc(companionTrips.updatedAt))
+        .limit(limit)
+        .offset(offset);
+
+      const list = whereClause ? await query.where(whereClause) : await query;
+      const items = list.map(t => sanitizeTripForPublic(t.data, viewerId, isAdmin));
 
       return {
         items,
@@ -325,7 +398,9 @@ export async function getAllTripsFromDb(
       };
     }
 
-    return trips;
+    const query = db.select().from(companionTrips).orderBy(desc(companionTrips.updatedAt));
+    const list = whereClause ? await query.where(whereClause) : await query;
+    return list.map(t => sanitizeTripForPublic(t.data, viewerId, isAdmin));
   } catch (error) {
     console.error('Error fetching trips from DB:', error);
     throw new Error('Database query failed for trips.');
@@ -408,39 +483,246 @@ export async function saveTripsInDb(tripsList: any[], ownerId?: string) {
 }
 
 export async function deleteTripFromDb(tripId: string) {
-  try {
-    await db.delete(companionTrips).where(eq(companionTrips.id, tripId));
+  return await db.transaction(async (tx) => {
+    await tx.delete(tripApplications).where(eq(tripApplications.tripId, tripId));
+    await tx.delete(tripParticipants).where(eq(tripParticipants.tripId, tripId));
+    await tx.delete(companionTrips).where(eq(companionTrips.id, tripId));
     return { success: true };
+  });
+}
+
+// ============================================================
+// P1: Dedicated Queries for Trip Applications & Participants
+// ============================================================
+
+export async function getTripApplicationsFromDb(tripId: string) {
+  try {
+    return await db
+      .select()
+      .from(tripApplications)
+      .where(eq(tripApplications.tripId, tripId))
+      .orderBy(desc(tripApplications.appliedAt));
   } catch (error) {
-    console.error('Error deleting trip from DB:', error);
-    throw new Error('Database delete failed for trip.');
+    console.error('Error fetching trip applications from DB:', error);
+    throw new Error('Database query failed for trip applications.');
   }
 }
 
-// 11. Custom Routes DB helpers
+export async function createTripApplicationInDb(data: {
+  id: string;
+  tripId: string;
+  userId: string;
+  applicantName: string;
+  applicantPhone?: string;
+  applicantEmail?: string;
+  applicantAvatar?: string;
+  experienceLevel?: string;
+  vesselType?: string;
+  hasOwnGear?: boolean;
+  notes?: string;
+}) {
+  try {
+    const inserted = await db.insert(tripApplications).values({
+      id: data.id,
+      tripId: data.tripId,
+      userId: data.userId,
+      applicantName: data.applicantName,
+      applicantPhone: data.applicantPhone || '',
+      applicantEmail: data.applicantEmail || '',
+      applicantAvatar: data.applicantAvatar || '',
+      experienceLevel: data.experienceLevel || 'Любитель',
+      vesselType: data.vesselType || 'kayak',
+      hasOwnGear: data.hasOwnGear || false,
+      notes: data.notes || '',
+      status: 'pending',
+      appliedAt: new Date(),
+      updatedAt: new Date()
+    }).returning();
+
+    return inserted[0];
+  } catch (error) {
+    console.error('Error creating trip application in DB:', error);
+    throw new Error('Database insert failed for trip application.');
+  }
+}
+
+export async function updateTripApplicationStatusInDb(tripId: string, appId: string, status: 'accepted' | 'declined' | 'pending') {
+  return await db.transaction(async (tx) => {
+    const updated = await tx
+      .update(tripApplications)
+      .set({
+        status,
+        updatedAt: new Date()
+      })
+      .where(and(eq(tripApplications.id, appId), eq(tripApplications.tripId, tripId)))
+      .returning();
+
+    if (updated.length === 0) {
+      throw new Error('Application not found');
+    }
+
+    const application = updated[0];
+
+    // If accepted, ensure participant is automatically registered in trip_participants table
+    if (status === 'accepted') {
+      const existingPart = await tx
+        .select()
+        .from(tripParticipants)
+        .where(and(eq(tripParticipants.tripId, tripId), eq(tripParticipants.userId, application.userId)));
+
+      if (existingPart.length === 0) {
+        const partId = `part-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        await tx.insert(tripParticipants).values({
+          id: partId,
+          tripId,
+          userId: application.userId,
+          name: application.applicantName,
+          role: 'Матрос',
+          vessel: application.vesselType || 'kayak',
+          avatar: application.applicantAvatar || '',
+          phone: application.applicantPhone || '',
+          status: 'confirmed',
+          joinedAt: new Date()
+        });
+      }
+    }
+
+    return application;
+  });
+}
+
+export async function getTripParticipantsFromDb(tripId: string, canViewPii: boolean = false) {
+  try {
+    const list = await db
+      .select()
+      .from(tripParticipants)
+      .where(eq(tripParticipants.tripId, tripId))
+      .orderBy(desc(tripParticipants.joinedAt));
+
+    if (!canViewPii) {
+      return list.map(p => ({
+        ...p,
+        phone: ''
+      }));
+    }
+    return list;
+  } catch (error) {
+    console.error('Error fetching trip participants from DB:', error);
+    throw new Error('Database query failed for trip participants.');
+  }
+}
+
+export async function addTripParticipantInDb(data: {
+  id: string;
+  tripId: string;
+  userId?: string;
+  name: string;
+  role?: string;
+  vessel?: string;
+  avatar?: string;
+  phone?: string;
+}) {
+  try {
+    const inserted = await db.insert(tripParticipants).values({
+      id: data.id,
+      tripId: data.tripId,
+      userId: data.userId || null,
+      name: data.name,
+      role: data.role || 'Матрос',
+      vessel: data.vessel || 'kayak',
+      avatar: data.avatar || '',
+      phone: data.phone || '',
+      status: 'confirmed',
+      joinedAt: new Date()
+    }).returning();
+
+    return inserted[0];
+  } catch (error) {
+    console.error('Error adding trip participant in DB:', error);
+    throw new Error('Database insert failed for trip participant.');
+  }
+}
+
+export async function removeTripParticipantFromDb(tripId: string, participantId: string) {
+  try {
+    await db
+      .delete(tripParticipants)
+      .where(and(eq(tripParticipants.id, participantId), eq(tripParticipants.tripId, tripId)));
+    return { success: true };
+  } catch (error) {
+    console.error('Error removing trip participant from DB:', error);
+    throw new Error('Database delete failed for trip participant.');
+  }
+}
+
+// 11. Custom Routes DB helpers (with SQL-level pagination)
+export async function findCustomRouteRecordById(id: string) {
+  try {
+    const list = await db.select().from(customRoutes).where(eq(customRoutes.id, id));
+    return list[0] || null;
+  } catch (error) {
+    console.error('Error finding custom route record by id:', error);
+    return null;
+  }
+}
+
+export async function findCustomRouteById(id: string, viewerId?: string, isAdmin?: boolean) {
+  try {
+    const list = await db.select().from(customRoutes).where(eq(customRoutes.id, id));
+    if (list.length === 0) return null;
+    const route = list[0];
+    if (route.visibility === 'private' && !isAdmin && route.ownerId !== viewerId) {
+      return null;
+    }
+    return route.data;
+  } catch (error) {
+    console.error('Error finding custom route by id:', error);
+    return null;
+  }
+}
+
 export async function getAllCustomRoutesFromDb(
   filterOptions?: { userId?: string; isAdmin?: boolean },
   pagination?: PaginationOptions
 ): Promise<any[] | PaginatedResult<any>> {
   try {
-    const list = await db.select().from(customRoutes).orderBy(desc(customRoutes.updatedAt));
-    let routes = list.map(r => r.data as any);
+    const viewerId = filterOptions?.userId;
+    const isAdmin = filterOptions?.isAdmin || false;
 
-    if (filterOptions && !filterOptions.isAdmin) {
-      routes = routes.filter(r => {
-        if (!r.isPersonal && r.isPublic !== false) return true;
-        if (filterOptions.userId && r.authorId === filterOptions.userId) return true;
-        return false;
-      });
+    let whereClause = undefined;
+    if (!isAdmin) {
+      if (viewerId) {
+        whereClause = or(
+          eq(customRoutes.visibility, 'public'),
+          eq(customRoutes.ownerId, viewerId)
+        );
+      } else {
+        whereClause = eq(customRoutes.visibility, 'public');
+      }
     }
 
     if (pagination && (pagination.page || pagination.limit)) {
       const page = Math.max(1, pagination.page || 1);
       const limit = Math.min(100, Math.max(1, pagination.limit || 20));
-      const total = routes.length;
+      const offset = (page - 1) * limit;
+
+      const totalCountQuery = db.select({ total: sql<number>`count(*)::int` }).from(customRoutes);
+      const [totalResult] = whereClause
+        ? await totalCountQuery.where(whereClause)
+        : await totalCountQuery;
+
+      const total = totalResult?.total || 0;
       const totalPages = Math.ceil(total / limit) || 1;
-      const start = (page - 1) * limit;
-      const items = routes.slice(start, start + limit);
+
+      const query = db
+        .select()
+        .from(customRoutes)
+        .orderBy(desc(customRoutes.updatedAt))
+        .limit(limit)
+        .offset(offset);
+
+      const list = whereClause ? await query.where(whereClause) : await query;
+      const items = list.map(r => r.data as any);
 
       return {
         items,
@@ -448,7 +730,9 @@ export async function getAllCustomRoutesFromDb(
       };
     }
 
-    return routes;
+    const query = db.select().from(customRoutes).orderBy(desc(customRoutes.updatedAt));
+    const list = whereClause ? await query.where(whereClause) : await query;
+    return list.map(r => r.data as any);
   } catch (error) {
     console.error('Error fetching custom routes from DB:', error);
     throw new Error('Database query failed for custom routes.');
@@ -574,27 +858,33 @@ export async function saveTravelNotesConfigInDb(configData: any) {
   }
 }
 
-// 13. Articles DB helpers
+// 13. Articles DB helpers (with SQL Pagination)
 export async function getAllArticlesFromDb(pagination?: PaginationOptions): Promise<any[] | PaginatedResult<any>> {
   try {
-    const list = await db.select().from(articles).orderBy(desc(articles.updatedAt));
-    const articlesList = list.map(a => a.data);
-
     if (pagination && (pagination.page || pagination.limit)) {
       const page = Math.max(1, pagination.page || 1);
       const limit = Math.min(100, Math.max(1, pagination.limit || 20));
-      const total = articlesList.length;
+      const offset = (page - 1) * limit;
+
+      const [totalResult] = await db.select({ total: sql<number>`count(*)::int` }).from(articles);
+      const total = totalResult?.total || 0;
       const totalPages = Math.ceil(total / limit) || 1;
-      const start = (page - 1) * limit;
-      const items = articlesList.slice(start, start + limit);
+
+      const list = await db
+        .select()
+        .from(articles)
+        .orderBy(desc(articles.updatedAt))
+        .limit(limit)
+        .offset(offset);
 
       return {
-        items,
+        items: list.map(a => a.data),
         pagination: { total, page, limit, totalPages }
       };
     }
 
-    return articlesList;
+    const list = await db.select().from(articles).orderBy(desc(articles.updatedAt));
+    return list.map(a => a.data);
   } catch (error) {
     console.error('Error fetching articles from DB:', error);
     throw new Error('Database query failed for articles.');
@@ -672,9 +962,12 @@ export async function saveFaqConfigInDb(configData: any) {
 // 15. SuperAdmin Database Reset (Transactional)
 export async function resetDatabaseCleanStart() {
   return await db.transaction(async (tx) => {
+    await tx.delete(tripApplications);
+    await tx.delete(tripParticipants);
     await tx.delete(companionTrips);
     await tx.delete(customRoutes);
     await tx.delete(travelNotes);
+    await tx.delete(articles);
     await tx.delete(refreshTokens);
     await tx.delete(revokedTokens);
     return { success: true, timestamp: Date.now() };

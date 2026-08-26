@@ -22,10 +22,19 @@ import {
   adminUpdateUserRole,
   deleteUserFromDb,
   findTripById,
+  findTripRecordById,
   getAllTripsFromDb,
   saveTripInDb,
   saveTripsInDb,
   deleteTripFromDb,
+  getTripApplicationsFromDb,
+  createTripApplicationInDb,
+  updateTripApplicationStatusInDb,
+  getTripParticipantsFromDb,
+  addTripParticipantInDb,
+  removeTripParticipantFromDb,
+  findCustomRouteById,
+  findCustomRouteRecordById,
   getAllCustomRoutesFromDb,
   saveCustomRouteInDb,
   saveCustomRoutesInDb,
@@ -49,6 +58,9 @@ import {
   legacyUserSaveSchema,
   companionTripSchema,
   tripsBatchSchema,
+  tripApplicationCreateSchema,
+  tripApplicationStatusUpdateSchema,
+  tripParticipantCreateSchema,
   riverRouteSchema,
   routesBatchSchema,
   articleSchema,
@@ -101,13 +113,27 @@ function getClientIp(req: Request): string {
   return req.socket.remoteAddress || 'unknown';
 }
 
-// 1. Security HTTP Headers
+// 1. Security HTTP Headers with Production-grade CSP & AI Studio iframe support
 app.use(helmet({
-  contentSecurityPolicy: false, // Compatibility for AI Studio preview iframe and dynamic leaflet tiles
-  crossOriginEmbedderPolicy: false
+  frameguard: false, // Allow AI Studio iframe preview embedding
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://telegram.org', 'https://*.telegram.org'],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://unpkg.com'],
+      imgSrc: ["'self'", 'data:', 'blob:', 'https://*.tile.openstreetmap.org', 'https://images.unsplash.com', 'https://*.google.com', 'https://*.gstatic.com'],
+      connectSrc: ["'self'", 'data:', 'blob:', 'https://*.google.com', 'https://*.googleapis.com', 'https://ai.studio', 'https://api.telegram.org', 'wss:'],
+      fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
+      frameSrc: ["'self'", 'https://*.google.com', 'https://ai.studio'],
+      frameAncestors: ["'self'", 'https://*.google.com', 'https://*.aistudio.google.com', 'https://aistudio.google.com', 'https://ai.studio', 'https://*.run.app'],
+      objectSrc: ["'none'"]
+    }
+  },
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
-// 2. Strict Production CORS setup
+// 2. Strict Production CORS setup - Broad wildcards removed (P0-8)
 const allowedProductionOrigins = [
   'https://splav86.ru',
   'https://www.splav86.ru'
@@ -133,11 +159,9 @@ const corsOptions: cors.CorsOptions = {
       return callback(null, true);
     }
 
-    // AI Studio preview and deployment containers on Google Cloud Run
+    // AI Studio preview container patterns ONLY (P0-8: removed wide *.run.app)
     if (/^https:\/\/ais-(dev|pre)-[a-z0-9-]+\.europe-west1\.run\.app$/.test(origin) ||
         /^https:\/\/ais-(dev|pre)-[a-z0-9-]+\.run\.app$/.test(origin) ||
-        /^https:\/\/[a-z0-9-]+\.europe-west1\.run\.app$/.test(origin) ||
-        /^https:\/\/[a-z0-9-]+\.run\.app$/.test(origin) ||
         /^https:\/\/([a-z0-9-]+\.)?google\.com$/.test(origin) ||
         /^https:\/\/ai\.studio$/.test(origin)) {
       return callback(null, true);
@@ -338,7 +362,7 @@ app.post('/api/auth/register', authLimiter, async (req: AuthenticatedRequest, re
         level: 'warn',
         requestId: req.requestId,
         ip: getClientIp(req),
-        message: `Registration failed: user already exists (${cleanEmail})`
+        message: 'Registration failed: email already registered'
       });
       return res.status(409).json({
         error: `Пользователь с Email «${cleanEmail}» уже зарегистрирован. Пожалуйста, выполните вход.`,
@@ -377,7 +401,7 @@ app.post('/api/auth/register', authLimiter, async (req: AuthenticatedRequest, re
       userId: newUser.id,
       userRole: newUser.role,
       ip: getClientIp(req),
-      message: `User registered successfully (${newUser.email})`
+      message: `User registered successfully (id: ${newUser.id})`
     });
 
     return res.status(201).json({
@@ -413,7 +437,7 @@ app.post('/api/auth/login', authLimiter, async (req: AuthenticatedRequest, res: 
         level: 'warn',
         requestId: req.requestId,
         ip: getClientIp(req),
-        message: `Login failed: user not found (${cleanEmail})`
+        message: 'Login failed: email not found'
       });
       return res.status(401).json({
         error: `Пользователь с Email «${cleanEmail}» не найден в единой базе. Пожалуйста, зарегистрируйтесь.`,
@@ -434,7 +458,7 @@ app.post('/api/auth/login', authLimiter, async (req: AuthenticatedRequest, res: 
         requestId: req.requestId,
         userId: user.id,
         ip: getClientIp(req),
-        message: `Login failed: invalid password for user ${user.email}`
+        message: `Login failed: invalid password for user ${user.id}`
       });
       return res.status(401).json({
         error: 'Неверный пароль. Пожалуйста, проверьте правильность ввода.',
@@ -455,7 +479,7 @@ app.post('/api/auth/login', authLimiter, async (req: AuthenticatedRequest, res: 
       userId: privateUser.id,
       userRole: privateUser.role,
       ip: getClientIp(req),
-      message: `User logged in successfully (${privateUser.email})`
+      message: `User logged in successfully (id: ${privateUser.id})`
     });
 
     return res.json({
@@ -509,7 +533,7 @@ app.post('/api/auth/refresh', authLimiter, async (req: AuthenticatedRequest, res
       requestId: req.requestId,
       userId: refreshed.user.id,
       ip: getClientIp(req),
-      message: `Token refreshed successfully for user ${refreshed.user.email}`
+      message: `Token refreshed successfully for user ${refreshed.user.id}`
     });
 
     return res.json({
@@ -545,7 +569,7 @@ app.post('/api/auth/logout', requireAuth, async (req: AuthenticatedRequest, res:
       userId: req.user!.id,
       userRole: req.user!.role,
       ip: getClientIp(req),
-      message: `User logged out (${req.user!.email})`
+      message: `User logged out (id: ${req.user!.id})`
     });
 
     return res.json({ success: true, message: 'Сеанс успешно завершен.' });
@@ -582,7 +606,7 @@ app.patch('/api/users/me', requireAuth, async (req: AuthenticatedRequest, res: R
       userId: req.user!.id,
       userRole: req.user!.role,
       ip: getClientIp(req),
-      message: `User profile updated (${req.user!.email})`
+      message: `User profile updated (id: ${req.user!.id})`
     });
 
     return res.json(updatedUser);
@@ -640,7 +664,7 @@ app.patch('/api/users/me/password', requireAuth, async (req: AuthenticatedReques
       userId: req.user!.id,
       userRole: req.user!.role,
       ip: getClientIp(req),
-      message: `Password changed successfully for user ${req.user!.email}`
+      message: `Password changed successfully for user ${req.user!.id}`
     });
 
     return res.json({ success: true, message: 'Пароль успешно изменен.' });
@@ -707,7 +731,7 @@ app.patch('/api/admin/users/:id/role', adminLimiter, requireRole('superadmin', '
       userId: req.user!.id,
       userRole: req.user!.role,
       ip: getClientIp(req),
-      message: `Admin ${req.user!.email} changed role of user ${id} to ${targetRole}`,
+      message: `Admin ${req.user!.id} changed role of user ${id} to ${targetRole}`,
       details: { targetUserId: id, newRole: targetRole }
     });
 
@@ -733,7 +757,7 @@ app.delete('/api/admin/users/:id', adminLimiter, requireRole('superadmin', 'admi
       userId: req.user!.id,
       userRole: req.user!.role,
       ip: getClientIp(req),
-      message: `Admin ${req.user!.email} deleted user ${id}`,
+      message: `Admin ${req.user!.id} deleted user ${id}`,
       details: { deletedUserId: id }
     });
 
@@ -755,7 +779,7 @@ app.post('/api/admin/reset-database', adminLimiter, requireRole('superadmin'), a
       userId: req.user!.id,
       userRole: req.user!.role,
       ip: getClientIp(req),
-      message: `SuperAdmin ${req.user!.email} initiated full database reset`,
+      message: `SuperAdmin ${req.user!.id} initiated full database reset`,
       details: { timestamp: result.timestamp }
     });
 
@@ -826,7 +850,7 @@ app.delete('/api/db/users/:id', requireRole('admin', 'superadmin'), async (req: 
 // 13. COMPANION TRIPS & EXPEDITIONS API
 // ==========================================
 
-// P1-8: Pagination support
+// P1-8: Pagination support & P0-5: PII Sanitization
 app.get(['/api/db/trips', '/api/trips'], async (req: AuthenticatedRequest, res: Response) => {
   try {
     const isAdmin = req.user ? (req.user.role === 'admin' || req.user.role === 'superadmin') : false;
@@ -842,11 +866,28 @@ app.get(['/api/db/trips', '/api/trips'], async (req: AuthenticatedRequest, res: 
   }
 });
 
-// P1-4 & P1-9: Strict Zod validation & batch saving
+// Single trip lookup with PII sanitization
+app.get(['/api/db/trips/:id', '/api/trips/:id'], async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const isAdmin = req.user ? (req.user.role === 'admin' || req.user.role === 'superadmin') : false;
+    const trip = await findTripById(id, req.user?.id, isAdmin);
+    if (!trip) {
+      return res.status(404).json({ error: `Поход с ID «${id}» не найден.` });
+    }
+    return res.json(trip);
+  } catch (error: any) {
+    console.error('API single trip error:', error.message);
+    return res.status(500).json({ error: 'Не удалось загрузить данные похода.' });
+  }
+});
+
+// P0-3 & P0-4: Server-side Ownership Verification + Strip Client-Controlled Metadata
 app.post(['/api/db/trips', '/api/trips'], requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const body = req.body;
     const isPrivileged = req.user!.role === 'admin' || req.user!.role === 'superadmin';
+    const currentUserId = req.user!.id;
 
     if (body.trips && Array.isArray(body.trips)) {
       const parseResult = tripsBatchSchema.safeParse(body);
@@ -858,25 +899,48 @@ app.post(['/api/db/trips', '/api/trips'], requireAuth, async (req: Authenticated
       }
 
       const validTrips = parseResult.data.trips;
-      if (!isPrivileged) {
-        for (const trip of validTrips) {
-          if (trip.organizer?.userId && trip.organizer.userId !== req.user!.id) {
-            return res.status(403).json({ error: 'Вы можете сохранять только свои походы.' });
+      for (const trip of validTrips) {
+        // Check existing record ownership in DB (P0-3)
+        const existingRecord = await findTripRecordById(trip.id);
+        if (existingRecord && !isPrivileged) {
+          const isOwner = existingRecord.ownerId === currentUserId ||
+            (existingRecord.data as any)?.organizer?.userId === currentUserId;
+          if (!isOwner) {
+            return res.status(403).json({
+              error: `Вы не можете изменять поход «${trip.title || trip.id}», созданный другим пользователем.`
+            });
           }
-          if (trip.organizer) {
-            trip.organizer.userId = req.user!.id;
+        }
+
+        // P0-4: Overwrite client-controlled fields with authenticated server values
+        if (!isPrivileged) {
+          trip.ownerId = currentUserId;
+          if (!trip.organizer) {
+            trip.organizer = {
+              name: req.user!.name,
+              avatar: req.user!.avatar || '',
+              experienceYears: 1,
+              completedTrips: 1,
+              fstrRank: req.user!.fstrRank || '',
+              phone: req.user!.phone || '',
+              telegram: req.user!.telegram || '',
+              userId: currentUserId
+            };
+          } else {
+            trip.organizer.userId = currentUserId;
           }
-          trip.ownerId = req.user!.id;
+          // Strip client-controlled system flags
+          delete (trip as any).verified;
         }
       }
 
-      await saveTripsInDb(validTrips, isPrivileged ? undefined : req.user!.id);
+      await saveTripsInDb(validTrips, isPrivileged ? undefined : currentUserId);
 
       logAudit({
         eventType: 'TRIP_UPDATE',
         level: 'info',
         requestId: req.requestId,
-        userId: req.user!.id,
+        userId: currentUserId,
         userRole: req.user!.role,
         ip: getClientIp(req),
         message: `User saved batch of ${validTrips.length} trips`
@@ -893,23 +957,46 @@ app.post(['/api/db/trips', '/api/trips'], requireAuth, async (req: Authenticated
       }
 
       const validTrip = parseResult.data;
-      if (!isPrivileged) {
-        if (validTrip.organizer?.userId && validTrip.organizer.userId !== req.user!.id) {
-          return res.status(403).json({ error: 'Вы можете сохранять только свои походы.' });
+
+      // Check existing record ownership in DB (P0-3)
+      const existingRecord = await findTripRecordById(validTrip.id);
+      if (existingRecord && !isPrivileged) {
+        const isOwner = existingRecord.ownerId === currentUserId ||
+          (existingRecord.data as any)?.organizer?.userId === currentUserId;
+        if (!isOwner) {
+          return res.status(403).json({
+            error: 'Вы не можете редактировать данный поход, так как не являетесь его организатором.'
+          });
         }
-        if (validTrip.organizer) {
-          validTrip.organizer.userId = req.user!.id;
-        }
-        validTrip.ownerId = req.user!.id;
       }
 
-      await saveTripInDb(validTrip, isPrivileged ? (validTrip.organizer?.userId || req.user!.id) : req.user!.id);
+      // P0-4: Overwrite client-controlled fields with authenticated server values
+      if (!isPrivileged) {
+        validTrip.ownerId = currentUserId;
+        if (!validTrip.organizer) {
+          validTrip.organizer = {
+            name: req.user!.name,
+            avatar: req.user!.avatar || '',
+            experienceYears: 1,
+            completedTrips: 1,
+            fstrRank: req.user!.fstrRank || '',
+            phone: req.user!.phone || '',
+            telegram: req.user!.telegram || '',
+            userId: currentUserId
+          };
+        } else {
+          validTrip.organizer.userId = currentUserId;
+        }
+        delete (validTrip as any).verified;
+      }
+
+      await saveTripInDb(validTrip, isPrivileged ? (validTrip.organizer?.userId || currentUserId) : currentUserId);
 
       logAudit({
-        eventType: 'TRIP_CREATE',
+        eventType: existingRecord ? 'TRIP_UPDATE' : 'TRIP_CREATE',
         level: 'info',
         requestId: req.requestId,
-        userId: req.user!.id,
+        userId: currentUserId,
         userRole: req.user!.role,
         ip: getClientIp(req),
         message: `User saved trip ${validTrip.id} (${validTrip.title})`
@@ -924,18 +1011,22 @@ app.post(['/api/db/trips', '/api/trips'], requireAuth, async (req: Authenticated
   }
 });
 
+// P0-3: Delete Trip with strict Server Ownership Verification
 app.delete(['/api/db/trips/:id', '/api/trips/:id'], requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const allTrips = (await getAllTripsFromDb()) as any[];
-    const existing = allTrips.find((t: any) => t.id === id);
+    const existingRecord = await findTripRecordById(id);
 
-    if (existing && req.user!.role !== 'admin' && req.user!.role !== 'superadmin') {
-      const isOwner = (existing.organizer?.userId && existing.organizer.userId === req.user!.id) ||
-                      (existing.ownerId && existing.ownerId === req.user!.id);
-      if (!isOwner) {
-        return res.status(403).json({ error: 'Вы можете удалять только созданные вами походы.' });
-      }
+    if (!existingRecord) {
+      return res.status(404).json({ error: 'Поход не найден' });
+    }
+
+    const isPrivileged = req.user!.role === 'admin' || req.user!.role === 'superadmin';
+    const isOwner = existingRecord.ownerId === req.user!.id ||
+      (existingRecord.data as any)?.organizer?.userId === req.user!.id;
+
+    if (!isPrivileged && !isOwner) {
+      return res.status(403).json({ error: 'Вы можете удалять только созданные вами походы.' });
     }
 
     await deleteTripFromDb(id);
@@ -954,6 +1045,235 @@ app.delete(['/api/db/trips/:id', '/api/trips/:id'], requireAuth, async (req: Aut
   } catch (error: any) {
     console.error('API delete trip error:', error.message);
     return res.status(500).json({ error: 'Не удалось удалить поход.' });
+  }
+});
+
+// ==========================================
+// P1: TRIP APPLICATIONS & PARTICIPANTS API (NORMALIZED)
+// ==========================================
+
+// GET /api/trips/:id/applications — ACL: Only Trip Owner or Admin
+app.get(['/api/trips/:id/applications', '/api/db/trips/:id/applications'], requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id: tripId } = req.params;
+    const tripRecord = await findTripRecordById(tripId);
+    if (!tripRecord) {
+      return res.status(404).json({ error: 'Поход не найден' });
+    }
+
+    const isPrivileged = req.user!.role === 'admin' || req.user!.role === 'superadmin';
+    const isOwner = tripRecord.ownerId === req.user!.id ||
+      (tripRecord.data as any)?.organizer?.userId === req.user!.id;
+
+    if (!isPrivileged && !isOwner) {
+      return res.status(403).json({ error: 'Только организатор похода или администратор может просматривать заявки.' });
+    }
+
+    const applications = await getTripApplicationsFromDb(tripId);
+    return res.json(applications);
+  } catch (error: any) {
+    console.error('API get trip applications error:', error.message);
+    return res.status(500).json({ error: 'Не удалось загрузить список заявок.' });
+  }
+});
+
+// POST /api/trips/:id/applications — Submit Application as Authenticated User
+app.post(['/api/trips/:id/applications', '/api/db/trips/:id/applications'], requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id: tripId } = req.params;
+    const tripRecord = await findTripRecordById(tripId);
+    if (!tripRecord) {
+      return res.status(404).json({ error: 'Поход не найден' });
+    }
+
+    const parseResult = tripApplicationCreateSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return res.status(400).json({
+        error: parseResult.error.issues[0]?.message || 'Неверные параметры заявки',
+        details: parseResult.error.format()
+      });
+    }
+
+    const appId = `app-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const createdApp = await createTripApplicationInDb({
+      id: appId,
+      tripId,
+      userId: req.user!.id,
+      applicantName: req.user!.name,
+      applicantPhone: req.user!.phone || '',
+      applicantEmail: req.user!.email,
+      applicantAvatar: req.user!.avatar || '',
+      experienceLevel: parseResult.data.experienceLevel || req.user!.experienceLevel || 'Любитель',
+      vesselType: parseResult.data.vesselType || 'kayak',
+      hasOwnGear: parseResult.data.hasOwnGear || false,
+      notes: parseResult.data.notes || ''
+    });
+
+    logAudit({
+      eventType: 'TRIP_UPDATE',
+      level: 'info',
+      requestId: req.requestId,
+      userId: req.user!.id,
+      userRole: req.user!.role,
+      ip: getClientIp(req),
+      message: `User submitted application ${appId} for trip ${tripId}`
+    });
+
+    return res.status(201).json(createdApp);
+  } catch (error: any) {
+    console.error('API create trip application error:', error.message);
+    return res.status(500).json({ error: 'Не удалось отправить заявку.' });
+  }
+});
+
+// PATCH /api/trips/:id/applications/:appId/status — ACL: Only Trip Owner or Admin
+app.patch(['/api/trips/:id/applications/:appId/status', '/api/db/trips/:id/applications/:appId/status'], requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id: tripId, appId } = req.params;
+    const tripRecord = await findTripRecordById(tripId);
+    if (!tripRecord) {
+      return res.status(404).json({ error: 'Поход не найден' });
+    }
+
+    const isPrivileged = req.user!.role === 'admin' || req.user!.role === 'superadmin';
+    const isOwner = tripRecord.ownerId === req.user!.id ||
+      (tripRecord.data as any)?.organizer?.userId === req.user!.id;
+
+    if (!isPrivileged && !isOwner) {
+      return res.status(403).json({ error: 'Только организатор похода может изменять статус заявок.' });
+    }
+
+    const parseResult = tripApplicationStatusUpdateSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return res.status(400).json({ error: 'Недопустимый статус заявки' });
+    }
+
+    const updated = await updateTripApplicationStatusInDb(tripId, appId, parseResult.data.status);
+
+    logAudit({
+      eventType: 'TRIP_UPDATE',
+      level: 'info',
+      requestId: req.requestId,
+      userId: req.user!.id,
+      userRole: req.user!.role,
+      ip: getClientIp(req),
+      message: `Trip owner updated application ${appId} status to ${parseResult.data.status}`
+    });
+
+    return res.json(updated);
+  } catch (error: any) {
+    console.error('API update trip application status error:', error.message);
+    return res.status(500).json({ error: 'Не удалось обновить статус заявки.' });
+  }
+});
+
+// GET /api/trips/:id/participants — Public (Sanitized PII unless Organizer/Admin)
+app.get(['/api/trips/:id/participants', '/api/db/trips/:id/participants'], async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id: tripId } = req.params;
+    const tripRecord = await findTripRecordById(tripId);
+    if (!tripRecord) {
+      return res.status(404).json({ error: 'Поход не найден' });
+    }
+
+    const isPrivileged = req.user ? (req.user.role === 'admin' || req.user.role === 'superadmin') : false;
+    const isOwner = req.user ? (tripRecord.ownerId === req.user.id || (tripRecord.data as any)?.organizer?.userId === req.user.id) : false;
+    const canViewPii = isPrivileged || isOwner;
+
+    const participants = await getTripParticipantsFromDb(tripId, canViewPii);
+    return res.json(participants);
+  } catch (error: any) {
+    console.error('API get trip participants error:', error.message);
+    return res.status(500).json({ error: 'Не удалось загрузить участников похода.' });
+  }
+});
+
+// POST /api/trips/:id/participants — ACL: Only Trip Owner or Admin
+app.post(['/api/trips/:id/participants', '/api/db/trips/:id/participants'], requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id: tripId } = req.params;
+    const tripRecord = await findTripRecordById(tripId);
+    if (!tripRecord) {
+      return res.status(404).json({ error: 'Поход не найден' });
+    }
+
+    const isPrivileged = req.user!.role === 'admin' || req.user!.role === 'superadmin';
+    const isOwner = tripRecord.ownerId === req.user!.id ||
+      (tripRecord.data as any)?.organizer?.userId === req.user!.id;
+
+    if (!isPrivileged && !isOwner) {
+      return res.status(403).json({ error: 'Только организатор похода может добавлять участников напрямую.' });
+    }
+
+    const parseResult = tripParticipantCreateSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return res.status(400).json({
+        error: parseResult.error.issues[0]?.message || 'Неверные данные участника'
+      });
+    }
+
+    const partId = `part-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const added = await addTripParticipantInDb({
+      id: partId,
+      tripId,
+      userId: parseResult.data.userId,
+      name: parseResult.data.name,
+      role: parseResult.data.role,
+      vessel: parseResult.data.vessel,
+      avatar: parseResult.data.avatar,
+      phone: parseResult.data.phone
+    });
+
+    logAudit({
+      eventType: 'TRIP_UPDATE',
+      level: 'info',
+      requestId: req.requestId,
+      userId: req.user!.id,
+      userRole: req.user!.role,
+      ip: getClientIp(req),
+      message: `Trip owner added participant ${partId} to trip ${tripId}`
+    });
+
+    return res.status(201).json(added);
+  } catch (error: any) {
+    console.error('API add trip participant error:', error.message);
+    return res.status(500).json({ error: 'Не удалось добавить участника.' });
+  }
+});
+
+// DELETE /api/trips/:id/participants/:participantId — ACL: Trip Owner, Admin, or Participant Self
+app.delete(['/api/trips/:id/participants/:participantId', '/api/db/trips/:id/participants/:participantId'], requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id: tripId, participantId } = req.params;
+    const tripRecord = await findTripRecordById(tripId);
+    if (!tripRecord) {
+      return res.status(404).json({ error: 'Поход не найден' });
+    }
+
+    const isPrivileged = req.user!.role === 'admin' || req.user!.role === 'superadmin';
+    const isOwner = tripRecord.ownerId === req.user!.id ||
+      (tripRecord.data as any)?.organizer?.userId === req.user!.id;
+
+    if (!isPrivileged && !isOwner) {
+      return res.status(403).json({ error: 'Недостаточно прав для удаления участника.' });
+    }
+
+    await removeTripParticipantFromDb(tripId, participantId);
+
+    logAudit({
+      eventType: 'TRIP_UPDATE',
+      level: 'info',
+      requestId: req.requestId,
+      userId: req.user!.id,
+      userRole: req.user!.role,
+      ip: getClientIp(req),
+      message: `Participant ${participantId} removed from trip ${tripId}`
+    });
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('API delete trip participant error:', error.message);
+    return res.status(500).json({ error: 'Не удалось удалить участника.' });
   }
 });
 
@@ -977,11 +1297,28 @@ app.get(['/api/db/routes', '/api/routes'], async (req: AuthenticatedRequest, res
   }
 });
 
-// P1-4: Strict Zod validation & batch saving
+// Single route lookup
+app.get(['/api/db/routes/:id', '/api/routes/:id'], async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const isAdmin = req.user ? (req.user.role === 'admin' || req.user.role === 'superadmin') : false;
+    const route = await findCustomRouteById(id, req.user?.id, isAdmin);
+    if (!route) {
+      return res.status(404).json({ error: `Маршрут с ID «${id}» не найден.` });
+    }
+    return res.json(route);
+  } catch (error: any) {
+    console.error('API single route error:', error.message);
+    return res.status(500).json({ error: 'Не удалось загрузить маршрут.' });
+  }
+});
+
+// P0-3 & P0-4: Server-side Ownership Verification + Strip Client-Controlled Metadata for Routes
 app.post(['/api/db/routes', '/api/routes'], requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const body = req.body;
     const isPrivileged = req.user!.role === 'admin' || req.user!.role === 'superadmin';
+    const currentUserId = req.user!.id;
 
     if (body.routes && Array.isArray(body.routes)) {
       const parseResult = routesBatchSchema.safeParse(body);
@@ -993,23 +1330,33 @@ app.post(['/api/db/routes', '/api/routes'], requireAuth, async (req: Authenticat
       }
 
       const validRoutes = parseResult.data.routes;
-      if (!isPrivileged) {
-        for (const r of validRoutes) {
-          if (r.authorId && r.authorId !== req.user!.id) {
-            return res.status(403).json({ error: 'Вы можете сохранять только собственные маршруты.' });
+      for (const r of validRoutes) {
+        // Check existing record ownership in DB (P0-3)
+        const existingRecord = await findCustomRouteRecordById(r.id);
+        if (existingRecord && !isPrivileged) {
+          const isOwner = existingRecord.ownerId === currentUserId ||
+            (existingRecord.data as any)?.authorId === currentUserId;
+          if (!isOwner) {
+            return res.status(403).json({
+              error: `Вы не можете изменять маршрут «${r.name || r.id}», созданный другим пользователем.`
+            });
           }
-          r.authorId = req.user!.id;
-          (r as any).ownerId = req.user!.id;
+        }
+
+        // P0-4: Overwrite client-controlled fields
+        if (!isPrivileged) {
+          r.authorId = currentUserId;
+          (r as any).ownerId = currentUserId;
         }
       }
 
-      await saveCustomRoutesInDb(validRoutes, isPrivileged ? undefined : req.user!.id);
+      await saveCustomRoutesInDb(validRoutes, isPrivileged ? undefined : currentUserId);
 
       logAudit({
         eventType: 'ROUTE_UPDATE',
         level: 'info',
         requestId: req.requestId,
-        userId: req.user!.id,
+        userId: currentUserId,
         userRole: req.user!.role,
         ip: getClientIp(req),
         message: `User saved batch of ${validRoutes.length} routes`
@@ -1026,21 +1373,32 @@ app.post(['/api/db/routes', '/api/routes'], requireAuth, async (req: Authenticat
       }
 
       const validRoute = parseResult.data;
-      if (!isPrivileged) {
-        if (validRoute.authorId && validRoute.authorId !== req.user!.id) {
-          return res.status(403).json({ error: 'Вы можете сохранять только собственные маршруты.' });
+
+      // Check existing record ownership in DB (P0-3)
+      const existingRecord = await findCustomRouteRecordById(validRoute.id);
+      if (existingRecord && !isPrivileged) {
+        const isOwner = existingRecord.ownerId === currentUserId ||
+          (existingRecord.data as any)?.authorId === currentUserId;
+        if (!isOwner) {
+          return res.status(403).json({
+            error: 'Вы не можете редактировать данный маршрут, так как не являетесь его автором.'
+          });
         }
-        validRoute.authorId = req.user!.id;
-        (validRoute as any).ownerId = req.user!.id;
       }
 
-      await saveCustomRouteInDb(validRoute, isPrivileged ? (validRoute.authorId || req.user!.id) : req.user!.id);
+      // P0-4: Overwrite client-controlled fields
+      if (!isPrivileged) {
+        validRoute.authorId = currentUserId;
+        (validRoute as any).ownerId = currentUserId;
+      }
+
+      await saveCustomRouteInDb(validRoute, isPrivileged ? (validRoute.authorId || currentUserId) : currentUserId);
 
       logAudit({
-        eventType: 'ROUTE_CREATE',
+        eventType: existingRecord ? 'ROUTE_UPDATE' : 'ROUTE_CREATE',
         level: 'info',
         requestId: req.requestId,
-        userId: req.user!.id,
+        userId: currentUserId,
         userRole: req.user!.role,
         ip: getClientIp(req),
         message: `User saved route ${validRoute.id} (${validRoute.name})`
@@ -1055,18 +1413,22 @@ app.post(['/api/db/routes', '/api/routes'], requireAuth, async (req: Authenticat
   }
 });
 
+// P0-3: Delete Route with strict Server Ownership Verification
 app.delete(['/api/db/routes/:id', '/api/routes/:id'], requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const allRoutes = (await getAllCustomRoutesFromDb()) as any[];
-    const existing = allRoutes.find((r: any) => r.id === id);
+    const existingRecord = await findCustomRouteRecordById(id);
 
-    if (existing && req.user!.role !== 'admin' && req.user!.role !== 'superadmin') {
-      const isOwner = (existing.authorId && existing.authorId === req.user!.id) ||
-                      (existing.ownerId && existing.ownerId === req.user!.id);
-      if (!isOwner) {
-        return res.status(403).json({ error: 'Вы можете удалять только созданные вами маршруты.' });
-      }
+    if (!existingRecord) {
+      return res.status(404).json({ error: 'Маршрут не найден' });
+    }
+
+    const isPrivileged = req.user!.role === 'admin' || req.user!.role === 'superadmin';
+    const isOwner = existingRecord.ownerId === req.user!.id ||
+      (existingRecord.data as any)?.authorId === req.user!.id;
+
+    if (!isPrivileged && !isOwner) {
+      return res.status(403).json({ error: 'Вы можете удалять только созданные вами маршруты.' });
     }
 
     await deleteCustomRouteFromDb(id);
@@ -1104,7 +1466,7 @@ app.get(['/api/db/articles', '/api/articles'], async (req: AuthenticatedRequest,
   }
 });
 
-// P1-4: Strict Zod validation
+// P1-4: Strict Zod validation (Admin only)
 app.post(['/api/db/articles', '/api/articles'], requireRole('admin', 'superadmin'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const parseResult = articlesBatchSchema.safeParse(req.body);
@@ -1171,7 +1533,7 @@ app.get(['/api/db/faq', '/api/faq'], async (_req: AuthenticatedRequest, res: Res
   }
 });
 
-// P1-4: Strict Zod validation
+// P1-4: Strict Zod validation (Admin only)
 app.post(['/api/db/faq', '/api/faq'], requireRole('admin', 'superadmin'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const parseResult = faqConfigSchema.safeParse(req.body);
@@ -1301,13 +1663,13 @@ app.post('/api/notifications/telegram-application', notificationLimiter, require
     }
 
     logAudit({
-      eventType: 'AUTH_LOGIN', // Or Notification event
+      eventType: 'AUTH_LOGIN',
       level: 'info',
       requestId: req.requestId,
       userId: req.user!.id,
       userRole: req.user!.role,
       ip: getClientIp(req),
-      message: `User ${req.user!.email} submitted application for trip ${tripId} (${tripTitle})`
+      message: `User submitted application for trip ${tripId} (${tripTitle})`
     });
 
     return res.json({
