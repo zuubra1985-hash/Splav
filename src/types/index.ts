@@ -31,6 +31,8 @@ export interface AppUser {
   vk?: string; // Ссылка или id VK
   isReadyForExpeditions?: boolean; // Статус "Готов к экспедициям / Ищу команду"
   showContactsPublicly?: boolean; // Показывать ли телефон всем авторизованным туристам
+  isDeleted?: boolean;
+  updatedAt?: string;
   emergencyContact?: {
     name: string;
     phone: string;
@@ -82,6 +84,8 @@ export interface RoutePOI {
   safetyTips?: string;
   photo?: string;
   kmMark?: number;
+  isDeleted?: boolean;
+  updatedAt?: string;
 }
 
 export interface RiverRoute {
@@ -126,6 +130,8 @@ export interface RiverRoute {
   photos?: string[];
   wikipediaUrl?: string;
   wikipediaExtract?: string;
+  isDeleted?: boolean;
+  updatedAt?: string;
   // Quality Control & Verification
   verificationStatus?: 'verified' | 'incomplete' | 'needs_review';
   lastVerifiedAt?: string;
@@ -196,6 +202,8 @@ export interface TripApplication {
   notes?: string;
   status: 'pending' | 'accepted' | 'declined';
   appliedAt: string;
+  isDeleted?: boolean;
+  updatedAt?: string;
 }
 
 export interface TripChatMessage {
@@ -208,6 +216,8 @@ export interface TripChatMessage {
   text: string;
   timestamp: string;
   createdAt?: number;
+  isDeleted?: boolean;
+  updatedAt?: string;
 }
 
 export interface TripChatPresence {
@@ -266,6 +276,8 @@ export interface CompanionTrip {
   gpxFileName?: string;
   isArchived?: boolean;
   archivedAt?: string;
+  isDeleted?: boolean;
+  updatedAt?: string;
 }
 
 export interface MchsFormState {
@@ -306,6 +318,8 @@ export interface SafetyGuide {
   doList: string[];
   dontList: string[];
   emergencyContacts?: { name: string; phone: string; note: string }[];
+  isDeleted?: boolean;
+  updatedAt?: string;
 }
 
 export interface ArticleReport {
@@ -328,6 +342,8 @@ export interface ArticleReport {
   fullContent: string[];
   stats: { distanceKm: number; days: number; vessel: string; bestMonth: string };
   gallery: { url: string; caption: string }[];
+  isDeleted?: boolean;
+  updatedAt?: string;
 }
 
 export type Article = ArticleReport;
@@ -360,6 +376,7 @@ export interface TravelNote {
   isPublic: boolean; // true = "Опубликовано для всех", false = "Только для меня (личный дневник)"
   createdAt: string;
   updatedAt?: string;
+  isDeleted?: boolean;
 }
 
 export interface LogbookTrip {
@@ -380,6 +397,8 @@ export interface LogbookTrip {
   riverRating?: number; // 1 to 5 stars
   photos?: string[];
   createdAt: string;
+  updatedAt?: string;
+  isDeleted?: boolean;
 }
 
 export interface RiverReview {
@@ -398,6 +417,8 @@ export interface RiverReview {
   vesselUsed: VesselType;
   comment: string;
   adviceForOthers?: string;
+  isDeleted?: boolean;
+  updatedAt?: string;
 }
 
 export interface CrewReview {
@@ -418,6 +439,8 @@ export interface CrewReview {
   ratingPunctuality: number; // 1 to 5
   tags: string[]; // e.g. "💪 Мощный гребец", "🔥 Мастер костра", "🍲 Шеф-повар", "🧭 Отличный штурман", "🎸 Душа компании"
   comment: string;
+  isDeleted?: boolean;
+  updatedAt?: string;
 }
 
 export interface ChecklistItem {
@@ -428,6 +451,8 @@ export interface ChecklistItem {
   isCustom?: boolean;
   notes?: string;
   quantity?: string;
+  isDeleted?: boolean;
+  updatedAt?: string;
 }
 
 export interface FaqEmergencyContact {
@@ -437,6 +462,8 @@ export interface FaqEmergencyContact {
   description: string;
   badge?: string;
   isCritical?: boolean;
+  isDeleted?: boolean;
+  updatedAt?: string;
 }
 
 export interface FaqRadioFrequency {
@@ -445,6 +472,8 @@ export interface FaqRadioFrequency {
   frequency: string;
   description: string;
   tag: string;
+  isDeleted?: boolean;
+  updatedAt?: string;
 }
 
 export interface FaqVisualSignal {
@@ -453,6 +482,8 @@ export interface FaqVisualSignal {
   meaning: string;
   description: string;
   color?: 'red' | 'green' | 'gray' | 'amber';
+  isDeleted?: boolean;
+  updatedAt?: string;
 }
 
 export interface FaqQuestionItem {
@@ -461,6 +492,8 @@ export interface FaqQuestionItem {
   answer: string;
   category: 'general' | 'permits_gims' | 'satellite_sos' | 'wildlife' | 'routes_logistics';
   isPopular?: boolean;
+  isDeleted?: boolean;
+  updatedAt?: string;
 }
 
 export interface TravelNotesConfig {
@@ -472,6 +505,7 @@ export interface TravelNotesConfig {
   crewReviews: CrewReview[];
   updatedAt?: string;
   updatedBy?: string;
+  isDeleted?: boolean;
 }
 
 export interface FaqDataConfig {
@@ -489,6 +523,7 @@ export interface FaqDataConfig {
   faqQuestions: FaqQuestionItem[];
   updatedAt?: string;
   updatedBy?: string;
+  isDeleted?: boolean;
 }
 
 export interface SectionSyncInfo {

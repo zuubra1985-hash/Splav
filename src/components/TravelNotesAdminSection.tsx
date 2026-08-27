@@ -39,8 +39,8 @@ import {
   INITIAL_RIVER_REVIEWS,
   INITIAL_CREW_REVIEWS
 } from '../data/logbookData';
-import { TravelNotesSyncService } from '../firebase';
-import { CloudSqlDbService } from '../services/cloudSqlDb';
+import { CentralSyncManager } from '../services/centralSyncManager';
+import { filterActiveEntities } from '../utils/syncMerge';
 import confetti from 'canvas-confetti';
 
 interface TravelNotesAdminSectionProps {
@@ -114,27 +114,19 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
   };
 
   const commitConfig = (newConfig: TravelNotesConfig, message: string) => {
-    setNotesConfig(newConfig);
-    try {
-      localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
-      localStorage.setItem('splav86_travel_notes_v2', JSON.stringify(newConfig.notes));
-      localStorage.setItem('splav86_custom_checklist_v2', JSON.stringify(newConfig.checklist));
-      localStorage.setItem('splav86_my_trips_log_v2', JSON.stringify(newConfig.logbookTrips));
-      localStorage.setItem('splav86_river_reviews_v2', JSON.stringify(newConfig.riverReviews));
-      localStorage.setItem('splav86_crew_reviews_v2', JSON.stringify(newConfig.crewReviews));
-    } catch (e) {
-      console.warn('Storage sync:', e);
-    }
+    const enrichedConfig: TravelNotesConfig = {
+      ...newConfig,
+      updatedAt: new Date().toISOString()
+    };
+    setNotesConfig(enrichedConfig);
 
-    CloudSqlDbService.saveTravelNotes(newConfig).catch(console.warn);
-
-    TravelNotesSyncService.saveNotesConfig(newConfig)
+    CentralSyncManager.saveTravelNotes(enrichedConfig)
       .then(() => {
-        showNotification(message);
+        showNotification(message, 'success');
       })
       .catch((err) => {
-        console.warn('Firestore sync notes error:', err);
-        showNotification(`${message} (сохранено локально)`);
+        console.warn('CentralSyncManager save error:', err);
+        showNotification(`${message} (сохранено локально)`, 'success');
       });
   };
 
@@ -144,6 +136,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
       setEditingNote({ ...note });
       setIsNewNote(false);
     } else {
+      const nowIso = new Date().toISOString();
       setEditingNote({
         id: `note-${Date.now()}`,
         userId: currentUser?.id || 'admin',
@@ -156,7 +149,9 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
         tags: ['Снаряжение', 'Уроки'],
         isPinned: false,
         isPublic: true,
-        createdAt: new Date().toISOString().split('T')[0]
+        isDeleted: false,
+        createdAt: nowIso.split('T')[0],
+        updatedAt: nowIso
       });
       setIsNewNote(true);
     }
@@ -170,20 +165,30 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
       return;
     }
 
+    const nowIso = new Date().toISOString();
+    const preparedNote: TravelNote = {
+      ...editingNote,
+      isDeleted: false,
+      updatedAt: nowIso
+    };
+
     let updatedNotes: TravelNote[];
     if (isNewNote) {
-      updatedNotes = [editingNote, ...notesConfig.notes];
+      updatedNotes = [preparedNote, ...notesConfig.notes];
     } else {
-      updatedNotes = notesConfig.notes.map((n) => (n.id === editingNote.id ? editingNote : n));
+      updatedNotes = notesConfig.notes.map((n) => (n.id === preparedNote.id ? preparedNote : n));
     }
 
     const updatedConfig = { ...notesConfig, notes: updatedNotes };
-    commitConfig(updatedConfig, `Заметка "${editingNote.title}" сохранена`);
+    commitConfig(updatedConfig, `Заметка "${preparedNote.title}" сохранена`);
     setEditingNote(null);
   };
 
   const handleDeleteNote = (id: string, title: string) => {
-    const updatedNotes = notesConfig.notes.filter((n) => n.id !== id);
+    const nowIso = new Date().toISOString();
+    const updatedNotes = notesConfig.notes.map((n) =>
+      n.id === id ? { ...n, isDeleted: true, updatedAt: nowIso } : n
+    );
     commitConfig({ ...notesConfig, notes: updatedNotes }, `Заметка "${title}" удалена`);
   };
 
@@ -193,12 +198,15 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
       setEditingCheckItem({ ...item });
       setIsNewCheckItem(false);
     } else {
+      const nowIso = new Date().toISOString();
       setEditingCheckItem({
         id: `check-${Date.now()}`,
         text: '',
         category: 'camp_bivouac',
         isChecked: true,
-        quantity: '1 шт'
+        quantity: '1 шт',
+        isDeleted: false,
+        updatedAt: nowIso
       });
       setIsNewCheckItem(true);
     }
@@ -212,11 +220,18 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
       return;
     }
 
+    const nowIso = new Date().toISOString();
+    const preparedItem: ChecklistItem = {
+      ...editingCheckItem,
+      isDeleted: false,
+      updatedAt: nowIso
+    };
+
     let updatedList: ChecklistItem[];
     if (isNewCheckItem) {
-      updatedList = [...notesConfig.checklist, editingCheckItem];
+      updatedList = [...notesConfig.checklist, preparedItem];
     } else {
-      updatedList = notesConfig.checklist.map((i) => (i.id === editingCheckItem.id ? editingCheckItem : i));
+      updatedList = notesConfig.checklist.map((i) => (i.id === preparedItem.id ? preparedItem : i));
     }
 
     commitConfig({ ...notesConfig, checklist: updatedList }, 'Пункт чек-листа сохранен');
@@ -224,7 +239,10 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
   };
 
   const handleDeleteCheckItem = (id: string, _text: string) => {
-    const updatedList = notesConfig.checklist.filter((i) => i.id !== id);
+    const nowIso = new Date().toISOString();
+    const updatedList = notesConfig.checklist.map((i) =>
+      i.id === id ? { ...i, isDeleted: true, updatedAt: nowIso } : i
+    );
     commitConfig({ ...notesConfig, checklist: updatedList }, 'Предмет удален из чек-листа');
   };
 
@@ -234,6 +252,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
       setEditingTrip({ ...trip });
       setIsNewTrip(false);
     } else {
+      const nowIso = new Date().toISOString();
       setEditingTrip({
         id: `log-${Date.now()}`,
         userId: currentUser?.id || 'admin',
@@ -249,7 +268,9 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
         personalNotes: '',
         difficultyRating: 'II к.с.',
         riverRating: 5,
-        createdAt: new Date().toISOString().split('T')[0]
+        isDeleted: false,
+        createdAt: nowIso.split('T')[0],
+        updatedAt: nowIso
       });
       setIsNewTrip(true);
     }
@@ -263,11 +284,18 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
       return;
     }
 
+    const nowIso = new Date().toISOString();
+    const preparedTrip: LogbookTrip = {
+      ...editingTrip,
+      isDeleted: false,
+      updatedAt: nowIso
+    };
+
     let updatedTrips: LogbookTrip[];
     if (isNewTrip) {
-      updatedTrips = [editingTrip, ...notesConfig.logbookTrips];
+      updatedTrips = [preparedTrip, ...notesConfig.logbookTrips];
     } else {
-      updatedTrips = notesConfig.logbookTrips.map((t) => (t.id === editingTrip.id ? editingTrip : t));
+      updatedTrips = notesConfig.logbookTrips.map((t) => (t.id === preparedTrip.id ? preparedTrip : t));
     }
 
     commitConfig({ ...notesConfig, logbookTrips: updatedTrips }, 'Запись сплава сохранена');
@@ -275,7 +303,10 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
   };
 
   const handleDeleteTrip = (id: string, _river: string) => {
-    const updatedTrips = notesConfig.logbookTrips.filter((t) => t.id !== id);
+    const nowIso = new Date().toISOString();
+    const updatedTrips = notesConfig.logbookTrips.map((t) =>
+      t.id === id ? { ...t, isDeleted: true, updatedAt: nowIso } : t
+    );
     commitConfig({ ...notesConfig, logbookTrips: updatedTrips }, 'Запись о сплаве удалена');
   };
 
@@ -285,12 +316,13 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
       setEditingRiverReview({ ...review });
       setIsNewRiverReview(false);
     } else {
+      const nowIso = new Date().toISOString();
       setEditingRiverReview({
         id: `rev-r-${Date.now()}`,
         riverName: routes[0]?.name || 'р. Собь',
         userName: currentUser?.name || 'Администратор',
         userAvatar: currentUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
-        date: new Date().toISOString().split('T')[0],
+        date: nowIso.split('T')[0],
         ratingOverall: 5,
         ratingScenery: 5,
         ratingRapids: 4,
@@ -298,7 +330,9 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
         ratingFishing: 5,
         vesselUsed: 'catamaran',
         comment: 'Отличная чистая река с красивейшими стоянками!',
-        adviceForOthers: 'Возьмите надежные репелленты и спасжилеты'
+        adviceForOthers: 'Возьмите надежные репелленты и спасжилеты',
+        isDeleted: false,
+        updatedAt: nowIso
       });
       setIsNewRiverReview(true);
     }
@@ -312,11 +346,18 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
       return;
     }
 
+    const nowIso = new Date().toISOString();
+    const preparedRev: RiverReview = {
+      ...editingRiverReview,
+      isDeleted: false,
+      updatedAt: nowIso
+    };
+
     let updatedReviews: RiverReview[];
     if (isNewRiverReview) {
-      updatedReviews = [editingRiverReview, ...notesConfig.riverReviews];
+      updatedReviews = [preparedRev, ...notesConfig.riverReviews];
     } else {
-      updatedReviews = notesConfig.riverReviews.map((r) => (r.id === editingRiverReview.id ? editingRiverReview : r));
+      updatedReviews = notesConfig.riverReviews.map((r) => (r.id === preparedRev.id ? preparedRev : r));
     }
 
     commitConfig({ ...notesConfig, riverReviews: updatedReviews }, 'Отзыв о реке сохранен');
@@ -324,7 +365,10 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
   };
 
   const handleDeleteRiverReview = (id: string, river: string) => {
-    const updatedReviews = notesConfig.riverReviews.filter((r) => r.id !== id);
+    const nowIso = new Date().toISOString();
+    const updatedReviews = notesConfig.riverReviews.map((r) =>
+      r.id === id ? { ...r, isDeleted: true, updatedAt: nowIso } : r
+    );
     commitConfig({ ...notesConfig, riverReviews: updatedReviews }, `Отзыв о реке "${river}" удален`);
   };
 
@@ -334,6 +378,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
       setEditingCrewReview({ ...review });
       setIsNewCrewReview(false);
     } else {
+      const nowIso = new Date().toISOString();
       setEditingCrewReview({
         id: `rev-c-${Date.now()}`,
         tripTitle: 'Экспедиция по рекам Севера',
@@ -341,14 +386,16 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
         targetUserName: registeredUsers[0]?.name || 'Участник сплава',
         authorUserId: currentUser?.id || 'admin',
         authorUserName: currentUser?.name || 'Администратор',
-        date: new Date().toISOString().split('T')[0],
+        date: nowIso.split('T')[0],
         ratingOverall: 5,
         ratingPaddling: 5,
         ratingCampSkills: 5,
         ratingTeamwork: 5,
         ratingPunctuality: 5,
-        tags: ['🔥 Мастер костра', '💪 Мощий гребец'],
-        comment: 'Надежный товарищ по веслу, отличная выдержка в сложных условиях.'
+        tags: ['🔥 Мастер костра', '💪 Мощный гребец'],
+        comment: 'Надежный товарищ по веслу, отличная выдержка в сложных условиях.',
+        isDeleted: false,
+        updatedAt: nowIso
       });
       setIsNewCrewReview(true);
     }
@@ -362,11 +409,18 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
       return;
     }
 
+    const nowIso = new Date().toISOString();
+    const preparedRev: CrewReview = {
+      ...editingCrewReview,
+      isDeleted: false,
+      updatedAt: nowIso
+    };
+
     let updatedReviews: CrewReview[];
     if (isNewCrewReview) {
-      updatedReviews = [editingCrewReview, ...notesConfig.crewReviews];
+      updatedReviews = [preparedRev, ...notesConfig.crewReviews];
     } else {
-      updatedReviews = notesConfig.crewReviews.map((r) => (r.id === editingCrewReview.id ? editingCrewReview : r));
+      updatedReviews = notesConfig.crewReviews.map((r) => (r.id === preparedRev.id ? preparedRev : r));
     }
 
     commitConfig({ ...notesConfig, crewReviews: updatedReviews }, 'Отзыв об участнике экипажа сохранен');
@@ -374,7 +428,10 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
   };
 
   const handleDeleteCrewReview = (id: string, targetName: string) => {
-    const updatedReviews = notesConfig.crewReviews.filter((r) => r.id !== id);
+    const nowIso = new Date().toISOString();
+    const updatedReviews = notesConfig.crewReviews.map((r) =>
+      r.id === id ? { ...r, isDeleted: true, updatedAt: nowIso } : r
+    );
     commitConfig({ ...notesConfig, crewReviews: updatedReviews }, `Отзыв об участнике "${targetName}" удален`);
   };
 
@@ -463,11 +520,11 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
       {/* Sub-Navigation Tabs - Column on mobile, grid/flex on larger screens */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:flex lg:flex-wrap gap-2 pb-2 border-b border-[#E5E0D8]">
         {[
-          { id: 'notes', label: 'Путевые заметки', icon: BookOpen, count: notesConfig.notes.length },
-          { id: 'checklist', label: 'Чек-лист сборов', icon: CheckSquare, count: notesConfig.checklist.length },
-          { id: 'trips', label: 'Пройденные реки', icon: Compass, count: notesConfig.logbookTrips.length },
-          { id: 'river_reviews', label: 'Отзывы о реках 5★', icon: Star, count: notesConfig.riverReviews.length },
-          { id: 'crew_reviews', label: 'Отзывы об экипаже', icon: Award, count: notesConfig.crewReviews.length },
+          { id: 'notes', label: 'Путевые заметки', icon: BookOpen, count: filterActiveEntities(notesConfig.notes).length },
+          { id: 'checklist', label: 'Чек-лист сборов', icon: CheckSquare, count: filterActiveEntities(notesConfig.checklist).length },
+          { id: 'trips', label: 'Пройденные реки', icon: Compass, count: filterActiveEntities(notesConfig.logbookTrips).length },
+          { id: 'river_reviews', label: 'Отзывы о реках 5★', icon: Star, count: filterActiveEntities(notesConfig.riverReviews).length },
+          { id: 'crew_reviews', label: 'Отзывы об экипаже', icon: Award, count: filterActiveEntities(notesConfig.crewReviews).length },
           { id: 'backup', label: 'Бэкап и сброс', icon: RefreshCw }
         ].map((tab) => {
           const Icon = tab.icon;
@@ -522,7 +579,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {notesConfig.notes
+            {filterActiveEntities(notesConfig.notes)
               .filter(
                 (n) =>
                   !searchQuery ||
@@ -575,7 +632,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-[#E5E0D8]">
             <div className="text-xs text-[#6B665F]">
-              Всего позиций в эталонном чек-листе: <strong>{notesConfig.checklist.length}</strong>
+              Всего позиций в эталонном чек-листе: <strong>{filterActiveEntities(notesConfig.checklist).length}</strong>
             </div>
             <button
               onClick={() => handleOpenEditCheckItem()}
@@ -587,7 +644,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {notesConfig.checklist.map((item) => (
+            {filterActiveEntities(notesConfig.checklist).map((item) => (
               <div key={item.id} className="bg-white p-3.5 rounded-2xl border border-[#E5E0D8] flex items-center justify-between gap-2 shadow-xs">
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-bold text-[#1A1F1A] truncate">{item.text}</div>
@@ -622,7 +679,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-[#E5E0D8]">
             <div className="text-xs text-[#6B665F]">
-              Записано сплавов: <strong>{notesConfig.logbookTrips.length}</strong>
+              Записано сплавов: <strong>{filterActiveEntities(notesConfig.logbookTrips).length}</strong>
             </div>
             <button
               onClick={() => handleOpenEditTrip()}
@@ -634,7 +691,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
           </div>
 
           <div className="space-y-3">
-            {notesConfig.logbookTrips.map((trip) => (
+            {filterActiveEntities(notesConfig.logbookTrips).map((trip) => (
               <div key={trip.id} className="bg-white p-4 rounded-2xl border border-[#E5E0D8] flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
@@ -677,7 +734,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-[#E5E0D8]">
             <div className="text-xs text-[#6B665F]">
-              Всего 5-звёздочных отзывов о реках: <strong>{notesConfig.riverReviews.length}</strong>
+              Всего 5-звёздочных отзывов о реках: <strong>{filterActiveEntities(notesConfig.riverReviews).length}</strong>
             </div>
             <button
               onClick={() => handleOpenEditRiverReview()}
@@ -689,7 +746,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {notesConfig.riverReviews.map((rev) => (
+            {filterActiveEntities(notesConfig.riverReviews).map((rev) => (
               <div key={rev.id} className="bg-white p-4 rounded-2xl border border-[#E5E0D8] space-y-3 flex flex-col justify-between shadow-xs">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
@@ -737,7 +794,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-[#E5E0D8]">
             <div className="text-xs text-[#6B665F]">
-              Взаимных отзывов об участниках: <strong>{notesConfig.crewReviews.length}</strong>
+              Взаимных отзывов об участниках: <strong>{filterActiveEntities(notesConfig.crewReviews).length}</strong>
             </div>
             <button
               onClick={() => handleOpenEditCrewReview()}
@@ -749,7 +806,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {notesConfig.crewReviews.map((rev) => (
+            {filterActiveEntities(notesConfig.crewReviews).map((rev) => (
               <div key={rev.id} className="bg-white p-4 rounded-2xl border border-[#E5E0D8] space-y-3 flex flex-col justify-between shadow-xs">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">

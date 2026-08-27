@@ -28,6 +28,15 @@ import { ARTICLES_DATA } from './data/articlesData';
 import { RiverRoute, Region, CompanionTrip, ArticleReport, AppUser, UserRole, FaqDataConfig, TravelNotesConfig, CrewReview, TravelNote, RiverReview, Article, LogbookTrip } from './types';
 import { TripsSyncService, RoutesSyncService, UsersSyncService, ArticlesSyncService, FaqSyncService, TravelNotesSyncService } from './firebase';
 import { CloudSqlDbService } from './services/cloudSqlDb';
+import { CentralSyncManager } from './services/centralSyncManager';
+import {
+  mergeRoutes,
+  mergeTrips,
+  mergeTravelNotesConfigs,
+  mergeArticles,
+  mergeUsers,
+  filterActiveEntities
+} from './utils/syncMerge';
 import { INITIAL_FAQ_DATA } from './data/faqData';
 import { INITIAL_TRAVEL_NOTES_CONFIG } from './data/logbookData';
 import { 
@@ -103,50 +112,6 @@ const getInitialRegion = (): Region => {
     } catch (e) {}
   }
   return 'ALL';
-};
-
-const mergeTravelNotesConfigs = (prev: TravelNotesConfig, incoming: TravelNotesConfig): TravelNotesConfig => {
-  if (!incoming) return prev;
-  if (!prev) return incoming;
-
-  const notesMap = new Map<string, TravelNote>();
-  (incoming.notes || []).forEach((n) => { if (n && n.id) notesMap.set(n.id, n); });
-  (prev.notes || []).forEach((n) => {
-    if (n && n.id) {
-      if (!notesMap.has(n.id)) {
-        notesMap.set(n.id, n);
-      } else {
-        const inc = notesMap.get(n.id)!;
-        const incTime = new Date(inc.updatedAt || inc.createdAt || 0).getTime();
-        const prevTime = new Date(n.updatedAt || n.createdAt || 0).getTime();
-        if (prevTime > incTime || (n.likesCount || 0) > (inc.likesCount || 0)) {
-          notesMap.set(n.id, { ...inc, ...n });
-        }
-      }
-    }
-  });
-
-  const riverReviewsMap = new Map<string, RiverReview>();
-  (incoming.riverReviews || []).forEach((r) => { if (r && r.id) riverReviewsMap.set(r.id, r); });
-  (prev.riverReviews || []).forEach((r) => { if (r && r.id && !riverReviewsMap.has(r.id)) riverReviewsMap.set(r.id, r); });
-
-  const crewReviewsMap = new Map<string, CrewReview>();
-  (incoming.crewReviews || []).forEach((c) => { if (c && c.id) crewReviewsMap.set(c.id, c); });
-  (prev.crewReviews || []).forEach((c) => { if (c && c.id && !crewReviewsMap.has(c.id)) crewReviewsMap.set(c.id, c); });
-
-  const logbookTripsMap = new Map<string, LogbookTrip>();
-  (incoming.logbookTrips || []).forEach((t) => { if (t && t.id) logbookTripsMap.set(t.id, t); });
-  (prev.logbookTrips || []).forEach((t) => { if (t && t.id && !logbookTripsMap.has(t.id)) logbookTripsMap.set(t.id, t); });
-
-  return {
-    ...incoming,
-    notes: Array.from(notesMap.values()),
-    checklist: incoming.checklist && incoming.checklist.length > 0 ? incoming.checklist : prev.checklist,
-    logbookTrips: Array.from(logbookTripsMap.values()),
-    riverReviews: Array.from(riverReviewsMap.values()),
-    crewReviews: Array.from(crewReviewsMap.values()),
-    updatedAt: incoming.updatedAt || new Date().toISOString()
-  };
 };
 
 export default function App() {
@@ -448,223 +413,98 @@ export default function App() {
     }
   }, []);
 
-  // Real-time Cloud Synchronization via Firebase Firestore
+  // Real-time Cloud Synchronization via Firebase Firestore + Centralized SQL Sync
   useEffect(() => {
-    let isBootstrappingTrips = false;
     let isBootstrappingUsers = false;
-    let isBootstrappingRoutes = false;
-    let isBootstrappingArticles = false;
-    let isBootstrappingFaq = false;
-    let isBootstrappingNotes = false;
 
     // 1. Initial SQL fetch and Subscribe to Trips (Real-time expeditions)
     CloudSqlDbService.fetchTrips().then((sqlTrips) => {
       if (sqlTrips && sqlTrips.length > 0) {
-        const deleted = getDeletedTripIds();
-        const activeTrips = sqlTrips.filter((t) => !deleted.has(t.id));
-        sqlTrips.forEach((t) => {
-          if (deleted.has(t.id)) {
-            CloudSqlDbService.deleteTrip(t.id).catch(console.warn);
-          }
-        });
-        setTrips(activeTrips);
+        setTrips((prev) => filterActiveEntities(mergeTrips(prev, sqlTrips)));
       }
     }).catch(console.warn);
 
     const unsubTrips = TripsSyncService.subscribeToTrips((cloudTrips) => {
-      const deleted = getDeletedTripIds();
-      const tripsToSet = (cloudTrips || []).filter((t) => !deleted.has(t.id));
-      (cloudTrips || []).forEach((t) => {
-        if (deleted.has(t.id)) {
-          TripsSyncService.removeTrip(t.id).catch(console.warn);
-          CloudSqlDbService.deleteTrip(t.id).catch(console.warn);
+      setTrips((prev) => {
+        const merged = mergeTrips(prev, cloudTrips || []);
+        const active = filterActiveEntities(merged);
+        try {
+          localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(active));
+        } catch (e) {
+          console.error(e);
         }
+        return active;
       });
-      setTrips(tripsToSet);
-      try {
-        localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(tripsToSet));
-      } catch (e) {
-        console.error(e);
-      }
     });
 
     // 2. Initial SQL fetch and Subscribe to Routes (River passports and catalog)
     CloudSqlDbService.fetchRoutes().then((sqlRoutes) => {
       if (sqlRoutes && sqlRoutes.length > 0) {
-        const deleted = getDeletedRouteIds();
-        const activeRoutes = sqlRoutes.filter((r) => !deleted.has(r.id));
-        sqlRoutes.forEach((r) => {
-          if (deleted.has(r.id)) {
-            CloudSqlDbService.deleteRoute(r.id).catch(console.warn);
-          }
-        });
-        setRoutes(activeRoutes);
+        setRoutes((prev) => filterActiveEntities(mergeRoutes(prev, sqlRoutes)));
       }
     }).catch(console.warn);
 
     const unsubRoutes = RoutesSyncService.subscribeToRoutes((cloudRoutes) => {
-      const deleted = getDeletedRouteIds();
-      const routesToSet = (cloudRoutes || []).filter((r) => !deleted.has(r.id));
-      (cloudRoutes || []).forEach((r) => {
-        if (deleted.has(r.id)) {
-          RoutesSyncService.removeRoute(r.id).catch(console.warn);
-          CloudSqlDbService.deleteRoute(r.id).catch(console.warn);
+      setRoutes((prev) => {
+        const merged = mergeRoutes(prev, cloudRoutes || []);
+        const active = filterActiveEntities(merged);
+        try {
+          localStorage.setItem('splav86_custom_routes_v5', JSON.stringify(active));
+        } catch (e) {
+          console.error(e);
         }
+        return active;
       });
-      setRoutes(routesToSet);
-      try {
-        localStorage.setItem('splav86_custom_routes_v5', JSON.stringify(routesToSet));
-      } catch (e) {
-        console.error(e);
-      }
     });
 
     // 3. Subscribe to Users (Tourists, Organizers, Admins)
     CloudSqlDbService.fetchUsers().then((sqlUsers) => {
       if (sqlUsers && sqlUsers.length > 0) {
-        const deletedKeys = getDeletedUserKeys();
-        setRegisteredUsers((prev) => {
-          const map = new Map<string, AppUser>();
-          INITIAL_USERS.filter(
-            (u) => !deletedKeys.has(u.email.trim().toLowerCase()) && !deletedKeys.has(u.id.trim().toLowerCase())
-          ).forEach((u) => map.set(u.email.trim().toLowerCase(), u));
-          prev.forEach((u) => {
-            const k = (u.email || '').trim().toLowerCase();
-            const idKey = (u.id || '').trim().toLowerCase();
-            const tgClean = (u.telegram || '').trim().toLowerCase().replace('@', '');
-            const tgIdKey = u.telegramId ? String(u.telegramId).trim().toLowerCase() : '';
-            if (
-              (k && !deletedKeys.has(k) && !deletedKeys.has(idKey)) &&
-              (!tgClean || !deletedKeys.has(tgClean)) &&
-              (!tgIdKey || !deletedKeys.has(tgIdKey))
-            ) {
-              map.set(k || idKey, u);
-            }
-          });
-          sqlUsers.forEach((u) => {
-            const k = (u.email || '').trim().toLowerCase();
-            const idKey = (u.id || '').trim().toLowerCase();
-            const tgClean = (u.telegram || '').trim().toLowerCase().replace('@', '');
-            const tgIdKey = u.telegramId ? String(u.telegramId).trim().toLowerCase() : '';
-            if (
-              deletedKeys.has(k) ||
-              deletedKeys.has(idKey) ||
-              (tgClean && deletedKeys.has(tgClean)) ||
-              (tgIdKey && deletedKeys.has(tgIdKey))
-            ) {
-              CloudSqlDbService.deleteUser(u.id).catch(console.warn);
-              return;
-            }
-            map.set(k || idKey, u);
-          });
-          return Array.from(map.values());
-        });
+        setRegisteredUsers((prev) => filterActiveEntities(mergeUsers(prev, sqlUsers)));
       }
     }).catch(console.warn);
 
     const unsubUsers = UsersSyncService.subscribeToUsers((cloudUsers) => {
-      const deletedKeys = getDeletedUserKeys();
-
       if (!cloudUsers || cloudUsers.length === 0) {
         if (!isBootstrappingUsers) {
           isBootstrappingUsers = true;
-          const seedMap = new Map<string, AppUser>();
-          INITIAL_USERS.filter(
-            (u) => !deletedKeys.has(u.email.trim().toLowerCase()) && !deletedKeys.has(u.id.trim().toLowerCase())
-          ).forEach((u) => seedMap.set(u.email.trim().toLowerCase(), u));
-          const allToSeed = Array.from(seedMap.values());
-          allToSeed.forEach((u) => {
-            UsersSyncService.saveUser(u).catch(console.error);
+          INITIAL_USERS.forEach((u) => {
+            CentralSyncManager.saveUser(u).catch(console.error);
           });
-          setRegisteredUsers(allToSeed);
+          setRegisteredUsers(INITIAL_USERS);
         }
       } else {
-        // Strict deduplication by normalized email or ID, omitting deleted accounts
-        const userMap = new Map<string, AppUser>();
-        const duplicateIdsToDelete: string[] = [];
-
-        // Merge cloud users, detect duplicates, and omit deleted users
-        cloudUsers.forEach((u) => {
-          const emailKey = (u.email || '').trim().toLowerCase();
-          const idKey = (u.id || '').trim().toLowerCase();
-          const tgClean = (u.telegram || '').trim().toLowerCase().replace('@', '');
-          const tgIdKey = u.telegramId ? String(u.telegramId).trim().toLowerCase() : '';
-
-          if (!emailKey && !idKey) return;
-
-          if (
-            deletedKeys.has(emailKey) ||
-            deletedKeys.has(idKey) ||
-            (tgClean && deletedKeys.has(tgClean)) ||
-            (tgIdKey && deletedKeys.has(tgIdKey))
-          ) {
-            // Delete lingering cloud documents for already deleted user
-            UsersSyncService.removeUser(u.id).catch(console.warn);
-            CloudSqlDbService.deleteUser(u.id).catch(console.warn);
-            return;
+        setRegisteredUsers((prev) => {
+          const merged = mergeUsers(prev, cloudUsers);
+          const active = filterActiveEntities(merged);
+          try {
+            localStorage.setItem('splav86_users', JSON.stringify(active));
+          } catch (e) {
+            console.error(e);
           }
-
-          const primaryKey = emailKey || idKey;
-
-          if (userMap.has(primaryKey)) {
-            const existing = userMap.get(primaryKey)!;
-            if (existing.id !== u.id) {
-              duplicateIdsToDelete.push(u.id);
-            }
-            // Respect whatever role was saved in DB
-            userMap.set(primaryKey, { ...existing, ...u });
-          } else {
-            userMap.set(primaryKey, u);
-          }
+          return active;
         });
-
-        // Purge duplicate documents
-        duplicateIdsToDelete.forEach((dupId) => {
-          if (dupId) {
-            UsersSyncService.removeUser(dupId).catch(console.warn);
-            CloudSqlDbService.deleteUser(dupId).catch(console.warn);
-          }
-        });
-
-        const uniqueUsers = Array.from(userMap.values());
-        setRegisteredUsers(uniqueUsers);
-        try {
-          localStorage.setItem('splav86_users', JSON.stringify(uniqueUsers));
-        } catch (e) {
-          console.error(e);
-        }
       }
     });
 
     // 4. Initial SQL fetch and Subscribe to Articles & Reports
     CloudSqlDbService.fetchArticles().then((sqlArticles) => {
       if (sqlArticles && sqlArticles.length > 0) {
-        const deleted = getDeletedArticleIds();
-        const activeArticles = sqlArticles.filter((a) => !deleted.has(a.id));
-        sqlArticles.forEach((a) => {
-          if (deleted.has(a.id)) {
-            CloudSqlDbService.deleteArticle(a.id).catch(console.warn);
-          }
-        });
-        setArticles(activeArticles);
+        setArticles((prev) => filterActiveEntities(mergeArticles(prev, sqlArticles)));
       }
     }).catch(console.warn);
 
     const unsubArticles = ArticlesSyncService.subscribeToArticles((cloudArticles) => {
-      const deleted = getDeletedArticleIds();
-      const articlesToSet = (cloudArticles || []).filter((a) => !deleted.has(a.id));
-      (cloudArticles || []).forEach((a) => {
-        if (deleted.has(a.id)) {
-          ArticlesSyncService.removeArticle(a.id).catch(console.warn);
-          CloudSqlDbService.deleteArticle(a.id).catch(console.warn);
+      setArticles((prev) => {
+        const merged = mergeArticles(prev, cloudArticles || []);
+        const active = filterActiveEntities(merged);
+        try {
+          localStorage.setItem('splav86_custom_articles', JSON.stringify(active));
+        } catch (e) {
+          console.error(e);
         }
+        return active;
       });
-      setArticles(articlesToSet);
-      try {
-        localStorage.setItem('splav86_custom_articles', JSON.stringify(articlesToSet));
-      } catch (e) {
-        console.error(e);
-      }
     });
 
     // 5. Initial SQL fetch and Subscribe to FAQ Configuration
@@ -677,7 +517,7 @@ export default function App() {
     const unsubFaq = FaqSyncService.subscribeToFaq((cloudFaq) => {
       if (cloudFaq) {
         setFaqData(cloudFaq);
-        CloudSqlDbService.saveFaq(cloudFaq).catch(console.warn);
+        CentralSyncManager.saveFaq(cloudFaq).catch(console.warn);
         try {
           localStorage.setItem('splav86_faq_data_v1', JSON.stringify(cloudFaq));
         } catch (e) {
@@ -697,7 +537,7 @@ export default function App() {
       if (cloudNotes) {
         setNotesConfig((prev) => {
           const merged = mergeTravelNotesConfigs(prev, cloudNotes);
-          CloudSqlDbService.saveTravelNotes(merged).catch(console.warn);
+          CentralSyncManager.saveTravelNotes(merged).catch(console.warn);
           try {
             localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(merged));
           } catch (e) {
@@ -708,79 +548,35 @@ export default function App() {
       }
     });
 
-    // Periodic and window-focus sync across all 7 modules
+    // Periodic and window-focus sync across all modules using CentralSyncManager and merge algorithms
     const handleSilentSync = () => {
       CloudSqlDbService.fetchTrips().then((sqlTrips) => {
         if (sqlTrips && sqlTrips.length > 0) {
-          setTrips(sqlTrips);
+          setTrips((prev) => filterActiveEntities(mergeTrips(prev, sqlTrips)));
         }
       }).catch(console.warn);
 
       CloudSqlDbService.fetchRoutes().then((sqlRoutes) => {
         if (sqlRoutes && sqlRoutes.length > 0) {
-          setRoutes(sqlRoutes);
+          setRoutes((prev) => filterActiveEntities(mergeRoutes(prev, sqlRoutes)));
         }
       }).catch(console.warn);
 
       CloudSqlDbService.fetchArticles().then((sqlArticles) => {
         if (sqlArticles && sqlArticles.length > 0) {
-          setArticles(sqlArticles);
+          setArticles((prev) => filterActiveEntities(mergeArticles(prev, sqlArticles)));
         }
       }).catch(console.warn);
 
       CloudSqlDbService.fetchUsers().then((sqlUsers) => {
         if (sqlUsers && sqlUsers.length > 0) {
-          const deletedKeys = getDeletedUserKeys();
-          setRegisteredUsers((prev) => {
-            const map = new Map<string, AppUser>();
-            INITIAL_USERS.filter(
-              (u) => !deletedKeys.has(u.email.trim().toLowerCase()) && !deletedKeys.has(u.id.trim().toLowerCase())
-            ).forEach((u) => map.set(u.email.trim().toLowerCase(), u));
-            prev.forEach((u) => {
-              const k = (u.email || '').trim().toLowerCase();
-              const idKey = (u.id || '').trim().toLowerCase();
-              const tgClean = (u.telegram || '').trim().toLowerCase().replace('@', '');
-              const tgIdKey = u.telegramId ? String(u.telegramId).trim().toLowerCase() : '';
-              if (
-                (k && !deletedKeys.has(k) && !deletedKeys.has(idKey)) &&
-                (!tgClean || !deletedKeys.has(tgClean)) &&
-                (!tgIdKey || !deletedKeys.has(tgIdKey))
-              ) {
-                map.set(k || idKey, u);
-              }
-            });
-            sqlUsers.forEach((u) => {
-              const k = (u.email || '').trim().toLowerCase();
-              const idKey = (u.id || '').trim().toLowerCase();
-              const tgClean = (u.telegram || '').trim().toLowerCase().replace('@', '');
-              const tgIdKey = u.telegramId ? String(u.telegramId).trim().toLowerCase() : '';
-              if (
-                deletedKeys.has(k) ||
-                deletedKeys.has(idKey) ||
-                (tgClean && deletedKeys.has(tgClean)) ||
-                (tgIdKey && deletedKeys.has(tgIdKey))
-              ) {
-                CloudSqlDbService.deleteUser(u.id).catch(console.warn);
-                return;
-              }
-              map.set(k || idKey, u);
-            });
-            return Array.from(map.values());
-          });
+          setRegisteredUsers((prev) => filterActiveEntities(mergeUsers(prev, sqlUsers)));
         }
       }).catch(console.warn);
 
       CloudSqlDbService.fetchTravelNotes().then((sqlNotes) => {
         if (sqlNotes) {
-          setNotesConfig((prev) => ({
-            ...prev,
-            id: sqlNotes.id || prev.id || 'default-notes',
-            notes: sqlNotes.notes?.length ? sqlNotes.notes : prev.notes,
-            checklist: sqlNotes.checklist?.length ? sqlNotes.checklist : prev.checklist,
-            logbookTrips: sqlNotes.logbookTrips?.length ? sqlNotes.logbookTrips : prev.logbookTrips,
-            riverReviews: sqlNotes.riverReviews?.length ? sqlNotes.riverReviews : prev.riverReviews,
-            crewReviews: sqlNotes.crewReviews?.length ? sqlNotes.crewReviews : prev.crewReviews
-          }));
+          setNotesConfig((prev) => mergeTravelNotesConfigs(prev, sqlNotes));
         }
       }).catch(console.warn);
 
@@ -860,61 +656,64 @@ export default function App() {
   }, [faqData]);
 
   const handleRegisterUser = (newUser: AppUser) => {
-    const normEmail = (newUser.email || '').trim().toLowerCase();
+    const userWithMeta: AppUser = {
+      ...newUser,
+      isDeleted: false,
+      updatedAt: new Date().toISOString()
+    };
+    const normEmail = (userWithMeta.email || '').trim().toLowerCase();
     setRegisteredUsers((prev) => {
       const existsIndex = prev.findIndex(
-        (u) => u.id === newUser.id || (normEmail && (u.email || '').trim().toLowerCase() === normEmail)
+        (u) => u.id === userWithMeta.id || (normEmail && (u.email || '').trim().toLowerCase() === normEmail)
       );
       let updated: AppUser[];
       if (existsIndex >= 0) {
         updated = [...prev];
-        updated[existsIndex] = { ...updated[existsIndex], ...newUser };
+        updated[existsIndex] = { ...updated[existsIndex], ...userWithMeta };
       } else {
-        updated = [newUser, ...prev];
+        updated = [userWithMeta, ...prev];
       }
       try {
-        localStorage.setItem('splav86_users', JSON.stringify(updated));
+        localStorage.setItem('splav86_users', JSON.stringify(filterActiveEntities(updated)));
       } catch (e) {}
-      return updated;
+      return filterActiveEntities(updated);
     });
-    UsersSyncService.saveUser(newUser).catch((err) => {
-      console.warn('Failed to sync new user to Firestore:', err);
-    });
-    CloudSqlDbService.saveUser(newUser).catch((err) => {
-      console.warn('Failed to sync new user to CloudSQL:', err);
+
+    CentralSyncManager.saveUser(userWithMeta).catch((err) => {
+      console.warn('CentralSyncManager saveUser error:', err);
     });
   };
 
   const handleUpdateUserRole = (userId: string, newRole: UserRole) => {
-    let updatedList: AppUser[] = [];
     setRegisteredUsers((prev) => {
       const target = prev.find((u) => u.id === userId);
       const targetEmail = target?.email?.trim().toLowerCase();
 
       const updated = prev.map((u) => {
         if (u.id === userId || (targetEmail && u.email?.trim().toLowerCase() === targetEmail)) {
-          const userWithRole = { ...u, role: newRole };
-          UsersSyncService.saveUser(userWithRole).catch((err) => {
-            console.warn('Failed to sync user role to Firestore:', err);
-          });
-          CloudSqlDbService.saveUser(userWithRole).catch((err) => {
-            console.warn('Failed to sync user role to CloudSQL:', err);
+          const userWithRole: AppUser = {
+            ...u,
+            role: newRole,
+            isDeleted: false,
+            updatedAt: new Date().toISOString()
+          };
+          CentralSyncManager.saveUser(userWithRole).catch((err) => {
+            console.warn('CentralSyncManager saveUser role error:', err);
           });
           return userWithRole;
         }
         return u;
       });
-      updatedList = updated;
       try {
-        localStorage.setItem('splav86_users', JSON.stringify(updated));
+        localStorage.setItem('splav86_users', JSON.stringify(filterActiveEntities(updated)));
       } catch (e) {
         console.warn(e);
       }
-      return updated;
+      return filterActiveEntities(updated);
     });
 
     if (currentUser && (currentUser.id === userId || (currentUser.email && registeredUsers.find(u => u.id === userId)?.email?.toLowerCase() === currentUser.email.toLowerCase()))) {
-      const updatedCurr = { ...currentUser, role: newRole };
+      const updatedCurr: AppUser = { ...currentUser, role: newRole, isDeleted: false, updatedAt: new Date().toISOString() };
       setCurrentUser(updatedCurr);
       try {
         localStorage.setItem('splav86_current_user', JSON.stringify(updatedCurr));
@@ -930,6 +729,22 @@ export default function App() {
 
     recordUserDeletion(userId, targetEmail, targetUser?.telegram, targetUser?.telegramId);
 
+    const deletedUser: AppUser = targetUser ? {
+      ...targetUser,
+      isDeleted: true,
+      updatedAt: new Date().toISOString()
+    } : {
+      id: userId,
+      email: targetEmail || '',
+      name: 'Удаленный пользователь',
+      phone: '',
+      role: 'user',
+      registeredAt: new Date().toISOString(),
+      favoriteRouteIds: [],
+      isDeleted: true,
+      updatedAt: new Date().toISOString()
+    };
+
     const updated = registeredUsers.filter(
       (u) => u.id !== userId && (!targetEmail || (u.email || '').trim().toLowerCase() !== targetEmail)
     );
@@ -941,14 +756,10 @@ export default function App() {
       console.warn('Failed to save updated users to localStorage:', e);
     }
 
-    // Remove from Firestore & CloudSQL
-    UsersSyncService.removeUser(userId).catch(console.warn);
+    // Queue centralized delete
+    CentralSyncManager.deleteUser(userId, deletedUser).catch(console.warn);
     if (targetUser && targetUser.id !== userId) {
-      UsersSyncService.removeUser(targetUser.id).catch(console.warn);
-    }
-    CloudSqlDbService.deleteUser(userId).catch(console.warn);
-    if (targetUser && targetUser.id !== userId) {
-      CloudSqlDbService.deleteUser(targetUser.id).catch(console.warn);
+      CentralSyncManager.deleteUser(targetUser.id, { ...deletedUser, id: targetUser.id }).catch(console.warn);
     }
 
     // If current user is the deleted user, log out
@@ -965,15 +776,20 @@ export default function App() {
   };
 
   const handleUpdateCurrentUser = (updatedUser: AppUser) => {
-    setCurrentUser(updatedUser);
+    const userWithMeta: AppUser = {
+      ...updatedUser,
+      isDeleted: false,
+      updatedAt: new Date().toISOString()
+    };
+    setCurrentUser(userWithMeta);
 
     // 1. Update in registeredUsers list (by ID and normalized Email)
-    const normEmail = (updatedUser.email || '').trim().toLowerCase();
+    const normEmail = (userWithMeta.email || '').trim().toLowerCase();
     setRegisteredUsers((prev) =>
       prev.map((u) => {
         const uEmail = (u.email || '').trim().toLowerCase();
-        if (u.id === updatedUser.id || (normEmail && uEmail === normEmail)) {
-          return { ...u, ...updatedUser };
+        if (u.id === userWithMeta.id || (normEmail && uEmail === normEmail)) {
+          return { ...u, ...userWithMeta };
         }
         return u;
       })
@@ -987,13 +803,13 @@ export default function App() {
         let nextOrg = t.organizer;
         const orgUserId = t.organizer.userId;
 
-        if (orgUserId === updatedUser.id || (updatedUser.name && t.organizer.name === updatedUser.name)) {
+        if (orgUserId === userWithMeta.id || (userWithMeta.name && t.organizer.name === userWithMeta.name)) {
           nextOrg = {
             ...t.organizer,
-            name: updatedUser.name || t.organizer.name,
-            avatar: updatedUser.avatar || t.organizer.avatar,
-            phone: updatedUser.phone || t.organizer.phone,
-            fstrRank: updatedUser.fstrRank || t.organizer.fstrRank
+            name: userWithMeta.name || t.organizer.name,
+            avatar: userWithMeta.avatar || t.organizer.avatar,
+            phone: userWithMeta.phone || t.organizer.phone,
+            fstrRank: userWithMeta.fstrRank || t.organizer.fstrRank
           };
           tripModified = true;
         }
@@ -1004,13 +820,13 @@ export default function App() {
           nextApps = t.applications.map((app) => {
             const appEmail = (app.applicantEmail || '').trim().toLowerCase();
             const appUid = app.userId || app.applicantUserId;
-            if (appUid === updatedUser.id || (normEmail && appEmail === normEmail)) {
+            if (appUid === userWithMeta.id || (normEmail && appEmail === normEmail)) {
               tripModified = true;
               return {
                 ...app,
-                applicantName: updatedUser.name || app.applicantName,
-                applicantAvatar: updatedUser.avatar || app.applicantAvatar,
-                applicantPhone: updatedUser.phone || app.applicantPhone
+                applicantName: userWithMeta.name || app.applicantName,
+                applicantAvatar: userWithMeta.avatar || app.applicantAvatar,
+                applicantPhone: userWithMeta.phone || app.applicantPhone
               };
             }
             return app;
@@ -1019,8 +835,14 @@ export default function App() {
 
         if (tripModified) {
           changed = true;
-          const updatedTrip = { ...t, organizer: nextOrg, applications: nextApps };
-          TripsSyncService.saveTrip(updatedTrip).catch(console.warn);
+          const updatedTrip: CompanionTrip = {
+            ...t,
+            organizer: nextOrg,
+            applications: nextApps,
+            isDeleted: false,
+            updatedAt: new Date().toISOString()
+          };
+          CentralSyncManager.saveTrip(updatedTrip).catch(console.warn);
           return updatedTrip;
         }
         return t;
@@ -1028,26 +850,28 @@ export default function App() {
 
       if (changed) {
         try {
-          localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(nextTrips));
+          localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(filterActiveEntities(nextTrips)));
         } catch (e) {
           console.warn(e);
         }
       }
-      return nextTrips;
+      return filterActiveEntities(nextTrips);
     });
 
     // 3. Cascade avatar and name to articles
     setArticles((prevArticles) => {
       let changed = false;
       const nextArticles = prevArticles.map((art) => {
-        if (art.authorId === updatedUser.id || art.author === updatedUser.name) {
+        if (art.authorId === userWithMeta.id || art.author === userWithMeta.name) {
           changed = true;
-          const updatedArt = {
+          const updatedArt: ArticleReport = {
             ...art,
-            author: updatedUser.name || art.author,
-            authorAvatar: updatedUser.avatar || art.authorAvatar
+            author: userWithMeta.name || art.author,
+            authorAvatar: userWithMeta.avatar || art.authorAvatar,
+            isDeleted: false,
+            updatedAt: new Date().toISOString()
           };
-          ArticlesSyncService.saveArticle(updatedArt).catch(console.warn);
+          CentralSyncManager.saveArticle(updatedArt).catch(console.warn);
           return updatedArt;
         }
         return art;
@@ -1055,33 +879,30 @@ export default function App() {
 
       if (changed) {
         try {
-          localStorage.setItem('splav86_custom_articles', JSON.stringify(nextArticles));
+          localStorage.setItem('splav86_custom_articles', JSON.stringify(filterActiveEntities(nextArticles)));
         } catch (e) {
           console.warn(e);
         }
       }
-      return nextArticles;
+      return filterActiveEntities(nextArticles);
     });
 
-    // 4. Save user to Firestore & CloudSQL
-    UsersSyncService.saveUser(updatedUser).catch((err) => {
-      console.warn('Failed to sync current user update to Firestore:', err);
-    });
-    CloudSqlDbService.saveUser(updatedUser).catch((err) => {
-      console.warn('Failed to sync current user update to CloudSQL:', err);
+    // 4. Save user via CentralSyncManager
+    CentralSyncManager.saveUser(userWithMeta).catch((err) => {
+      console.warn('CentralSyncManager saveUser error:', err);
     });
 
     // 5. Persist to localStorage
     try {
-      localStorage.setItem('splav86_current_user', JSON.stringify(updatedUser));
+      localStorage.setItem('splav86_current_user', JSON.stringify(userWithMeta));
       const allUsers = registeredUsers.map((u) => {
         const uEmail = (u.email || '').trim().toLowerCase();
-        if (u.id === updatedUser.id || (normEmail && uEmail === normEmail)) {
-          return { ...u, ...updatedUser };
+        if (u.id === userWithMeta.id || (normEmail && uEmail === normEmail)) {
+          return { ...u, ...userWithMeta };
         }
         return u;
       });
-      localStorage.setItem('splav86_users', JSON.stringify(allUsers));
+      localStorage.setItem('splav86_users', JSON.stringify(filterActiveEntities(allUsers)));
     } catch (err) {
       console.error(err);
     }
@@ -1106,26 +927,28 @@ export default function App() {
   };
 
   const handleClearAllUserCards = () => {
+    const timestamp = new Date().toISOString();
     setRegisteredUsers((prev) => {
-      const cleaned = prev.map((u) => ({
-        ...u,
-        phone: '',
-        vesselsOwned: [],
-        gearInventory: [],
-        favoriteRivers: [],
-        favoriteRouteIds: [],
-        badges: [],
-        bio: '',
-        callsign: '',
-        fstrRank: '',
-        telegram: '',
-        vk: '',
-        isReadyForExpeditions: true,
-        showContactsPublicly: true
-      }));
-      cleaned.forEach((u) => {
-        UsersSyncService.saveUser(u).catch(console.warn);
-        CloudSqlDbService.saveUser(u).catch(console.warn);
+      const cleaned = prev.map((u) => {
+        const item: AppUser = {
+          ...u,
+          phone: '',
+          vesselsOwned: [],
+          gearInventory: [],
+          favoriteRivers: [],
+          favoriteRouteIds: [],
+          badges: [],
+          bio: '',
+          callsign: '',
+          fstrRank: '',
+          telegram: '',
+          vk: '',
+          isReadyForExpeditions: true,
+          showContactsPublicly: true,
+          updatedAt: timestamp
+        };
+        CentralSyncManager.saveUser(item).catch(console.warn);
+        return item;
       });
       localStorage.setItem('splav86_users', JSON.stringify(cleaned));
       return cleaned;
@@ -1146,21 +969,21 @@ export default function App() {
         telegram: '',
         vk: '',
         isReadyForExpeditions: true,
-        showContactsPublicly: true
+        showContactsPublicly: true,
+        updatedAt: timestamp
       };
       setCurrentUser(updatedCurrent);
       localStorage.setItem('splav86_current_user', JSON.stringify(updatedCurrent));
-      UsersSyncService.saveUser(updatedCurrent).catch(console.warn);
-      CloudSqlDbService.saveUser(updatedCurrent).catch(console.warn);
+      CentralSyncManager.saveUser(updatedCurrent).catch(console.warn);
     }
 
     const cleanedNotes: TravelNotesConfig = {
       ...notesConfig,
-      crewReviews: []
+      crewReviews: [],
+      updatedAt: timestamp
     };
     setNotesConfig(cleanedNotes);
-    TravelNotesSyncService.saveNotesConfig(cleanedNotes).catch(console.warn);
-    CloudSqlDbService.saveTravelNotes(cleanedNotes).catch(console.warn);
+    CentralSyncManager.saveTravelNotes(cleanedNotes).catch(console.warn);
   };
 
   const handleResetToDefaults = async () => {
@@ -1175,42 +998,37 @@ export default function App() {
     localStorage.removeItem('splav86_river_reviews_v2');
     localStorage.removeItem('splav86_crew_reviews_v2');
 
-    // Wipe routes from cloud
+    const timestamp = new Date().toISOString();
+
+    // Wipe routes
     routes.forEach((r) => {
       recordRouteDeletion(r.id);
-      RoutesSyncService.removeRoute(r.id).catch(console.warn);
-      CloudSqlDbService.deleteRoute(r.id).catch(console.warn);
+      CentralSyncManager.deleteRoute(r.id, { ...r, isDeleted: true, updatedAt: timestamp }).catch(console.warn);
     });
     setRoutes([]);
-    CloudSqlDbService.saveRoutes([]).catch(console.warn);
 
-    // Wipe articles from cloud
+    // Wipe articles
     articles.forEach((a) => {
       recordArticleDeletion(a.id);
-      ArticlesSyncService.removeArticle(a.id).catch(console.warn);
-      CloudSqlDbService.deleteArticle(a.id).catch(console.warn);
+      CentralSyncManager.deleteArticle(a.id, { ...a, isDeleted: true, updatedAt: timestamp }).catch(console.warn);
     });
     setArticles([]);
-    CloudSqlDbService.saveArticles([]).catch(console.warn);
 
-    // Wipe trips from cloud
+    // Wipe trips
     trips.forEach((t) => {
       recordTripDeletion(t.id);
-      TripsSyncService.removeTrip(t.id).catch(console.warn);
-      CloudSqlDbService.deleteTrip(t.id).catch(console.warn);
+      CentralSyncManager.deleteTrip(t.id, { ...t, isDeleted: true, updatedAt: timestamp }).catch(console.warn);
     });
     setTrips([]);
-    CloudSqlDbService.saveTrips([]).catch(console.warn);
 
     // Reset notes
-    setNotesConfig(INITIAL_TRAVEL_NOTES_CONFIG);
-    TravelNotesSyncService.saveNotesConfig(INITIAL_TRAVEL_NOTES_CONFIG).catch(console.warn);
-    CloudSqlDbService.saveTravelNotes(INITIAL_TRAVEL_NOTES_CONFIG).catch(console.warn);
+    const freshNotes = { ...INITIAL_TRAVEL_NOTES_CONFIG, updatedAt: timestamp };
+    setNotesConfig(freshNotes);
+    CentralSyncManager.saveTravelNotes(freshNotes).catch(console.warn);
 
     // Reset FAQ
     setFaqData(INITIAL_FAQ_DATA);
-    FaqSyncService.saveFaq(INITIAL_FAQ_DATA).catch(console.warn);
-    CloudSqlDbService.saveFaq(INITIAL_FAQ_DATA).catch(console.warn);
+    CentralSyncManager.saveFaq(INITIAL_FAQ_DATA).catch(console.warn);
 
     handleClearAllUserCards();
   };
@@ -1263,31 +1081,33 @@ export default function App() {
   const handleSavePassport = (savedRoute: RiverRoute) => {
     if (!isAdmin && !(currentUser && (!savedRoute.authorId || savedRoute.authorId === currentUser.id))) return;
     
-    // Ensure author attribution if user is logged in and not set
+    // Ensure author attribution and metadata
     const preparedRoute: RiverRoute = {
       ...savedRoute,
       authorId: savedRoute.authorId || currentUser?.id,
       authorName: savedRoute.authorName || currentUser?.name,
       authorEmail: savedRoute.authorEmail || currentUser?.email,
-      isPersonal: savedRoute.isPersonal ?? true
+      isPersonal: savedRoute.isPersonal ?? true,
+      isDeleted: false,
+      updatedAt: new Date().toISOString()
     };
 
     setRoutes((prev) => {
       const exists = prev.some((r) => r.id === preparedRoute.id);
       const updated = exists ? prev.map((r) => (r.id === preparedRoute.id ? preparedRoute : r)) : [preparedRoute, ...prev];
+      const active = filterActiveEntities(updated);
       try {
-        localStorage.setItem('splav86_custom_routes_v5', JSON.stringify(updated));
+        localStorage.setItem('splav86_custom_routes_v5', JSON.stringify(active));
       } catch (e) {
         console.error(e);
       }
-      return updated;
+      return active;
     });
 
-    // Sync to Firestore Cloud DB and CloudSQL
-    RoutesSyncService.saveRoute(preparedRoute).catch((err) => {
-      console.warn('Failed to sync route to Firestore:', err);
+    // Centralized Sync
+    CentralSyncManager.saveRoute(preparedRoute).catch((err) => {
+      console.warn('CentralSyncManager saveRoute error:', err);
     });
-    CloudSqlDbService.saveRoute(preparedRoute).catch(console.warn);
 
     if (selectedRoute?.id === preparedRoute.id) {
       setSelectedRoute(preparedRoute);
@@ -1299,6 +1119,41 @@ export default function App() {
 
   const handleDeleteRoute = (routeId: string) => {
     recordRouteDeletion(routeId);
+    const targetRoute = routes.find((r) => r.id === routeId);
+    const softDeletedRoute: RiverRoute = targetRoute ? {
+      ...targetRoute,
+      isDeleted: true,
+      updatedAt: new Date().toISOString()
+    } : {
+      id: routeId,
+      name: 'Удаленный маршрут',
+      riverName: '',
+      region: 'ХМАО',
+      lengthKm: 0,
+      durationDays: 1,
+      fstrCategory: 'н/к',
+      intlClass: 'Class I',
+      recommendedVessels: ['kayak'],
+      startPoint: { name: '', lat: 0, lng: 0 },
+      endPoint: { name: '', lat: 0, lng: 0 },
+      coordinates: [],
+      elevationGainM: 0,
+      elevationProfile: [],
+      gpxFileName: '',
+      avgFlowSpeedKmh: 0,
+      seasonMonths: '',
+      shortDesc: '',
+      description: '',
+      highlights: [],
+      warnings: [],
+      mchsRegistrationRequired: false,
+      kmnsPermitNeeded: false,
+      coverImage: '',
+      pois: [],
+      isDeleted: true,
+      updatedAt: new Date().toISOString()
+    };
+
     setRoutes((prev) => {
       const updated = prev.filter((r) => r.id !== routeId);
       try {
@@ -1309,10 +1164,9 @@ export default function App() {
       return updated;
     });
 
-    RoutesSyncService.removeRoute(routeId).catch((err) => {
-      console.warn('Failed to delete route from Firestore:', err);
+    CentralSyncManager.deleteRoute(routeId, softDeletedRoute).catch((err) => {
+      console.warn('CentralSyncManager deleteRoute error:', err);
     });
-    CloudSqlDbService.deleteRoute(routeId).catch(console.warn);
 
     if (selectedRoute?.id === routeId) setSelectedRoute(null);
     if (detailModalRoute?.id === routeId) setDetailModalRoute(null);
@@ -1339,45 +1193,90 @@ export default function App() {
   };
 
   const handleCreateNewTrip = (newTrip: CompanionTrip) => {
+    const tripWithMeta: CompanionTrip = {
+      ...newTrip,
+      isDeleted: false,
+      updatedAt: new Date().toISOString()
+    };
     setTrips((prev) => {
-      const updated = [newTrip, ...prev.filter(t => t.id !== newTrip.id)];
+      const updated = [tripWithMeta, ...prev.filter(t => t.id !== tripWithMeta.id)];
+      const active = filterActiveEntities(updated);
       try {
-        localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(updated));
+        localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(active));
       } catch (e) {
         console.error(e);
       }
-      CloudSqlDbService.saveTrips(updated).catch(console.warn);
-      return updated;
+      return active;
     });
-    TripsSyncService.saveTrip(newTrip).catch((err) => {
-      console.warn('Failed to sync new trip to Firestore:', err);
-    });
-    CloudSqlDbService.saveTrip(newTrip).catch((err) => {
-      console.warn('Failed to sync new trip to CloudSQL API:', err);
+
+    CentralSyncManager.saveTrip(tripWithMeta).catch((err) => {
+      console.warn('CentralSyncManager saveTrip error:', err);
     });
   };
 
   const handleUpdateTrip = (updatedTrip: CompanionTrip) => {
+    const tripWithMeta: CompanionTrip = {
+      ...updatedTrip,
+      isDeleted: false,
+      updatedAt: new Date().toISOString()
+    };
     setTrips((prev) => {
-      const updated = prev.map((t) => (t.id === updatedTrip.id ? updatedTrip : t));
+      const updated = prev.map((t) => (t.id === tripWithMeta.id ? tripWithMeta : t));
+      const active = filterActiveEntities(updated);
       try {
-        localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(updated));
+        localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(active));
       } catch (e) {
         console.error(e);
       }
-      CloudSqlDbService.saveTrips(updated).catch(console.warn);
-      return updated;
+      return active;
     });
-    TripsSyncService.saveTrip(updatedTrip).catch((err) => {
-      console.warn('Failed to sync updated trip to Firestore:', err);
-    });
-    CloudSqlDbService.saveTrip(updatedTrip).catch((err) => {
-      console.warn('Failed to sync updated trip to CloudSQL API:', err);
+
+    CentralSyncManager.saveTrip(tripWithMeta).catch((err) => {
+      console.warn('CentralSyncManager updateTrip error:', err);
     });
   };
 
   const handleDeleteTrip = (tripId: string) => {
     recordTripDeletion(tripId);
+    const targetTrip = trips.find((t) => t.id === tripId);
+    const softDeletedTrip: CompanionTrip = targetTrip ? {
+      ...targetTrip,
+      isDeleted: true,
+      updatedAt: new Date().toISOString()
+    } : {
+      id: tripId,
+      title: 'Удаленный поход',
+      riverName: '',
+      region: 'ХМАО',
+      startDate: '',
+      endDate: '',
+      durationDays: 1,
+      vessels: ['kayak'],
+      fstrCategory: 'н/к',
+      totalSeats: 1,
+      bookedSeats: 0,
+      requiredExperience: 'Начинающий (0-1 сплав)',
+      organizer: {
+        userId: '',
+        name: 'Организатор',
+        avatar: '',
+        experienceYears: 0,
+        completedTrips: 0,
+        fstrRank: '',
+        phone: '',
+        telegram: ''
+      },
+      gearProvided: [],
+      requiredPersonalGear: [],
+      estimatedCostPerPersonRub: 0,
+      participants: [],
+      commentsCount: 0,
+      description: '',
+      status: 'completed',
+      isDeleted: true,
+      updatedAt: new Date().toISOString()
+    };
+
     setTrips((prev) => {
       const updated = prev.filter((t) => t.id !== tripId);
       try {
@@ -1387,12 +1286,39 @@ export default function App() {
       }
       return updated;
     });
-    TripsSyncService.removeTrip(tripId).catch(console.warn);
-    CloudSqlDbService.deleteTrip(tripId).catch(console.warn);
+
+    CentralSyncManager.deleteTrip(tripId, softDeletedTrip).catch((err) => {
+      console.warn('CentralSyncManager deleteTrip error:', err);
+    });
   };
 
   const handleDeleteArticle = (articleId: string) => {
     recordArticleDeletion(articleId);
+    const targetArticle = articles.find((a) => a.id === articleId);
+    const softDeletedArticle: ArticleReport = targetArticle ? {
+      ...targetArticle,
+      isDeleted: true,
+      updatedAt: new Date().toISOString()
+    } : {
+      id: articleId,
+      title: 'Удаленная статья',
+      subtitle: '',
+      author: 'Автор',
+      authorRank: '',
+      riverName: '',
+      region: 'ХМАО',
+      date: '',
+      readTimeMin: 1,
+      coverImage: '',
+      tags: [],
+      summary: '',
+      fullContent: [],
+      stats: { distanceKm: 0, days: 0, vessel: '', bestMonth: '' },
+      gallery: [],
+      isDeleted: true,
+      updatedAt: new Date().toISOString()
+    };
+
     setArticles((prev) => {
       const updated = prev.filter((a) => a.id !== articleId);
       try {
@@ -1402,8 +1328,10 @@ export default function App() {
       }
       return updated;
     });
-    ArticlesSyncService.removeArticle(articleId).catch(console.warn);
-    CloudSqlDbService.deleteArticle(articleId).catch(console.warn);
+
+    CentralSyncManager.deleteArticle(articleId, softDeletedArticle).catch((err) => {
+      console.warn('CentralSyncManager deleteArticle error:', err);
+    });
   };
 
   const handleViewTripOnMainMap = (trip: CompanionTrip) => {

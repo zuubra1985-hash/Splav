@@ -55,6 +55,7 @@ import {
   Star,
   ExternalLink,
   HelpCircle,
+  RotateCcw,
   X
 } from 'lucide-react';
 import { CloudSqlDbService } from '../services/cloudSqlDb';
@@ -66,6 +67,8 @@ import {
   FaqSyncService, 
   TravelNotesSyncService 
 } from '../firebase';
+import { CentralSyncManager } from '../services/centralSyncManager';
+import { filterActiveEntities, filterDeletedEntities } from '../utils/syncMerge';
 
 interface AdminPanelModuleProps {
   currentUser: AppUser | null;
@@ -112,7 +115,7 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   onOpenPassportEditor
 }) => {
   const [adminTab, setAdminTab] = useState<
-    'dashboard' | 'routes' | 'trips' | 'articles' | 'travel_notes' | 'faq_safety' | 'users' | 'database'
+    'dashboard' | 'routes' | 'trips' | 'articles' | 'travel_notes' | 'faq_safety' | 'users' | 'recycle_bin' | 'database'
   >('dashboard');
   
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -120,6 +123,26 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   const [regionFilter, setRegionFilter] = useState<'all' | 'ХМАО' | 'ЯНАО'>('all');
   const [isSyncingAll, setIsSyncingAll] = useState<boolean>(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState<string>('');
+
+  // Deleted entities computed for Recycle Bin
+  const deletedRoutes = useMemo(() => filterDeletedEntities(routes), [routes]);
+  const deletedTrips = useMemo(() => filterDeletedEntities(trips), [trips]);
+  const deletedArticles = useMemo(() => filterDeletedEntities(articles), [articles]);
+  const deletedNotes = useMemo(() => filterDeletedEntities(notesConfig.notes || []), [notesConfig.notes]);
+  const deletedChecklist = useMemo(() => filterDeletedEntities(notesConfig.checklist || []), [notesConfig.checklist]);
+  const deletedRiverReviews = useMemo(() => filterDeletedEntities(notesConfig.riverReviews || []), [notesConfig.riverReviews]);
+  const deletedCrewReviews = useMemo(() => filterDeletedEntities(notesConfig.crewReviews || []), [notesConfig.crewReviews]);
+  const deletedUsers = useMemo(() => filterDeletedEntities(registeredUsers), [registeredUsers]);
+
+  const totalDeletedCount = 
+    deletedRoutes.length + 
+    deletedTrips.length + 
+    deletedArticles.length + 
+    deletedNotes.length + 
+    deletedChecklist.length + 
+    deletedRiverReviews.length + 
+    deletedCrewReviews.length + 
+    deletedUsers.length;
 
   // Editing Modals State
   const [editingArticle, setEditingArticle] = useState<Article | null>(null);
@@ -508,8 +531,10 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   // TRAVEL NOTES & REVIEWS MODERATION
   // ==========================================
   const handleDeleteTravelNote = (noteId: string) => {
-    if (!window.confirm('Удалить эту заметку/отчет?')) return;
-    const updatedNotes = (notesConfig.notes || []).filter(n => n.id !== noteId);
+    if (!window.confirm('Переместить эту заметку/отчет в корзину?')) return;
+    const updatedNotes = (notesConfig.notes || []).map(n => 
+      n.id === noteId ? { ...n, isDeleted: true, updatedAt: new Date().toISOString() } : n
+    );
     const newConfig: TravelNotesConfig = {
       ...notesConfig,
       notes: updatedNotes,
@@ -519,13 +544,14 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
     try {
       localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
     } catch (e) {}
-    TravelNotesSyncService.saveNotesConfig(newConfig).catch(console.warn);
-    CloudSqlDbService.saveTravelNotes(newConfig).catch(console.warn);
+    CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
   };
 
   const handleDeleteCrewReview = (reviewId: string) => {
-    if (!window.confirm('Удалить этот отзыв экипажа?')) return;
-    const updatedReviews = (notesConfig.crewReviews || []).filter(r => r.id !== reviewId);
+    if (!window.confirm('Переместить этот отзыв экипажа в корзину?')) return;
+    const updatedReviews = (notesConfig.crewReviews || []).map(r => 
+      r.id === reviewId ? { ...r, isDeleted: true, updatedAt: new Date().toISOString() } : r
+    );
     const newConfig: TravelNotesConfig = {
       ...notesConfig,
       crewReviews: updatedReviews,
@@ -535,8 +561,159 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
     try {
       localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
     } catch (e) {}
-    TravelNotesSyncService.saveNotesConfig(newConfig).catch(console.warn);
-    CloudSqlDbService.saveTravelNotes(newConfig).catch(console.warn);
+    CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+  };
+
+  // ==========================================
+  // RECYCLE BIN RESTORE & PURGE HANDLERS
+  // ==========================================
+  const handleRestoreRoute = (routeId: string) => {
+    const target = routes.find(r => r.id === routeId);
+    if (!target) return;
+    const restored: RiverRoute = {
+      ...target,
+      isDeleted: false,
+      updatedAt: new Date().toISOString()
+    };
+    const updated = routes.map(r => r.id === routeId ? restored : r);
+    if (typeof onUpdateRoutes === 'function') onUpdateRoutes(updated as any);
+    CentralSyncManager.saveRoute(restored).catch(console.warn);
+    setSyncStatusMsg(`Маршрут "${restored.name}" успешно восстановлен`);
+    setTimeout(() => setSyncStatusMsg(''), 3000);
+  };
+
+  const handlePermanentDeleteRoute = (routeId: string) => {
+    if (!window.confirm('Удалить маршрут НАВСЕГДА без возможности восстановления?')) return;
+    const updated = routes.filter(r => r.id !== routeId);
+    if (typeof onUpdateRoutes === 'function') onUpdateRoutes(updated as any);
+    RoutesSyncService.removeRoute(routeId).catch(console.warn);
+    CloudSqlDbService.deleteRoute(routeId).catch(console.warn);
+    setSyncStatusMsg('Маршрут окончательно удален из базы');
+    setTimeout(() => setSyncStatusMsg(''), 3000);
+  };
+
+  const handleRestoreTrip = (tripId: string) => {
+    const target = trips.find(t => t.id === tripId);
+    if (!target) return;
+    const restored: CompanionTrip = {
+      ...target,
+      isDeleted: false,
+      updatedAt: new Date().toISOString()
+    };
+    const updated = trips.map(t => t.id === tripId ? restored : t);
+    if (typeof onUpdateTrips === 'function') onUpdateTrips(updated as any);
+    CentralSyncManager.saveTrip(restored).catch(console.warn);
+    setSyncStatusMsg(`Сплав "${restored.title}" успешно восстановлен`);
+    setTimeout(() => setSyncStatusMsg(''), 3000);
+  };
+
+  const handlePermanentDeleteTrip = (tripId: string) => {
+    if (!window.confirm('Удалить сплав НАВСЕГДА без возможности восстановления?')) return;
+    const updated = trips.filter(t => t.id !== tripId);
+    if (typeof onUpdateTrips === 'function') onUpdateTrips(updated as any);
+    TripsSyncService.removeTrip(tripId).catch(console.warn);
+    CloudSqlDbService.deleteTrip(tripId).catch(console.warn);
+    setSyncStatusMsg('Сплав окончательно удален из базы');
+    setTimeout(() => setSyncStatusMsg(''), 3000);
+  };
+
+  const handleRestoreArticle = (articleId: string) => {
+    const target = articles.find(a => a.id === articleId);
+    if (!target) return;
+    const restored: Article = {
+      ...target,
+      isDeleted: false,
+      updatedAt: new Date().toISOString()
+    };
+    const updated = articles.map(a => a.id === articleId ? restored : a);
+    if (typeof onUpdateArticles === 'function') onUpdateArticles(updated as any);
+    CentralSyncManager.saveArticle(restored).catch(console.warn);
+    setSyncStatusMsg(`Статья "${restored.title}" успешно восстановлена`);
+    setTimeout(() => setSyncStatusMsg(''), 3000);
+  };
+
+  const handlePermanentDeleteArticle = (articleId: string) => {
+    if (!window.confirm('Удалить статью НАВСЕГДА?')) return;
+    const updated = articles.filter(a => a.id !== articleId);
+    if (typeof onUpdateArticles === 'function') onUpdateArticles(updated as any);
+    ArticlesSyncService.removeArticle(articleId).catch(console.warn);
+    CloudSqlDbService.deleteArticle(articleId).catch(console.warn);
+    setSyncStatusMsg('Статья окончательно удалена');
+    setTimeout(() => setSyncStatusMsg(''), 3000);
+  };
+
+  const handleRestoreUser = (userId: string) => {
+    const target = registeredUsers.find(u => u.id === userId);
+    if (!target) return;
+    const restored: AppUser = {
+      ...target,
+      isDeleted: false,
+      updatedAt: new Date().toISOString()
+    };
+    onUpdateUserRole(userId, target.role || 'user');
+    CentralSyncManager.saveUser(restored).catch(console.warn);
+    setSyncStatusMsg(`Пользователь "${restored.name}" успешно восстановлен`);
+    setTimeout(() => setSyncStatusMsg(''), 3000);
+  };
+
+  const handleRestoreTravelNote = (noteId: string) => {
+    const updatedNotes = (notesConfig.notes || []).map(n => 
+      n.id === noteId ? { ...n, isDeleted: false, updatedAt: new Date().toISOString() } : n
+    );
+    const newConfig: TravelNotesConfig = {
+      ...notesConfig,
+      notes: updatedNotes,
+      updatedAt: new Date().toISOString()
+    };
+    if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
+    CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+    setSyncStatusMsg('Заметка восстановлена');
+    setTimeout(() => setSyncStatusMsg(''), 3000);
+  };
+
+  const handleRestoreCrewReview = (reviewId: string) => {
+    const updatedReviews = (notesConfig.crewReviews || []).map(r => 
+      r.id === reviewId ? { ...r, isDeleted: false, updatedAt: new Date().toISOString() } : r
+    );
+    const newConfig: TravelNotesConfig = {
+      ...notesConfig,
+      crewReviews: updatedReviews,
+      updatedAt: new Date().toISOString()
+    };
+    if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
+    CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+    setSyncStatusMsg('Отзыв экипажа восстановлен');
+    setTimeout(() => setSyncStatusMsg(''), 3000);
+  };
+
+  const handleRestoreRiverReview = (reviewId: string) => {
+    const updatedReviews = (notesConfig.riverReviews || []).map(r => 
+      r.id === reviewId ? { ...r, isDeleted: false, updatedAt: new Date().toISOString() } : r
+    );
+    const newConfig: TravelNotesConfig = {
+      ...notesConfig,
+      riverReviews: updatedReviews,
+      updatedAt: new Date().toISOString()
+    };
+    if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
+    CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+    setSyncStatusMsg('Отзыв о реке восстановлен');
+    setTimeout(() => setSyncStatusMsg(''), 3000);
+  };
+
+  const handleRestoreChecklistItem = (itemId: string) => {
+    const updatedChecklist = (notesConfig.checklist || []).map(c => 
+      c.id === itemId ? { ...c, isDeleted: false, updatedAt: new Date().toISOString() } : c
+    );
+    const newConfig: TravelNotesConfig = {
+      ...notesConfig,
+      checklist: updatedChecklist,
+      updatedAt: new Date().toISOString()
+    };
+    if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
+    CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+    setSyncStatusMsg('Пункт чек-листа восстановлен');
+    setTimeout(() => setSyncStatusMsg(''), 3000);
   };
 
   return (
@@ -589,12 +766,13 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:flex lg:flex-wrap gap-2 border-t border-[#EEEBE6] pt-3">
           {[
             { id: 'dashboard', label: 'Дашборд & KPI', icon: Activity },
-            { id: 'routes', label: 'Паспорта рек & Маршруты', count: routes.length, icon: Compass },
-            { id: 'trips', label: 'Сплавы & Заявки', count: trips.length, icon: Users },
-            { id: 'articles', label: 'Статьи & Гайды', count: articles.length, icon: BookOpen },
-            { id: 'travel_notes', label: 'Отчеты & Отзывы', count: (notesConfig.notes || []).length + (notesConfig.crewReviews || []).length, icon: MessageSquare },
+            { id: 'routes', label: 'Паспорта рек & Маршруты', count: filterActiveEntities(routes).length, icon: Compass },
+            { id: 'trips', label: 'Сплавы & Заявки', count: filterActiveEntities(trips).length, icon: Users },
+            { id: 'articles', label: 'Статьи & Гайды', count: filterActiveEntities(articles).length, icon: BookOpen },
+            { id: 'travel_notes', label: 'Отчеты & Отзывы', count: filterActiveEntities(notesConfig.notes || []).length + filterActiveEntities(notesConfig.crewReviews || []).length, icon: MessageSquare },
             { id: 'faq_safety', label: 'Безопасность & FAQ', count: (faqData.faqQuestions || []).length + (faqData.safetyGuides || []).length, icon: ShieldAlert },
-            { id: 'users', label: 'Пользователи (RBAC)', count: registeredUsers.length, icon: ShieldCheck },
+            { id: 'users', label: 'Пользователи (RBAC)', count: filterActiveEntities(registeredUsers).length, icon: ShieldCheck },
+            { id: 'recycle_bin', label: 'Корзина', count: totalDeletedCount, icon: Trash2 },
             { id: 'database', label: 'База данных & Бэкап', icon: Database }
           ].map((tab) => {
             const Icon = tab.icon;
@@ -615,7 +793,7 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
                 </div>
                 {tab.count !== undefined && (
                   <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold shrink-0 ${
-                    isActive ? 'bg-white/20 text-white' : 'bg-[#E5E0D8] text-[#2D332D]'
+                    isActive ? 'bg-white/20 text-white' : tab.id === 'recycle_bin' && tab.count > 0 ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-[#E5E0D8] text-[#2D332D]'
                   }`}>
                     {tab.count}
                   </span>
@@ -1408,7 +1586,273 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
         </div>
       )}
 
-      {/* 8. DATABASE & BACKUP */}
+      {/* 8. RECYCLE BIN (КОРЗИНА МЯГКО УДАЛЕННЫХ ОБЪЕКТОВ) */}
+      {adminTab === 'recycle_bin' && (
+        <div className="bg-white p-5 sm:p-7 rounded-3xl border border-[#E5E0D8] shadow-2xs space-y-6 animate-fadeIn">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#EEEBE6] pb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300">
+                  Безопасное восстановление
+                </span>
+                <span className="text-xs text-[#6B665F]">Всего удаленных объектов: {totalDeletedCount}</span>
+              </div>
+              <h2 className="text-base sm:text-lg font-black text-[#1A1F1A] mt-1">
+                Корзина удаленных объектов (Recycle Bin)
+              </h2>
+            </div>
+          </div>
+
+          {totalDeletedCount === 0 ? (
+            <div className="p-8 sm:p-12 text-center text-xs text-[#8B7E6D] bg-[#F9F7F4] rounded-3xl border border-dashed border-[#E5E0D8] space-y-2">
+              <CheckCircle2 className="w-8 h-8 text-[#2D5A27] mx-auto opacity-70" />
+              <div className="font-bold text-[#1A1F1A] text-sm">Корзина пуста</div>
+              <p>Нет удаленных маршрутов, сплавов, статей, заметок или пользователей.</p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+
+              {/* Deleted Routes */}
+              {deletedRoutes.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Compass className="w-4 h-4 text-[#8A3B14]" />
+                    <h3 className="text-xs font-black uppercase text-[#1A1F1A] tracking-wider">
+                      Удаленные паспорта рек & маршруты ({deletedRoutes.length})
+                    </h3>
+                  </div>
+                  <div className="space-y-2">
+                    {deletedRoutes.map((r) => (
+                      <div key={r.id} className="p-3.5 rounded-2xl bg-[#FDFCFB] border border-amber-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <div className="font-bold text-xs text-[#1A1F1A] flex items-center gap-2">
+                            <span>{r.name}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-[#6B665F] font-semibold">{r.region}</span>
+                          </div>
+                          <div className="text-[11px] text-[#6B665F]">
+                            р. {r.riverName} • {r.fstrCategory} • {r.lengthKm || 0} км • Обновлено: {r.updatedAt?.split('T')[0] || '—'}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => handleRestoreRoute(r.id)}
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Восстановить</span>
+                          </button>
+                          <button
+                            onClick={() => handlePermanentDeleteRoute(r.id)}
+                            className="p-1.5 rounded-xl text-[#E54B4B] hover:bg-red-50 transition-colors"
+                            title="Удалить навсегда"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Deleted Trips */}
+              {deletedTrips.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Users className="w-4 h-4 text-[#2D5A27]" />
+                    <h3 className="text-xs font-black uppercase text-[#1A1F1A] tracking-wider">
+                      Удаленные сплавы & экипажи ({deletedTrips.length})
+                    </h3>
+                  </div>
+                  <div className="space-y-2">
+                    {deletedTrips.map((t) => (
+                      <div key={t.id} className="p-3.5 rounded-2xl bg-[#FDFCFB] border border-amber-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <div className="font-bold text-xs text-[#1A1F1A]">{t.title}</div>
+                          <div className="text-[11px] text-[#6B665F]">
+                            р. {t.riverName} • {t.startDate} — {t.endDate} • Орг: {t.organizer?.name}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => handleRestoreTrip(t.id)}
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Восстановить</span>
+                          </button>
+                          <button
+                            onClick={() => handlePermanentDeleteTrip(t.id)}
+                            className="p-1.5 rounded-xl text-[#E54B4B] hover:bg-red-50 transition-colors"
+                            title="Удалить навсегда"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Deleted Articles */}
+              {deletedArticles.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-emerald-600" />
+                    <h3 className="text-xs font-black uppercase text-[#1A1F1A] tracking-wider">
+                      Удаленные статьи & отчеты ({deletedArticles.length})
+                    </h3>
+                  </div>
+                  <div className="space-y-2">
+                    {deletedArticles.map((a) => (
+                      <div key={a.id} className="p-3.5 rounded-2xl bg-[#FDFCFB] border border-amber-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <div className="font-bold text-xs text-[#1A1F1A]">{a.title}</div>
+                          <div className="text-[11px] text-[#6B665F]">
+                            {a.subtitle || a.riverName} • Автор: {a.author}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => handleRestoreArticle(a.id)}
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Восстановить</span>
+                          </button>
+                          <button
+                            onClick={() => handlePermanentDeleteArticle(a.id)}
+                            className="p-1.5 rounded-xl text-[#E54B4B] hover:bg-red-50 transition-colors"
+                            title="Удалить навсегда"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Deleted Notes & Reviews */}
+              {(deletedNotes.length > 0 || deletedCrewReviews.length > 0 || deletedRiverReviews.length > 0 || deletedChecklist.length > 0) && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4 text-purple-600" />
+                    <h3 className="text-xs font-black uppercase text-[#1A1F1A] tracking-wider">
+                      Удаленные заметки, отзывы и чек-листы ({deletedNotes.length + deletedCrewReviews.length + deletedRiverReviews.length + deletedChecklist.length})
+                    </h3>
+                  </div>
+                  <div className="space-y-2">
+                    {deletedNotes.map((n) => (
+                      <div key={n.id} className="p-3.5 rounded-2xl bg-[#FDFCFB] border border-amber-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <div className="font-bold text-xs text-[#1A1F1A]">{n.title || 'Заметка без названия'}</div>
+                          <div className="text-[11px] text-[#6B665F]">
+                            Автор: {n.authorName || '—'} • р. {n.riverName || '—'}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRestoreTravelNote(n.id)}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors self-end sm:self-auto"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Восстановить</span>
+                        </button>
+                      </div>
+                    ))}
+
+                    {deletedCrewReviews.map((c) => (
+                      <div key={c.id} className="p-3.5 rounded-2xl bg-[#FDFCFB] border border-amber-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <div className="font-bold text-xs text-[#1A1F1A]">Отзыв об участнике: {c.targetUserName}</div>
+                          <div className="text-[11px] text-[#6B665F]">
+                            Автор: {c.authorUserName} • Сплав: {c.tripTitle || '—'}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRestoreCrewReview(c.id)}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors self-end sm:self-auto"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Восстановить</span>
+                        </button>
+                      </div>
+                    ))}
+
+                    {deletedRiverReviews.map((r) => (
+                      <div key={r.id} className="p-3.5 rounded-2xl bg-[#FDFCFB] border border-amber-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <div className="font-bold text-xs text-[#1A1F1A]">Отзыв о реке: {r.riverName}</div>
+                          <div className="text-[11px] text-[#6B665F]">
+                            Автор: {r.userName} • Оценка: {r.ratingOverall}★
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRestoreRiverReview(r.id)}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors self-end sm:self-auto"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Восстановить</span>
+                        </button>
+                      </div>
+                    ))}
+
+                    {deletedChecklist.map((ch) => (
+                      <div key={ch.id} className="p-3.5 rounded-2xl bg-[#FDFCFB] border border-amber-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <div className="font-bold text-xs text-[#1A1F1A]">Пункт снаряжения: {ch.text}</div>
+                          <div className="text-[11px] text-[#6B665F]">Категория: {ch.category}</div>
+                        </div>
+                        <button
+                          onClick={() => handleRestoreChecklistItem(ch.id)}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors self-end sm:self-auto"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Восстановить</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Deleted Users */}
+              {deletedUsers.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-blue-600" />
+                    <h3 className="text-xs font-black uppercase text-[#1A1F1A] tracking-wider">
+                      Удаленные пользователи ({deletedUsers.length})
+                    </h3>
+                  </div>
+                  <div className="space-y-2">
+                    {deletedUsers.map((u) => (
+                      <div key={u.id} className="p-3.5 rounded-2xl bg-[#FDFCFB] border border-amber-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <div className="font-bold text-xs text-[#1A1F1A]">{u.name} ({u.email || u.id})</div>
+                          <div className="text-[11px] text-[#6B665F]">Роль: {u.role}</div>
+                        </div>
+                        <button
+                          onClick={() => handleRestoreUser(u.id)}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors self-end sm:self-auto"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Восстановить</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 9. DATABASE & BACKUP */}
       {adminTab === 'database' && (
         <div className="bg-white p-5 sm:p-7 rounded-3xl border border-[#E5E0D8] shadow-2xs space-y-4">
           <h2 className="text-base font-black text-[#1A1F1A]">

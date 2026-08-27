@@ -73,7 +73,9 @@ export const legacyUserSaveSchema = z.object({
   telegram: z.string().max(100).optional(),
   vk: z.string().max(200).optional(),
   isReadyForExpeditions: z.boolean().optional(),
-  showContactsPublicly: z.boolean().optional()
+  showContactsPublicly: z.boolean().optional(),
+  isDeleted: z.boolean().optional(),
+  updatedAt: z.string().max(50).optional()
 });
 
 // 2. Trip Schemas
@@ -110,7 +112,9 @@ export const tripApplicationSchema = z.object({
   hasOwnGear: z.boolean().optional(),
   notes: z.string().max(2000).optional(),
   status: z.enum(['pending', 'accepted', 'declined']).default('pending'),
-  appliedAt: z.string().max(50).default(() => new Date().toISOString())
+  appliedAt: z.string().max(50).default(() => new Date().toISOString()),
+  isDeleted: z.boolean().optional(),
+  updatedAt: z.string().max(50).optional()
 });
 
 export const tripChatMessageSchema = z.object({
@@ -122,7 +126,9 @@ export const tripChatMessageSchema = z.object({
   role: z.enum(['organizer', 'participant', 'guest']).default('participant'),
   text: z.string().max(2000),
   timestamp: z.string().max(50).default(() => new Date().toISOString()),
-  createdAt: z.number().optional()
+  createdAt: z.number().optional(),
+  isDeleted: z.boolean().optional(),
+  updatedAt: z.string().max(50).optional()
 });
 
 // 3. Route & POI Schemas
@@ -135,7 +141,9 @@ export const routePoiSchema = z.object({
   description: z.string().max(2000).default(''),
   safetyTips: z.string().max(2000).optional(),
   photo: z.string().max(1000).optional(),
-  kmMark: z.number().max(10000).optional()
+  kmMark: z.number().max(10000).optional(),
+  isDeleted: z.boolean().optional(),
+  updatedAt: z.string().max(50).optional()
 });
 
 export const gpxTrackSchema = z.object({
@@ -188,7 +196,9 @@ export const companionTripSchema = z.object({
   isPrivate: z.boolean().optional(),
   isPersonal: z.boolean().optional(),
   visibility: z.enum(['public', 'private']).optional(),
-  ownerId: z.string().max(100).optional()
+  ownerId: z.string().max(100).optional(),
+  isDeleted: z.boolean().optional(),
+  updatedAt: z.string().max(50).optional()
 });
 
 export const tripsBatchSchema = z.object({
@@ -240,7 +250,9 @@ export const riverRouteSchema = z.object({
   lastPassportRevision: z.string().max(50).optional(),
   photos: z.array(z.string().max(1000)).max(100).optional(),
   wikipediaUrl: z.string().max(1000).optional(),
-  wikipediaExtract: z.string().max(5000).optional()
+  wikipediaExtract: z.string().max(5000).optional(),
+  isDeleted: z.boolean().optional(),
+  updatedAt: z.string().max(50).optional()
 });
 
 export const routesBatchSchema = z.object({
@@ -265,7 +277,9 @@ export const articleSchema = z.object({
   authorAvatar: z.string().max(1000).optional(),
   isPublished: z.boolean().default(true),
   likesCount: z.number().int().nonnegative().max(1000000).default(0),
-  viewsCount: z.number().int().nonnegative().max(10000000).default(0)
+  viewsCount: z.number().int().nonnegative().max(10000000).default(0),
+  isDeleted: z.boolean().optional(),
+  updatedAt: z.string().max(50).optional()
 });
 
 export const articlesBatchSchema = z.object({
@@ -279,7 +293,9 @@ export const faqEmergencyContactSchema = z.object({
   phone: z.string().max(50),
   description: z.string().max(1000).default(''),
   badge: z.string().max(100).optional(),
-  isCritical: z.boolean().optional()
+  isCritical: z.boolean().optional(),
+  isDeleted: z.boolean().optional(),
+  updatedAt: z.string().max(50).optional()
 });
 
 export const faqRadioFrequencySchema = z.object({
@@ -287,7 +303,9 @@ export const faqRadioFrequencySchema = z.object({
   name: z.string().max(200),
   frequency: z.string().max(100),
   description: z.string().max(1000).default(''),
-  tag: z.string().max(100).default('')
+  tag: z.string().max(100).default(''),
+  isDeleted: z.boolean().optional(),
+  updatedAt: z.string().max(50).optional()
 });
 
 export const faqVisualSignalSchema = z.object({
@@ -295,7 +313,9 @@ export const faqVisualSignalSchema = z.object({
   code: z.string().max(50),
   meaning: z.string().max(500),
   description: z.string().max(1000).default(''),
-  color: z.enum(['red', 'green', 'gray', 'amber']).optional()
+  color: z.enum(['red', 'green', 'gray', 'amber']).optional(),
+  isDeleted: z.boolean().optional(),
+  updatedAt: z.string().max(50).optional()
 });
 
 export const safetyGuideSchema = z.object({
@@ -313,7 +333,9 @@ export const safetyGuideSchema = z.object({
     name: z.string().max(200),
     phone: z.string().max(50),
     note: z.string().max(500).default('')
-  })).max(50).optional()
+  })).max(50).optional(),
+  isDeleted: z.boolean().optional(),
+  updatedAt: z.string().max(50).optional()
 });
 
 export const faqQuestionItemSchema = z.object({
@@ -321,7 +343,9 @@ export const faqQuestionItemSchema = z.object({
   question: z.string().max(500),
   answer: z.string().max(10000),
   category: z.enum(['general', 'permits_gims', 'satellite_sos', 'wildlife', 'routes_logistics']).default('general'),
-  isPopular: z.boolean().optional()
+  isPopular: z.boolean().optional(),
+  isDeleted: z.boolean().optional(),
+  updatedAt: z.string().max(50).optional()
 });
 
 export const faqConfigSchema = z.object({
@@ -338,7 +362,8 @@ export const faqConfigSchema = z.object({
   safetyGuides: z.array(safetyGuideSchema).max(100).optional().default([]),
   faqQuestions: z.array(faqQuestionItemSchema).max(500).optional().default([]),
   updatedAt: z.string().max(50).optional(),
-  updatedBy: z.string().max(100).optional()
+  updatedBy: z.string().max(100).optional(),
+  isDeleted: z.boolean().optional()
 });
 
 // 6. Travel Notes Schema (Strict P2)
@@ -348,13 +373,14 @@ export const travelNoteSchema = z.object({
   authorName: z.string().max(100).optional(),
   title: z.string().max(300),
   riverName: z.string().max(200).optional(),
-  category: z.enum(['future_idea', 'gear_lessons', 'secret_camp', 'fishing_spots', 'safety_warning', 'trip_impressions']).default('trip_impressions'),
+  category: z.enum(['future_idea', 'gear_lessons', 'secret_camp', 'fishing_spots', 'safety_warning', 'trip_impressions', 'expedition_report', 'river_log']).default('trip_impressions'),
   season: z.enum(['spring_highwater', 'summer_warm', 'summer_polar', 'autumn_cold']).optional(),
   content: z.string().max(20000).default(''),
   tags: z.array(z.string().max(100)).max(50).optional().default([]),
   isPinned: z.boolean().optional(),
   createdAt: z.string().max(50).default(() => new Date().toISOString()),
-  updatedAt: z.string().max(50).optional()
+  updatedAt: z.string().max(50).optional(),
+  isDeleted: z.boolean().optional()
 });
 
 export const checklistItemSchema = z.object({
@@ -364,7 +390,9 @@ export const checklistItemSchema = z.object({
   isChecked: z.boolean().default(false),
   isCustom: z.boolean().optional(),
   notes: z.string().max(1000).optional(),
-  quantity: z.string().max(50).optional()
+  quantity: z.string().max(50).optional(),
+  isDeleted: z.boolean().optional(),
+  updatedAt: z.string().max(50).optional()
 });
 
 export const logbookTripSchema = z.object({
@@ -384,7 +412,9 @@ export const logbookTripSchema = z.object({
   difficultyRating: z.string().max(50).default('I к.с.'),
   riverRating: z.number().min(1).max(5).optional(),
   photos: z.array(z.string().max(1000)).max(50).optional(),
-  createdAt: z.string().max(50).default(() => new Date().toISOString())
+  createdAt: z.string().max(50).default(() => new Date().toISOString()),
+  isDeleted: z.boolean().optional(),
+  updatedAt: z.string().max(50).optional()
 });
 
 export const riverReviewSchema = z.object({
@@ -402,7 +432,9 @@ export const riverReviewSchema = z.object({
   ratingFishing: z.number().min(1).max(5).default(4),
   vesselUsed: vesselEnum.default('kayak'),
   comment: z.string().max(5000).default(''),
-  adviceForOthers: z.string().max(5000).optional()
+  adviceForOthers: z.string().max(5000).optional(),
+  isDeleted: z.boolean().optional(),
+  updatedAt: z.string().max(50).optional()
 });
 
 export const crewReviewSchema = z.object({
@@ -422,7 +454,9 @@ export const crewReviewSchema = z.object({
   ratingTeamwork: z.number().min(1).max(5).default(5),
   ratingPunctuality: z.number().min(1).max(5).default(5),
   tags: z.array(z.string().max(100)).max(50).default([]),
-  comment: z.string().max(5000).default('')
+  comment: z.string().max(5000).default(''),
+  isDeleted: z.boolean().optional(),
+  updatedAt: z.string().max(50).optional()
 });
 
 export const travelNotesConfigSchema = z.object({
@@ -433,7 +467,8 @@ export const travelNotesConfigSchema = z.object({
   riverReviews: z.array(riverReviewSchema).max(500).optional().default([]),
   crewReviews: z.array(crewReviewSchema).max(500).optional().default([]),
   updatedAt: z.string().max(50).optional(),
-  updatedBy: z.string().max(100).optional()
+  updatedBy: z.string().max(100).optional(),
+  isDeleted: z.boolean().optional()
 });
 
 // 7. Telegram Application Schema (Strict P1-5)

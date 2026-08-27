@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx src/tests/security.test.ts"
+    "test": "tsx src/tests/security.test.ts",
+    "test:stress": "tsx src/tests/stress.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
