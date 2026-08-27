@@ -3,7 +3,7 @@ import {
   Compass, 
   Users, 
   CheckSquare, 
-  ShieldCheck, 
+  BookOpen, 
   User, 
   LogIn, 
   Shield,
@@ -15,6 +15,7 @@ export type MainNavigationTab =
   | 'routes' 
   | 'companions' 
   | 'preparation' 
+  | 'notes'
   | 'mytrip' 
   | 'cabinet' 
   | 'knowledge'
@@ -106,16 +107,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             <button
-              id="nav-tab-mytrip"
-              onClick={() => setActiveTab('mytrip')}
+              id="nav-tab-notes"
+              onClick={() => setActiveTab('notes')}
               className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
-                activeTab === 'mytrip'
+                activeTab === 'notes'
                   ? 'bg-[#E8F1E7] text-[#2D5A27] border border-[#CDE0CC]'
                   : 'text-[#6B665F] hover:text-[#2D5A27] hover:bg-[#F9F7F4]'
               }`}
             >
-              <ShieldCheck className="w-4 h-4 text-[#2D5A27]" />
-              <span>Мой сплав</span>
+              <BookOpen className="w-4 h-4 text-[#2D5A27]" />
+              <span>Путевые заметки</span>
             </button>
           </nav>
 
@@ -218,14 +219,14 @@ export const Navbar: React.FC<NavbarProps> = ({
         </button>
 
         <button
-          id="mobile-nav-mytrip"
-          onClick={() => setActiveTab('mytrip')}
+          id="mobile-nav-notes"
+          onClick={() => setActiveTab('notes')}
           className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all min-h-[44px] min-w-[56px] ${
-            activeTab === 'mytrip' ? 'text-[#2D5A27] font-black' : 'text-[#6B665F]'
+            activeTab === 'notes' ? 'text-[#2D5A27] font-black' : 'text-[#6B665F]'
           }`}
         >
-          <ShieldCheck className={`w-5 h-5 ${activeTab === 'mytrip' ? 'stroke-[2.5]' : 'stroke-2'}`} />
-          <span className="text-[10px] mt-0.5 leading-none">Мой сплав</span>
+          <BookOpen className={`w-5 h-5 ${activeTab === 'notes' ? 'stroke-[2.5]' : 'stroke-2'}`} />
+          <span className="text-[10px] mt-0.5 leading-none">Заметки</span>
         </button>
 
         <button

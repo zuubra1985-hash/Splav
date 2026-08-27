@@ -336,16 +336,28 @@ export interface TravelNote {
   id: string;
   userId?: string;
   authorName?: string;
+  authorAvatar?: string;
   title: string;
   riverName?: string;
   locationName?: string;
   region?: Region;
   date?: string;
-  category: 'future_idea' | 'gear_lessons' | 'secret_camp' | 'fishing_spots' | 'safety_warning' | 'trip_impressions';
+  category: 'future_idea' | 'gear_lessons' | 'secret_camp' | 'fishing_spots' | 'safety_warning' | 'trip_impressions' | 'expedition_report' | 'river_log';
   season?: 'spring_highwater' | 'summer_warm' | 'summer_polar' | 'autumn_cold';
+  vesselType?: VesselType;
+  durationDays?: number;
+  distanceKm?: number;
+  waterLevel?: 'high' | 'normal' | 'low';
+  riverDifficulty?: string;
+  riverRating?: number; // 1 to 5 stars
   content: string;
+  practicalTips?: string; // Полезные советы последователям
   tags?: string[];
+  photos?: string[];
+  likesCount?: number;
+  likedByUserIds?: string[];
   isPinned?: boolean;
+  isPublic: boolean; // true = "Опубликовано для всех", false = "Только для меня (личный дневник)"
   createdAt: string;
   updatedAt?: string;
 }

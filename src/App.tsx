@@ -12,7 +12,7 @@ import { RouteSuitabilityModal } from './components/RouteSuitabilityModal';
 import { CompanionsModule } from './components/CompanionsModule';
 import { PreparationModule } from './components/PreparationModule';
 import { KnowledgeBaseModule } from './components/KnowledgeBaseModule';
-import { MyTripModule } from './components/MyTripModule';
+import { TravelNotesModule } from './components/TravelNotesModule';
 import { UserCabinetModule } from './components/UserCabinetModule';
 import { AdminPanelModule } from './components/AdminPanelModule';
 import { AuthModal } from './components/AuthModal';
@@ -25,7 +25,7 @@ import { COMPANION_TRIPS_DATA } from './data/tripsData';
 import { SAFETY_GUIDES_DATA } from './data/safetyGuideData';
 import { ARTICLES_DATA } from './data/articlesData';
 
-import { RiverRoute, Region, CompanionTrip, ArticleReport, AppUser, UserRole, FaqDataConfig, TravelNotesConfig, CrewReview, TravelNote, RiverReview, Article } from './types';
+import { RiverRoute, Region, CompanionTrip, ArticleReport, AppUser, UserRole, FaqDataConfig, TravelNotesConfig, CrewReview, TravelNote, RiverReview, Article, LogbookTrip } from './types';
 import { TripsSyncService, RoutesSyncService, UsersSyncService, ArticlesSyncService, FaqSyncService, TravelNotesSyncService } from './firebase';
 import { CloudSqlDbService } from './services/cloudSqlDb';
 import { INITIAL_FAQ_DATA } from './data/faqData';
@@ -74,7 +74,7 @@ const INITIAL_USERS: AppUser[] = [
   }
 ];
 
-const VALID_TABS = ['routes', 'companions', 'preparation', 'knowledge', 'mytrip', 'cabinet', 'admin'] as const;
+const VALID_TABS = ['routes', 'companions', 'preparation', 'notes', 'knowledge', 'mytrip', 'cabinet', 'admin'] as const;
 type AppTab = typeof VALID_TABS[number];
 
 const getInitialTab = (): AppTab => {
@@ -103,6 +103,50 @@ const getInitialRegion = (): Region => {
     } catch (e) {}
   }
   return 'ALL';
+};
+
+const mergeTravelNotesConfigs = (prev: TravelNotesConfig, incoming: TravelNotesConfig): TravelNotesConfig => {
+  if (!incoming) return prev;
+  if (!prev) return incoming;
+
+  const notesMap = new Map<string, TravelNote>();
+  (incoming.notes || []).forEach((n) => { if (n && n.id) notesMap.set(n.id, n); });
+  (prev.notes || []).forEach((n) => {
+    if (n && n.id) {
+      if (!notesMap.has(n.id)) {
+        notesMap.set(n.id, n);
+      } else {
+        const inc = notesMap.get(n.id)!;
+        const incTime = new Date(inc.updatedAt || inc.createdAt || 0).getTime();
+        const prevTime = new Date(n.updatedAt || n.createdAt || 0).getTime();
+        if (prevTime > incTime || (n.likesCount || 0) > (inc.likesCount || 0)) {
+          notesMap.set(n.id, { ...inc, ...n });
+        }
+      }
+    }
+  });
+
+  const riverReviewsMap = new Map<string, RiverReview>();
+  (incoming.riverReviews || []).forEach((r) => { if (r && r.id) riverReviewsMap.set(r.id, r); });
+  (prev.riverReviews || []).forEach((r) => { if (r && r.id && !riverReviewsMap.has(r.id)) riverReviewsMap.set(r.id, r); });
+
+  const crewReviewsMap = new Map<string, CrewReview>();
+  (incoming.crewReviews || []).forEach((c) => { if (c && c.id) crewReviewsMap.set(c.id, c); });
+  (prev.crewReviews || []).forEach((c) => { if (c && c.id && !crewReviewsMap.has(c.id)) crewReviewsMap.set(c.id, c); });
+
+  const logbookTripsMap = new Map<string, LogbookTrip>();
+  (incoming.logbookTrips || []).forEach((t) => { if (t && t.id) logbookTripsMap.set(t.id, t); });
+  (prev.logbookTrips || []).forEach((t) => { if (t && t.id && !logbookTripsMap.has(t.id)) logbookTripsMap.set(t.id, t); });
+
+  return {
+    ...incoming,
+    notes: Array.from(notesMap.values()),
+    checklist: incoming.checklist && incoming.checklist.length > 0 ? incoming.checklist : prev.checklist,
+    logbookTrips: Array.from(logbookTripsMap.values()),
+    riverReviews: Array.from(riverReviewsMap.values()),
+    crewReviews: Array.from(crewReviewsMap.values()),
+    updatedAt: incoming.updatedAt || new Date().toISOString()
+  };
 };
 
 export default function App() {
@@ -645,19 +689,22 @@ export default function App() {
     // 6. Initial SQL fetch and Subscribe to Travel Notes, Checklists & Reviews Configuration
     CloudSqlDbService.fetchTravelNotes().then((sqlNotes) => {
       if (sqlNotes) {
-        setNotesConfig(sqlNotes);
+        setNotesConfig((prev) => mergeTravelNotesConfigs(prev, sqlNotes));
       }
     }).catch(console.warn);
 
     const unsubNotes = TravelNotesSyncService.subscribeToNotesConfig((cloudNotes) => {
       if (cloudNotes) {
-        setNotesConfig(cloudNotes);
-        CloudSqlDbService.saveTravelNotes(cloudNotes).catch(console.warn);
-        try {
-          localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(cloudNotes));
-        } catch (e) {
-          console.error(e);
-        }
+        setNotesConfig((prev) => {
+          const merged = mergeTravelNotesConfigs(prev, cloudNotes);
+          CloudSqlDbService.saveTravelNotes(merged).catch(console.warn);
+          try {
+            localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(merged));
+          } catch (e) {
+            console.error(e);
+          }
+          return merged;
+        });
       }
     });
 
@@ -1569,7 +1616,7 @@ export default function App() {
             faqData={faqData}
             currentUser={currentUser}
             isAdmin={isAdmin}
-            onOpenMyTrip={() => setActiveTab('mytrip')}
+            onOpenMyTrip={() => setActiveTab('notes')}
             onSelectRouteForTrip={handleCreateMyTripFromRoute}
           />
         )}
@@ -1587,18 +1634,22 @@ export default function App() {
           />
         )}
 
-        {/* 5. MY TRIP (PLANNING & IN-EXPEDITION MODE) */}
-        {activeTab === 'mytrip' && (
-          <MyTripModule
-            currentUser={currentUser}
+        {/* 5. TRAVEL NOTES & EXPEDITION DIARIES */}
+        {(activeTab === 'notes' || activeTab === 'mytrip') && (
+          <TravelNotesModule
             routes={routes}
-            initialSelectedTripId={myTripSelectedTripId}
+            currentUser={currentUser}
+            registeredUsers={registeredUsers}
+            onOpenAuth={() => setIsAuthModalOpen(true)}
+            isAdmin={isAdmin}
+            notesConfig={notesConfig}
+            setNotesConfig={setNotesConfig}
+            onOpenAdminNotesManager={() => setActiveTab('admin')}
             onOpenRouteDetails={(r) => setDetailModalRoute(r)}
-            onOpenMchsRegistration={(r) => {
-              if (r) setPreparationInitialRoute(r);
-              setActiveTab('preparation');
+            onSelectRouteOnMap={(r) => {
+              setSelectedRoute(r);
+              setActiveTab('routes');
             }}
-            onOpenCompanions={() => setActiveTab('companions')}
           />
         )}
 
@@ -1611,7 +1662,7 @@ export default function App() {
             onUpdateCurrentUser={handleUpdateCurrentUser}
             routes={routes}
             trips={trips}
-            onOpenMyTrip={() => setActiveTab('mytrip')}
+            onOpenMyTrip={() => setActiveTab('notes')}
             onOpenRouteDetails={(r) => setDetailModalRoute(r)}
             onToggleFavorite={handleToggleFavoriteRoute}
             onAddCustomRoute={handleSavePassport}

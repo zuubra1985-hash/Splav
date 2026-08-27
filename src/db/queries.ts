@@ -509,6 +509,19 @@ export async function getTripApplicationsFromDb(tripId: string) {
   }
 }
 
+export async function getUserApplicationsFromDb(userId: string) {
+  try {
+    return await db
+      .select()
+      .from(tripApplications)
+      .where(eq(tripApplications.userId, userId))
+      .orderBy(desc(tripApplications.appliedAt));
+  } catch (error) {
+    console.error('Error fetching user applications from DB:', error);
+    throw new Error('Database query failed for user applications.');
+  }
+}
+
 export async function createTripApplicationInDb(data: {
   id: string;
   tripId: string;
@@ -523,6 +536,32 @@ export async function createTripApplicationInDb(data: {
   notes?: string;
 }) {
   try {
+    // P0-10: Check if user already has an active pending/accepted application
+    const existingApps = await db
+      .select()
+      .from(tripApplications)
+      .where(and(eq(tripApplications.tripId, data.tripId), eq(tripApplications.userId, data.userId)));
+
+    const activeApp = existingApps.find(a => a.status === 'pending' || a.status === 'accepted');
+    if (activeApp) {
+      throw new Error('Вы уже отправили активную заявку на этот поход.');
+    }
+
+    // P0-10: Verify trip capacity
+    const tripRec = await db.select().from(companionTrips).where(eq(companionTrips.id, data.tripId));
+    if (tripRec.length > 0) {
+      const tripData = tripRec[0].data as any;
+      const totalSeats = typeof tripData?.totalSeats === 'number' ? tripData.totalSeats : 10;
+      const participants = await db
+        .select()
+        .from(tripParticipants)
+        .where(eq(tripParticipants.tripId, data.tripId));
+      
+      if (participants.length >= totalSeats) {
+        throw new Error('К сожалению, в этом походе уже нет свободных мест.');
+      }
+    }
+
     const inserted = await db.insert(tripApplications).values({
       id: data.id,
       tripId: data.tripId,
@@ -541,14 +580,31 @@ export async function createTripApplicationInDb(data: {
     }).returning();
 
     return inserted[0];
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating trip application in DB:', error);
-    throw new Error('Database insert failed for trip application.');
+    throw new Error(error.message || 'Database insert failed for trip application.');
   }
 }
 
 export async function updateTripApplicationStatusInDb(tripId: string, appId: string, status: 'accepted' | 'declined' | 'pending') {
   return await db.transaction(async (tx) => {
+    // If accepting, enforce capacity limit first (P0-10)
+    if (status === 'accepted') {
+      const tripRec = await tx.select().from(companionTrips).where(eq(companionTrips.id, tripId));
+      if (tripRec.length > 0) {
+        const tripData = tripRec[0].data as any;
+        const totalSeats = typeof tripData?.totalSeats === 'number' ? tripData.totalSeats : 10;
+        const currentParticipants = await tx
+          .select()
+          .from(tripParticipants)
+          .where(eq(tripParticipants.tripId, tripId));
+        
+        if (currentParticipants.length >= totalSeats) {
+          throw new Error(`Невозможно принять заявку: все ${totalSeats} мест уже заняты.`);
+        }
+      }
+    }
+
     const updated = await tx
       .update(tripApplications)
       .set({
@@ -586,6 +642,30 @@ export async function updateTripApplicationStatusInDb(tripId: string, appId: str
           joinedAt: new Date()
         });
       }
+    } else if (status === 'declined') {
+      // If changed to declined, remove from trip_participants if present
+      await tx
+        .delete(tripParticipants)
+        .where(and(eq(tripParticipants.tripId, tripId), eq(tripParticipants.userId, application.userId)));
+    }
+
+    // P0-11: Synchronize bookedSeats in companionTrips table with actual confirmed count
+    const allConfirmed = await tx
+      .select()
+      .from(tripParticipants)
+      .where(eq(tripParticipants.tripId, tripId));
+
+    const tripRec = await tx.select().from(companionTrips).where(eq(companionTrips.id, tripId));
+    if (tripRec.length > 0) {
+      const tripData = { ...(tripRec[0].data as any) };
+      tripData.bookedSeats = allConfirmed.length;
+      await tx
+        .update(companionTrips)
+        .set({
+          data: tripData,
+          updatedAt: new Date()
+        })
+        .where(eq(companionTrips.id, tripId));
     }
 
     return application;
@@ -623,8 +703,23 @@ export async function addTripParticipantInDb(data: {
   avatar?: string;
   phone?: string;
 }) {
-  try {
-    const inserted = await db.insert(tripParticipants).values({
+  return await db.transaction(async (tx) => {
+    // Capacity check
+    const tripRec = await tx.select().from(companionTrips).where(eq(companionTrips.id, data.tripId));
+    if (tripRec.length > 0) {
+      const tripData = tripRec[0].data as any;
+      const totalSeats = typeof tripData?.totalSeats === 'number' ? tripData.totalSeats : 10;
+      const currentParticipants = await tx
+        .select()
+        .from(tripParticipants)
+        .where(eq(tripParticipants.tripId, data.tripId));
+      
+      if (currentParticipants.length >= totalSeats) {
+        throw new Error(`В походе уже достигнут лимит участников (${totalSeats}).`);
+      }
+    }
+
+    const inserted = await tx.insert(tripParticipants).values({
       id: data.id,
       tripId: data.tripId,
       userId: data.userId || null,
@@ -637,23 +732,55 @@ export async function addTripParticipantInDb(data: {
       joinedAt: new Date()
     }).returning();
 
+    // Sync bookedSeats
+    const allConfirmed = await tx
+      .select()
+      .from(tripParticipants)
+      .where(eq(tripParticipants.tripId, data.tripId));
+
+    if (tripRec.length > 0) {
+      const tripData = { ...(tripRec[0].data as any) };
+      tripData.bookedSeats = allConfirmed.length;
+      await tx
+        .update(companionTrips)
+        .set({
+          data: tripData,
+          updatedAt: new Date()
+        })
+        .where(eq(companionTrips.id, data.tripId));
+    }
+
     return inserted[0];
-  } catch (error) {
-    console.error('Error adding trip participant in DB:', error);
-    throw new Error('Database insert failed for trip participant.');
-  }
+  });
 }
 
 export async function removeTripParticipantFromDb(tripId: string, participantId: string) {
-  try {
-    await db
+  return await db.transaction(async (tx) => {
+    await tx
       .delete(tripParticipants)
       .where(and(eq(tripParticipants.id, participantId), eq(tripParticipants.tripId, tripId)));
+
+    // Sync bookedSeats
+    const allConfirmed = await tx
+      .select()
+      .from(tripParticipants)
+      .where(eq(tripParticipants.tripId, tripId));
+
+    const tripRec = await tx.select().from(companionTrips).where(eq(companionTrips.id, tripId));
+    if (tripRec.length > 0) {
+      const tripData = { ...(tripRec[0].data as any) };
+      tripData.bookedSeats = allConfirmed.length;
+      await tx
+        .update(companionTrips)
+        .set({
+          data: tripData,
+          updatedAt: new Date()
+        })
+        .where(eq(companionTrips.id, tripId));
+    }
+
     return { success: true };
-  } catch (error) {
-    console.error('Error removing trip participant from DB:', error);
-    throw new Error('Database delete failed for trip participant.');
-  }
+  });
 }
 
 // 11. Custom Routes DB helpers (with SQL-level pagination)

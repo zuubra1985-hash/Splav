@@ -1,6 +1,93 @@
 import { TravelNote, ChecklistItem, LogbookTrip, RiverReview, CrewReview, TravelNotesConfig } from '../types';
 
-export const INITIAL_TRAVEL_NOTES: TravelNote[] = [];
+export const INITIAL_TRAVEL_NOTES: TravelNote[] = [
+  {
+    id: 'note-sob-2026',
+    userId: 'guide-polar-ural',
+    authorName: 'Евгений «Северный» (Инструктор)',
+    authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
+    title: 'Полярный Урал: Сплав по реке Собь в среднюю июльскую воду',
+    riverName: 'р. Собь',
+    locationName: 'ст. 110 км — пос. Харп',
+    region: 'ЯНАО',
+    date: '10–15 июля 2026',
+    category: 'expedition_report',
+    season: 'summer_polar',
+    vesselType: 'catamaran',
+    durationDays: 5,
+    distanceKm: 105,
+    waterLevel: 'normal',
+    riverDifficulty: 'II к.с.',
+    riverRating: 5,
+    content: 'Прошли классический маршрут от платформы 110 км до поселка Харп. Вода в середине июля прозрачная, уровень оптимальный для катамарана и надувных байдарок. Порог «Опасный» прошли по основной струе с левого берега без происшествий. На перекатах возле устья Ельца отличная рыбалка — хариус активно брал на серую «мушку» и вертушки 2-го номера. Ночевки делали на галечных косах — там значительно меньше гнуса и мошки из-за постоянного речного бриза.',
+    practicalTips: '1. На станции Харп удобно заказывать микроавтобус до Лабытнанги прямо к ж/д мосту.\n2. Дрова на верхнем участке — плавник и ивняк, лучше иметь с собой газовую горелку для быстрого чая.\n3. Связь Теле2/МТС ловит только перед самим Харпом.',
+    tags: ['ПолярныйУрал', 'Собь', 'Хариус', 'Катамаран', 'Пороги'],
+    photos: [
+      'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=80',
+      'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=800&q=80'
+    ],
+    likesCount: 14,
+    isPinned: true,
+    isPublic: true,
+    createdAt: '2026-07-20'
+  },
+  {
+    id: 'note-trom-2026',
+    userId: 'surgut-paddler',
+    authorName: 'Алексей Смирнов (Сургут)',
+    authorAvatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=200&q=80',
+    title: 'Тромъёган: Песчаные яры, сосновый бор и таёжная тишина',
+    riverName: 'р. Тромъёган',
+    locationName: 'Русскинская — мост а/д Сургут-Когалым',
+    region: 'ХМАО',
+    date: '3–6 августа 2026',
+    category: 'trip_impressions',
+    season: 'summer_warm',
+    vesselType: 'kayak',
+    durationDays: 4,
+    distanceKm: 120,
+    waterLevel: 'normal',
+    riverDifficulty: 'I к.с.',
+    riverRating: 5,
+    content: 'Великолепный спокойный релакс-маршрут для байдарок и пакрафтов. Река сильно петляет, открывая живописные высокие песчаные обрывы с вековыми соснами. Стоянки роскошные — белый сухой мох, чистый лес без подлеска, дров в избытке. Вода темная, торфяная, но при кипячении очень вкусная и чистая. В старицах хорошо клюет щука и окунь на воблеры.',
+    practicalTips: 'Заброска рейсовым автобусом или на такси до деревни Русскинская прямо к музею природы. Выход на автотрассу возле моста с удобным пологим берегом.',
+    tags: ['Югра', 'Тромъёган', 'Байдарка', 'СемейныйСплав', 'СосновыйБор'],
+    photos: [
+      'https://images.unsplash.com/photo-1510312305653-8ed496efae75?auto=format&fit=crop&w=800&q=80'
+    ],
+    likesCount: 9,
+    isPinned: false,
+    isPublic: true,
+    createdAt: '2026-08-10'
+  },
+  {
+    id: 'note-agan-secret',
+    userId: 'agan-explorer',
+    authorName: 'Дмитрий В. (Нижневартовск)',
+    authorAvatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=200&q=80',
+    title: 'Секретная стоянка и родник на реке Аган (38-й км ниже Варьёгана)',
+    riverName: 'р. Аган',
+    locationName: 'Мыс «Кедровый»',
+    region: 'ХМАО',
+    date: 'Июнь 2026',
+    category: 'secret_camp',
+    season: 'summer_warm',
+    vesselType: 'sup',
+    durationDays: 3,
+    distanceKm: 70,
+    waterLevel: 'high',
+    riverDifficulty: 'I к.с.',
+    riverRating: 4,
+    content: 'На правом высоком берегу после второго крутого меандра за островом находится прекрасная оборудованная стоянка: есть деревянный стол со скамьями, костровище с тросиком и навес от дождя. В 50 метрах вглубь леса бьет ключевой родник с чистейшей холодной водой. Берег песчаный, удобно чалить SUP-борды и надувные лодки.',
+    practicalTips: 'В июне на Аган обязательно берите репелленты с максимальной концентрацией ДЭТА и противомоскитные сетки на палатки. Вечером мошка очень активна.',
+    tags: ['Аган', 'Стоянка', 'Родник', 'SUP', 'Варьёган'],
+    photos: [],
+    likesCount: 6,
+    isPinned: false,
+    isPublic: true,
+    createdAt: '2026-06-25'
+  }
+];
 
 export const INITIAL_CHECKLIST_ITEMS: ChecklistItem[] = [
   // 1. Безопасность на воде

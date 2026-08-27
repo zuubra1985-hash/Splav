@@ -54,11 +54,10 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 }
 
 /**
- * Recursively converts nested arrays (e.g. [[lat, lng], ...]) into array of objects [{ lat, lng }]
- * and strips undefined fields so Firestore setDoc never throws:
- * "Function setDoc() called with invalid data. Nested arrays are not supported"
+ * Recursively sanitizes objects for Firestore, stripping undefined fields.
+ * Coordinates are specifically preserved/converted without mutating arbitrary numeric tuples.
  */
-export function cleanForFirestore<T>(obj: T): any {
+export function cleanForFirestore<T>(obj: T, currentKey?: string): any {
   if (obj === undefined) {
     return null;
   }
@@ -66,66 +65,51 @@ export function cleanForFirestore<T>(obj: T): any {
     return obj;
   }
   if (Array.isArray(obj)) {
-    // If this array contains arrays (nested arrays), convert each inner array to an object
-    return obj.map((item) => {
-      if (Array.isArray(item)) {
-        // Coordinate pair [lat, lng] -> { lat, lng }
-        if (item.length === 2 && typeof item[0] === 'number' && typeof item[1] === 'number') {
+    // Only convert [lat, lng] to object if the field is specifically a coordinate list
+    if (currentKey === 'coordinates' || currentKey === 'trackCoordinates') {
+      return obj.map((item) => {
+        if (Array.isArray(item) && item.length === 2 && typeof item[0] === 'number' && typeof item[1] === 'number') {
           return { lat: item[0], lng: item[1] };
         }
-        // Generic nested array -> object with indexed keys
-        const innerObj: Record<string, any> = {};
-        item.forEach((val, idx) => {
-          innerObj[`idx_${idx}`] = cleanForFirestore(val);
-        });
-        return innerObj;
-      }
-      return cleanForFirestore(item);
-    });
+        return cleanForFirestore(item);
+      });
+    }
+    return obj.map((item) => cleanForFirestore(item));
   }
 
   const result: Record<string, any> = {};
   for (const [key, value] of Object.entries(obj)) {
     if (value !== undefined) {
-      result[key] = cleanForFirestore(value);
+      result[key] = cleanForFirestore(value, key);
     }
   }
   return result;
 }
 
 /**
- * Restores data loaded from Firestore back into application types
- * (e.g. converting [{ lat, lng }] back to [[lat, lng]])
+ * Restores data loaded from Firestore back into application types.
+ * Specifically converts { lat, lng } in coordinates arrays back to [lat, lng] without touching other objects.
  */
-export function restoreFromFirestore<T>(obj: any): T {
+export function restoreFromFirestore<T>(obj: any, currentKey?: string): T {
   if (obj === null || obj === undefined || typeof obj !== 'object') {
     return obj;
   }
 
   if (Array.isArray(obj)) {
-    return obj.map((item) => {
-      if (item && typeof item === 'object' && !Array.isArray(item)) {
-        if ('lat' in item && 'lng' in item && typeof item.lat === 'number' && typeof item.lng === 'number') {
+    if (currentKey === 'coordinates' || currentKey === 'trackCoordinates') {
+      return obj.map((item) => {
+        if (item && typeof item === 'object' && !Array.isArray(item) && 'lat' in item && 'lng' in item) {
           return [item.lat, item.lng];
         }
-      }
-      return restoreFromFirestore(item);
-    }) as any;
+        return restoreFromFirestore(item, currentKey);
+      }) as any;
+    }
+    return obj.map((item) => restoreFromFirestore(item)) as any;
   }
 
   const result: Record<string, any> = {};
   for (const [key, value] of Object.entries(obj)) {
-    if (key === 'coordinates' && Array.isArray(value)) {
-      result[key] = value.map((pt: any) => {
-        if (Array.isArray(pt)) return pt;
-        if (pt && typeof pt === 'object' && 'lat' in pt && 'lng' in pt) {
-          return [pt.lat, pt.lng];
-        }
-        return pt;
-      });
-    } else {
-      result[key] = restoreFromFirestore(value);
-    }
+    result[key] = restoreFromFirestore(value, key);
   }
   return result as T;
 }

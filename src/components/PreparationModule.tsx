@@ -173,16 +173,6 @@ ${mchsForm.emergencyContactName}: ${mchsForm.emergencyContactPhone}
               Чек-листы, безопасность на воде, радиосвязь, регистрация в МЧС и документы
             </p>
           </div>
-
-          {onOpenMyTrip && (
-            <button
-              onClick={onOpenMyTrip}
-              className="px-4 py-2.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-2 transition-all self-start sm:self-auto"
-            >
-              <ShieldCheck className="w-4 h-4" />
-              <span>Перейти в «Мой сплав»</span>
-            </button>
-          )}
         </div>
 
         {/* 6 Core Sub-tabs - Column on mobile, grid/flex on larger screens */}

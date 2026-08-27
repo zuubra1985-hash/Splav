@@ -43,6 +43,7 @@ import confetti from 'canvas-confetti';
 import { parseGpxFile, generateGpxString } from '../utils/gpxParser';
 import { compressAvatarFile } from '../utils/imageCompressor';
 import { MyTripsStore } from '../services/myTripsStore';
+import { CloudSqlDbService } from '../services/cloudSqlDb';
 
 interface UserCabinetModuleProps {
   currentUser: AppUser | null;
@@ -314,8 +315,16 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
   };
 
   // Handle application decision (accept/decline)
-  const handleApplicationDecision = (trip: CompanionTrip, appId: string, status: 'accepted' | 'declined') => {
+  const handleApplicationDecision = async (trip: CompanionTrip, appId: string, status: 'accepted' | 'declined') => {
     if (!onUpdateTrip) return;
+    
+    // Sync with backend Cloud SQL API
+    try {
+      await CloudSqlDbService.updateTripApplicationStatus(trip.id, appId, status);
+    } catch (e) {
+      console.warn('Could not sync status with backend API:', e);
+    }
+
     const updatedApps = (trip.applications || []).map(a => a.id === appId ? { ...a, status } : a);
     const applicant = trip.applications?.find(a => a.id === appId);
     
@@ -924,22 +933,13 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
         <div className="bg-white p-5 sm:p-7 rounded-3xl border border-[#E5E0D8] shadow-2xs space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-black text-[#1A1F1A]">Мои активные и запланированные сплавы</h2>
-            {onOpenMyTrip && (
-              <button
-                onClick={onOpenMyTrip}
-                className="px-3.5 py-1.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
-              >
-                <Compass className="w-3.5 h-3.5" />
-                <span>Открыть «Мой сплав»</span>
-              </button>
-            )}
           </div>
 
           {myPlannerTrips.length === 0 && myCompanionTrips.length === 0 ? (
             <div className="p-8 text-center space-y-3 bg-[#F9F7F4] rounded-2xl border border-[#EEEBE6]">
               <Compass className="w-8 h-8 text-[#8B7E6D] mx-auto opacity-50" />
               <p className="text-xs text-[#6B665F]">
-                У вас пока нет активных сплавов. Выберите маршрут в каталоге и начните подготовку в модуле «Мой сплав» или создайте сбор экипажа.
+                У вас пока нет активных сплавов. Выберите маршрут в каталоге рек или создайте сбор экипажа.
               </p>
             </div>
           ) : (

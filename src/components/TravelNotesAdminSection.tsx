@@ -155,6 +155,7 @@ export const TravelNotesAdminSection: React.FC<TravelNotesAdminSectionProps> = (
         content: '',
         tags: ['Снаряжение', 'Уроки'],
         isPinned: false,
+        isPublic: true,
         createdAt: new Date().toISOString().split('T')[0]
       });
       setIsNewNote(true);

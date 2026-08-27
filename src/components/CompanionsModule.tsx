@@ -248,7 +248,28 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
   const [applicantExp, setApplicantExp] = useState('');
   const [applicantNotes, setApplicantNotes] = useState('');
 
+  // Trip applications state decoupled from trip mutation
+  const [myApplications, setMyApplications] = useState<TripApplication[]>([]);
+  const [tripApplicationsMap, setTripApplicationsMap] = useState<Record<string, TripApplication[]>>({});
+
   const isAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
+
+  // Load current user's submitted applications from Cloud SQL
+  useEffect(() => {
+    if (currentUser?.id) {
+      CloudSqlDbService.fetchMyApplications()
+        .then(apps => {
+          if (apps && Array.isArray(apps)) {
+            setMyApplications(apps);
+          }
+        })
+        .catch(err => {
+          console.warn('Failed to load myApplications:', err);
+        });
+    } else {
+      setMyApplications([]);
+    }
+  }, [currentUser?.id]);
 
   // Keep open modal in sync with live real-time trips updates
   useEffect(() => {
@@ -259,6 +280,24 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
       }
     }
   }, [trips, selectedTrip]);
+
+  // Load applications for organizer/admin when selectedTrip is viewed
+  useEffect(() => {
+    if (selectedTrip && currentUser && isTripOrganizer(selectedTrip)) {
+      CloudSqlDbService.fetchTripApplications(selectedTrip.id)
+        .then(apps => {
+          if (apps && Array.isArray(apps)) {
+            setTripApplicationsMap(prev => ({
+              ...prev,
+              [selectedTrip.id]: apps
+            }));
+          }
+        })
+        .catch(err => {
+          console.warn('Failed to load trip applications for organizer:', err);
+        });
+    }
+  }, [selectedTrip?.id, currentUser?.id]);
 
   // Check if current user is the actual creator/organizer of a trip
   const isActualOrganizer = (trip: CompanionTrip) => {
@@ -276,17 +315,33 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
     return false;
   };
 
+  // Get applications list for a trip (from loaded map or trip object)
+  const getTripApplicationsList = (trip: CompanionTrip): TripApplication[] => {
+    if (tripApplicationsMap[trip.id]) {
+      return tripApplicationsMap[trip.id];
+    }
+    return trip.applications || [];
+  };
+
   // Get user's application for a specific trip
   const getUserApplication = (trip: CompanionTrip): TripApplication | undefined => {
-    if (!trip.applications || trip.applications.length === 0) return undefined;
     if (currentUser) {
-      const byId = trip.applications.find(a => a.userId && a.userId === currentUser.id);
-      if (byId) return byId;
-      const byNameOrPhone = trip.applications.find(a => 
-        (currentUser.name && a.applicantName.toLowerCase() === currentUser.name.toLowerCase()) ||
-        (currentUser.phone && a.applicantPhone === currentUser.phone)
-      );
-      if (byNameOrPhone) return byNameOrPhone;
+      const fromMyApps = myApplications.find(a => a.tripId === trip.id);
+      if (fromMyApps) return fromMyApps;
+
+      const fromLoaded = (tripApplicationsMap[trip.id] || []).find(a => a.userId === currentUser.id);
+      if (fromLoaded) return fromLoaded;
+    }
+    if (trip.applications && trip.applications.length > 0) {
+      if (currentUser) {
+        const byId = trip.applications.find(a => a.userId && a.userId === currentUser.id);
+        if (byId) return byId;
+        const byNameOrPhone = trip.applications.find(a => 
+          (currentUser.name && a.applicantName.toLowerCase() === currentUser.name.toLowerCase()) ||
+          (currentUser.phone && a.applicantPhone === currentUser.phone)
+        );
+        if (byNameOrPhone) return byNameOrPhone;
+      }
     }
     return undefined;
   };
@@ -551,102 +606,124 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
     });
   };
 
-  const handleJoinSubmit = (e: React.FormEvent) => {
+  const handleJoinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!joinModalTrip) return;
 
-    const newApp: TripApplication = {
-      id: `app-${Date.now()}`,
-      tripId: joinModalTrip.id,
-      userId: currentUser?.id,
-      applicantName: applicantName.trim() || (currentUser?.name || 'Путешественник'),
-      applicantPhone: applicantPhone.trim() || (currentUser?.phone || ''),
-      applicantEmail: currentUser?.email,
-      applicantAvatar: currentUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
-      experienceLevel: applicantExp || 'Любитель (1-2 к.с.)',
-      vesselType: applicantVessel,
-      hasOwnGear: true,
-      notes: applicantNotes.trim(),
-      status: 'pending',
-      appliedAt: new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-    };
-
-    // Update trip with new application
-    const existingApps = joinModalTrip.applications || [];
-    const updatedTrip: CompanionTrip = {
-      ...joinModalTrip,
-      applications: [newApp, ...existingApps.filter(a => a.userId !== currentUser?.id)]
-    };
-
-    // Send Telegram instant notification to organizer via secure backend endpoint (P1-5)
-    CloudSqlDbService.sendTelegramApplication({
-      tripId: joinModalTrip.id,
-      notes: newApp.notes,
-      vesselType: newApp.vesselType,
-      experienceLevel: newApp.experienceLevel
-    }).catch(err => {
-      console.warn('Failed to send Telegram notification:', err);
-    });
-
-    onUpdateTrip(updatedTrip);
-    if (selectedTrip?.id === updatedTrip.id) {
-      setSelectedTrip(updatedTrip);
+    if (!currentUser) {
+      onOpenAuth();
+      return;
     }
 
-    setJoinSuccess(true);
-    confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
-    setTimeout(() => {
-      setJoinModalTrip(null);
-      setJoinSuccess(false);
-    }, 2400);
-  };
+    try {
+      const expLevel = applicantExp || 'Любитель (1-2 к.с.)';
+      const vessel = applicantVessel;
+      const notes = applicantNotes.trim();
 
-  const handleAcceptApplication = (trip: CompanionTrip, app: TripApplication) => {
-    const updatedApps = (trip.applications || []).map(a => 
-      a.id === app.id ? { ...a, status: 'accepted' as const } : a
-    );
-    const newParticipant = {
-      userId: app.userId,
-      name: app.applicantName,
-      role: 'Участник экипажа',
-      vessel: app.vesselType || 'kayak',
-      avatar: app.applicantAvatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
-      phone: app.applicantPhone
-    };
-    const updatedTrip: CompanionTrip = {
-      ...trip,
-      bookedSeats: Math.min(trip.totalSeats, trip.bookedSeats + 1),
-      participants: [...trip.participants, newParticipant],
-      applications: updatedApps,
-      chatMessages: [
-        ...(trip.chatMessages || []),
-        {
-          id: `msg-${Date.now()}`,
-          tripId: trip.id,
-          authorName: 'Бортовой журнал',
-          role: 'organizer',
-          text: `🎉 К экипажу присоединился ${app.applicantName} (${app.vesselType ? app.vesselType.toUpperCase() : 'судно'})!`,
-          timestamp: 'Только что'
-        }
-      ]
-    };
-    onUpdateTrip(updatedTrip);
-    if (selectedTrip?.id === trip.id) {
-      setSelectedTrip(updatedTrip);
+      // Submit application via dedicated Cloud SQL API
+      const createdApp = await CloudSqlDbService.createTripApplication(joinModalTrip.id, {
+        experienceLevel: expLevel,
+        vesselType: vessel,
+        hasOwnGear: true,
+        notes
+      });
+
+      // Update local user's myApplications list
+      setMyApplications(prev => [
+        createdApp,
+        ...prev.filter(a => a.tripId !== joinModalTrip.id)
+      ]);
+
+      // Also send Telegram instant notification to organizer if configured
+      CloudSqlDbService.sendTelegramApplication({
+        tripId: joinModalTrip.id,
+        notes,
+        vesselType: vessel,
+        experienceLevel: expLevel
+      }).catch(err => {
+        console.warn('Failed to send Telegram notification:', err);
+      });
+
+      setJoinSuccess(true);
+      confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+      setTimeout(() => {
+        setJoinModalTrip(null);
+        setJoinSuccess(false);
+      }, 2400);
+    } catch (err: any) {
+      console.error('Failed to submit trip application:', err);
+      alert(err.message || 'Не удалось отправить заявку. Пожалуйста, попробуйте еще раз.');
     }
   };
 
-  const handleDeclineApplication = (trip: CompanionTrip, app: TripApplication) => {
-    const updatedApps = (trip.applications || []).map(a => 
-      a.id === app.id ? { ...a, status: 'declined' as const } : a
-    );
-    const updatedTrip: CompanionTrip = {
-      ...trip,
-      applications: updatedApps
-    };
-    onUpdateTrip(updatedTrip);
-    if (selectedTrip?.id === trip.id) {
-      setSelectedTrip(updatedTrip);
+  const handleAcceptApplication = async (trip: CompanionTrip, app: TripApplication) => {
+    try {
+      const updatedApp = await CloudSqlDbService.updateTripApplicationStatus(trip.id, app.id, 'accepted');
+
+      // Update trip applications map
+      setTripApplicationsMap(prev => ({
+        ...prev,
+        [trip.id]: (prev[trip.id] || trip.applications || []).map(a => a.id === app.id ? updatedApp : a)
+      }));
+
+      // Update trip state for UI
+      const newParticipant = {
+        userId: app.userId,
+        name: app.applicantName,
+        role: 'Участник экипажа',
+        vessel: app.vesselType || 'kayak',
+        avatar: app.applicantAvatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
+        phone: app.applicantPhone
+      };
+
+      const currentParticipants = trip.participants || [];
+      const updatedParticipants = currentParticipants.some(p => p.userId === app.userId)
+        ? currentParticipants
+        : [...currentParticipants, newParticipant];
+
+      const updatedTrip: CompanionTrip = {
+        ...trip,
+        bookedSeats: Math.min(trip.totalSeats, updatedParticipants.length),
+        participants: updatedParticipants,
+        applications: (trip.applications || []).map(a => a.id === app.id ? updatedApp : a)
+      };
+
+      if (isTripOrganizer(trip)) {
+        onUpdateTrip(updatedTrip);
+      }
+      if (selectedTrip?.id === trip.id) {
+        setSelectedTrip(updatedTrip);
+      }
+      confetti({ particleCount: 50, spread: 50, origin: { y: 0.6 } });
+    } catch (err: any) {
+      console.error('Failed to accept trip application:', err);
+      alert(err.message || 'Ошибка при подтверждении заявки.');
+    }
+  };
+
+  const handleDeclineApplication = async (trip: CompanionTrip, app: TripApplication) => {
+    try {
+      const updatedApp = await CloudSqlDbService.updateTripApplicationStatus(trip.id, app.id, 'declined');
+
+      setTripApplicationsMap(prev => ({
+        ...prev,
+        [trip.id]: (prev[trip.id] || trip.applications || []).map(a => a.id === app.id ? updatedApp : a)
+      }));
+
+      const updatedTrip: CompanionTrip = {
+        ...trip,
+        applications: (trip.applications || []).map(a => a.id === app.id ? updatedApp : a)
+      };
+
+      if (isTripOrganizer(trip)) {
+        onUpdateTrip(updatedTrip);
+      }
+      if (selectedTrip?.id === trip.id) {
+        setSelectedTrip(updatedTrip);
+      }
+    } catch (err: any) {
+      console.error('Failed to decline trip application:', err);
+      alert(err.message || 'Ошибка при отклонении заявки.');
     }
   };
 
@@ -1658,7 +1735,7 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
                   }`}
                 >
                   <UserCheck className="w-3.5 h-3.5 shrink-0" />
-                  <span>Заявки ({(selectedTrip.applications || []).filter(a => a.status === 'pending').length})</span>
+                  <span>Заявки ({getTripApplicationsList(selectedTrip).filter(a => a.status === 'pending').length})</span>
                 </button>
               ) : (
                 <button
@@ -2318,12 +2395,12 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
             {/* TAB 4: APPLICATIONS (ORGANIZER ONLY) */}
             {modalTab === 'applications' && isTripOrganizer(selectedTrip) && (
               <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
-                {(selectedTrip.applications || []).length === 0 ? (
+                {getTripApplicationsList(selectedTrip).length === 0 ? (
                   <div className="py-8 text-center text-xs text-[#8B7E6D]">
                     Заявок на участие пока нет
                   </div>
                 ) : (
-                  (selectedTrip.applications || []).map((app) => (
+                  getTripApplicationsList(selectedTrip).map((app) => (
                     <div
                       key={app.id}
                       className="p-3.5 bg-[#F9F7F4] border border-[#EEEBE6] rounded-2xl space-y-2.5 text-xs shadow-2xs"

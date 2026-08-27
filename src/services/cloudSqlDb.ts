@@ -1,4 +1,4 @@
-import { AppUser, CompanionTrip, RiverRoute, TravelNotesConfig, ArticleReport, FaqDataConfig, UserRole, PublicUserDTO, PrivateUserDTO } from '../types';
+import { AppUser, CompanionTrip, RiverRoute, TravelNotesConfig, ArticleReport, FaqDataConfig, UserRole, PublicUserDTO, PrivateUserDTO, TripApplication } from '../types';
 import { syncTracker } from './syncTracker';
 
 const TOKEN_KEY = 'splav86_jwt_token';
@@ -379,6 +379,88 @@ export const CloudSqlDbService = {
       });
     } catch (e) {
       console.warn('CloudSQL deleteTrip failed:', e);
+    }
+  },
+
+  // Trip Applications & Participants API
+  async fetchTripApplications(tripId: string): Promise<TripApplication[]> {
+    try {
+      const res = await authenticatedFetch(`/api/trips/${encodeURIComponent(tripId)}/applications`);
+      if (!res.ok) {
+        if (res.status === 403) return [];
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } catch (e) {
+      console.warn(`CloudSQL fetchTripApplications for trip ${tripId} failed:`, e);
+      return [];
+    }
+  },
+
+  async createTripApplication(
+    tripId: string,
+    payload: { experienceLevel?: string; vesselType?: string; hasOwnGear?: boolean; notes?: string }
+  ): Promise<TripApplication> {
+    const res = await authenticatedFetch(`/api/trips/${encodeURIComponent(tripId)}/applications`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    syncTracker.recordUpload('cloudsql', {
+      message: `Отправлена заявка на участие в походе ${tripId}`
+    });
+    return data;
+  },
+
+  async updateTripApplicationStatus(
+    tripId: string,
+    appId: string,
+    status: 'accepted' | 'declined' | 'pending'
+  ): Promise<TripApplication> {
+    const res = await authenticatedFetch(
+      `/api/trips/${encodeURIComponent(tripId)}/applications/${encodeURIComponent(appId)}/status`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status })
+      }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    syncTracker.recordUpload('cloudsql', {
+      message: `Статус заявки ${appId} изменен на ${status}`
+    });
+    return data;
+  },
+
+  async fetchTripParticipants(tripId: string): Promise<any[]> {
+    try {
+      const res = await authenticatedFetch(`/api/trips/${encodeURIComponent(tripId)}/participants`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } catch (e) {
+      console.warn(`CloudSQL fetchTripParticipants for trip ${tripId} failed:`, e);
+      return [];
+    }
+  },
+
+  async fetchMyApplications(): Promise<TripApplication[]> {
+    try {
+      const res = await authenticatedFetch('/api/users/me/applications');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } catch (e) {
+      console.warn('CloudSQL fetchMyApplications failed:', e);
+      return [];
     }
   },
 

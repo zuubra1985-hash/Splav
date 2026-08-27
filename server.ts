@@ -27,6 +27,7 @@ import {
   saveTripsInDb,
   deleteTripFromDb,
   getTripApplicationsFromDb,
+  getUserApplicationsFromDb,
   createTripApplicationInDb,
   updateTripApplicationStatusInDb,
   getTripParticipantsFromDb,
@@ -83,9 +84,9 @@ dotenv.config();
 
 const app = express();
 const PORT = 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'splav86-secure-default-jwt-secret-key-2026';
-if (!process.env.JWT_SECRET) {
-  console.warn('⚠️ WARNING: JWT_SECRET environment variable is not set. Using secure fallback secret.');
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error('FATAL SECURITY ERROR: JWT_SECRET environment variable is strictly required. Define JWT_SECRET in .env.');
 }
 
 // Periodically clean up expired tokens (every 2 hours)
@@ -193,8 +194,8 @@ const corsOptions: cors.CorsOptions = {
       return callback(null, true);
     }
 
-    // Do not throw fatal error in middleware, safely allow or handle
-    return callback(null, true);
+    // P0-6: Reject unauthorized external origins strictly
+    return callback(new Error(`CORS blocked: Origin '${origin}' is not authorized.`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -685,6 +686,17 @@ app.patch('/api/users/me/password', requireAuth, async (req: AuthenticatedReques
   } catch (error: any) {
     console.error('API Change Password Error:', error.message);
     return res.status(500).json({ error: 'Ошибка смены пароля.' });
+  }
+});
+
+// P1-4: Get current user's submitted trip applications
+app.get(['/api/users/me/applications', '/api/db/users/me/applications'], requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const apps = await getUserApplicationsFromDb(req.user!.id);
+    return res.json(apps);
+  } catch (error: any) {
+    console.error('API get user applications error:', error.message);
+    return res.status(500).json({ error: 'Не удалось загрузить ваши заявки.' });
   }
 });
 

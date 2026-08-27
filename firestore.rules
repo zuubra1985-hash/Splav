@@ -96,7 +96,7 @@ service cloud.firestore {
     // Travel Notes, Checklists, Logbook & Reviews
     match /travel_notes/{docId} {
       allow read: if isValidId(docId);
-      allow write: if isAdmin() && isValidId(docId);
+      allow write: if (isSignedIn() || isAdmin()) && isValidId(docId);
     }
   }
 }
