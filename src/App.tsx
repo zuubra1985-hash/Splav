@@ -517,7 +517,6 @@ export default function App() {
     const unsubFaq = FaqSyncService.subscribeToFaq((cloudFaq) => {
       if (cloudFaq) {
         setFaqData(cloudFaq);
-        CentralSyncManager.saveFaq(cloudFaq).catch(console.warn);
         try {
           localStorage.setItem('splav86_faq_data_v1', JSON.stringify(cloudFaq));
         } catch (e) {
@@ -537,7 +536,6 @@ export default function App() {
       if (cloudNotes) {
         setNotesConfig((prev) => {
           const merged = mergeTravelNotesConfigs(prev, cloudNotes);
-          CentralSyncManager.saveTravelNotes(merged).catch(console.warn);
           try {
             localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(merged));
           } catch (e) {

@@ -121,25 +121,16 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
     });
   };
 
-  // --- STATE: TRAVEL NOTES ---
-  const [notes, setNotes] = useState<TravelNote[]>(() => {
+  // --- TRAVEL NOTES DERIVED STATE ---
+  const allNotesList: TravelNote[] = useMemo(() => {
     if (notesConfig?.notes && notesConfig.notes.length > 0) {
-      return filterActiveEntities(notesConfig.notes);
+      return filterActiveEntities<TravelNote>(notesConfig.notes);
     }
     try {
       const stored = localStorage.getItem('splav86_travel_notes_v3');
-      return stored ? filterActiveEntities(JSON.parse(stored)) : filterActiveEntities(INITIAL_TRAVEL_NOTES);
+      return stored ? filterActiveEntities<TravelNote>(JSON.parse(stored)) : filterActiveEntities<TravelNote>(INITIAL_TRAVEL_NOTES);
     } catch {
-      return filterActiveEntities(INITIAL_TRAVEL_NOTES);
-    }
-  });
-
-  useEffect(() => {
-    if (notesConfig?.notes && Array.isArray(notesConfig.notes)) {
-      setNotes((prevNotes) => {
-        const merged = mergeTravelNotes(prevNotes, notesConfig.notes);
-        return filterActiveEntities(merged);
-      });
+      return filterActiveEntities<TravelNote>(INITIAL_TRAVEL_NOTES);
     }
   }, [notesConfig?.notes]);
 
@@ -176,7 +167,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
 
     const fullNotes = updatedPartial.notes !== undefined
       ? mergeTravelNotes(notesConfig?.notes || [], updatedPartial.notes)
-      : (notesConfig?.notes || notes);
+      : (notesConfig?.notes || allNotesList);
 
     const newConfig: TravelNotesConfig = {
       id: notesConfig?.id || 'splav86_travel_notes_main',
@@ -283,7 +274,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
     const authorDisplayName = noteFormAuthorName.trim() || currentUser?.name || 'Турист-исследователь';
 
     if (editingNote) {
-      const allNotes = notesConfig?.notes || notes;
+      const allNotes = notesConfig?.notes || allNotesList;
       const updatedNotes = allNotes.map((n) =>
         n.id === editingNote.id
           ? {
@@ -312,7 +303,6 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
             }
           : n
       );
-      setNotes(filterActiveEntities(updatedNotes));
       syncUpdatedConfig({ notes: updatedNotes });
     } else {
       const newNote: TravelNote = {
@@ -344,9 +334,8 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
         createdAt: nowIso,
         updatedAt: nowIso
       };
-      const allNotes = notesConfig?.notes || notes;
+      const allNotes = notesConfig?.notes || allNotesList;
       const updatedNotes = [newNote, ...allNotes];
-      setNotes(filterActiveEntities(updatedNotes));
       syncUpdatedConfig({ notes: updatedNotes });
     }
 
@@ -357,7 +346,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
   const handleToggleLikeNote = (noteId: string) => {
     const userId = currentUser?.id || 'guest-device';
     const nowIso = new Date().toISOString();
-    const allNotes = notesConfig?.notes || notes;
+    const allNotes = notesConfig?.notes || allNotesList;
     const updatedNotes = allNotes.map((n) => {
       if (n.id === noteId) {
         const liked = (n.likedByUserIds || []).includes(userId);
@@ -373,7 +362,6 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
       }
       return n;
     });
-    setNotes(filterActiveEntities(updatedNotes));
     syncUpdatedConfig({ notes: updatedNotes });
 
     if (viewingNote && viewingNote.id === noteId) {
@@ -395,7 +383,7 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
 
   const handleTogglePinNote = (noteId: string) => {
     const nowIso = new Date().toISOString();
-    const allNotes = notesConfig?.notes || notes;
+    const allNotes = notesConfig?.notes || allNotesList;
     const updatedNotes = allNotes.map((n) => {
       if (n.id === noteId) {
         return {
@@ -406,12 +394,11 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
       }
       return n;
     });
-    setNotes(filterActiveEntities(updatedNotes));
     syncUpdatedConfig({ notes: updatedNotes });
   };
 
   const handleDeleteNote = (noteId: string) => {
-    const noteToDelete = notes.find((n) => n.id === noteId);
+    const noteToDelete = allNotesList.find((n) => n.id === noteId);
     askConfirmation({
       title: 'Удалить путевую заметку?',
       message: `Вы действительно хотите удалить заметку «${noteToDelete?.title || 'Без названия'}»? Запись будет перемещена в корзину.`,
@@ -419,11 +406,10 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
       confirmVariant: 'danger',
       onConfirm: () => {
         const nowIso = new Date().toISOString();
-        const allNotes = notesConfig?.notes || notes;
+        const allNotes = notesConfig?.notes || allNotesList;
         const updatedNotes = allNotes.map((n) =>
           n.id === noteId ? { ...n, isDeleted: true, updatedAt: nowIso } : n
         );
-        setNotes(filterActiveEntities(updatedNotes));
         syncUpdatedConfig({ notes: updatedNotes });
         if (viewingNote?.id === noteId) {
           setViewingNote(null);
@@ -469,13 +455,12 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
 
   // Displayed Notes: ALL active notes available to EVERY user (pinned first, then newest)
   const displayedNotes = useMemo(() => {
-    const activeList = filterActiveEntities(notes);
-    return [...activeList].sort((a, b) => {
+    return [...allNotesList].sort((a, b) => {
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
-  }, [notes]);
+  }, [allNotesList]);
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-6">

@@ -12,91 +12,59 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.]+$');
     }
 
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
-    }
-
-    function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.role == 'admin' ||
-        request.auth.token.role == 'superadmin' ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-      );
-    }
-
     // Safe connection test doc
     match /test/{docId} {
       allow read: if true;
       allow write: if false;
     }
 
-    // Strict User Profiles (PII Protected: only owner or verified admin can read/write)
+    // Tourist Profiles (Visible to all community members for sync, writable with valid ID)
     match /users/{userId} {
-      allow get: if isOwner(userId) || isAdmin();
-      allow list: if isAdmin();
-      allow create: if (isOwner(userId) || isAdmin()) && isValidId(userId);
-      allow update: if (isOwner(userId) || isAdmin()) && isValidId(userId);
-      allow delete: if isAdmin() && isValidId(userId);
+      allow read, list: if true;
+      allow write: if isValidId(userId);
     }
 
-    // Community River Routes & Waterway Passports
+    // Community River Routes & Waterway Passports (Shared across all users)
     match /routes/{routeId} {
-      allow read: if isValidId(routeId);
-      allow create: if (isSignedIn() || isAdmin()) && isValidId(routeId);
-      allow update: if (isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid)) && isValidId(routeId);
-      allow delete: if (isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid)) && isValidId(routeId);
+      allow read, list: if true;
+      allow write: if isValidId(routeId);
     }
 
-    // Expeditions & Companion Search Trips
+    // Expeditions & Companion Search Trips (Shared across all users in real-time)
     match /trips/{tripId} {
-      allow read: if isValidId(tripId);
-      allow create: if (isSignedIn() || isAdmin()) && isValidId(tripId);
-      allow update: if (isAdmin() || (isSignedIn() && resource.data.organizer.userId == request.auth.uid)) && isValidId(tripId);
-      allow delete: if (isAdmin() || (isSignedIn() && resource.data.organizer.userId == request.auth.uid)) && isValidId(tripId);
+      allow read, list: if true;
+      allow write: if isValidId(tripId);
 
-      // Instant Trip Chat Subcollection (Strict access: organizer, participants, admin only)
+      // Instant Trip Chat Subcollection
       match /messages/{msgId} {
-        allow read, list: if isValidId(msgId) && (isAdmin() || (isSignedIn() && (
-          get(/databases/$(database)/documents/trips/$(tripId)).data.organizer.userId == request.auth.uid ||
-          get(/databases/$(database)/documents/trips/$(tripId)).data.participants.hasAny([request.auth.uid])
-        )));
-        allow create: if isValidId(msgId) && (isAdmin() || (isSignedIn() && (
-          get(/databases/$(database)/documents/trips/$(tripId)).data.organizer.userId == request.auth.uid ||
-          get(/databases/$(database)/documents/trips/$(tripId)).data.participants.hasAny([request.auth.uid])
-        )));
-        allow update, delete: if (isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid)) && isValidId(msgId);
+        allow read, list: if true;
+        allow write: if isValidId(msgId);
       }
 
-      // Live Presence Subcollection (Strict access: active trip members only)
+      // Live Presence Subcollection
       match /presence/{userId} {
-        allow read, list: if isValidId(userId) && (isAdmin() || (isSignedIn() && (
-          get(/databases/$(database)/documents/trips/$(tripId)).data.organizer.userId == request.auth.uid ||
-          get(/databases/$(database)/documents/trips/$(tripId)).data.participants.hasAny([request.auth.uid])
-        )));
-        allow write: if (isOwner(userId) || isAdmin()) && isValidId(userId);
+        allow read, list: if true;
+        allow write: if isValidId(userId);
       }
     }
 
     // Articles, Reports & River Guides
     match /articles/{articleId} {
-      allow read: if isValidId(articleId);
-      allow write: if isAdmin() && isValidId(articleId);
+      allow read, list: if true;
+      allow write: if isValidId(articleId);
     }
 
     // FAQ, Safety Handbook, Radio & Emergency Communications
     match /faq/{docId} {
-      allow read: if isValidId(docId);
-      allow write: if isAdmin() && isValidId(docId);
+      allow read, list: if true;
+      allow write: if isValidId(docId);
     }
 
-    // Travel Notes, Checklists, Logbook & Reviews
+    // Travel Notes, Checklists, Logbook & Community Reviews (Shared & Synchronized for everyone)
     match /travel_notes/{docId} {
-      allow read: if isValidId(docId);
-      allow write: if (isSignedIn() || isAdmin()) && isValidId(docId);
+      allow read, list: if true;
+      allow write: if isValidId(docId);
     }
   }
 }
+
