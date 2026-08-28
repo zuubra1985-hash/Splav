@@ -115,12 +115,13 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   onOpenPassportEditor
 }) => {
   const [adminTab, setAdminTab] = useState<
-    'dashboard' | 'routes' | 'trips' | 'articles' | 'travel_notes' | 'faq_safety' | 'users' | 'recycle_bin' | 'database'
+    'dashboard' | 'routes' | 'trips' | 'travel_notes' | 'faq_safety' | 'users' | 'recycle_bin' | 'database'
   >('dashboard');
   
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'verified' | 'incomplete' | 'needs_review'>('all');
   const [regionFilter, setRegionFilter] = useState<'all' | 'ХМАО' | 'ЯНАО'>('all');
+  const [notesSubTab, setNotesSubTab] = useState<'all' | 'notes' | 'river_reviews' | 'crew_reviews' | 'checklist'>('all');
   const [isSyncingAll, setIsSyncingAll] = useState<boolean>(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState<string>('');
 
@@ -145,9 +146,6 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
     deletedUsers.length;
 
   // Editing Modals State
-  const [editingArticle, setEditingArticle] = useState<Article | null>(null);
-  const [isCreatingArticle, setIsCreatingArticle] = useState<boolean>(false);
-
   const [editingTrip, setEditingTrip] = useState<CompanionTrip | null>(null);
   const [isCreatingTrip, setIsCreatingTrip] = useState<boolean>(false);
   const [selectedTripForApps, setSelectedTripForApps] = useState<CompanionTrip | null>(null);
@@ -158,17 +156,15 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   const [editingSafetyGuide, setEditingSafetyGuide] = useState<SafetyGuide | null>(null);
   const [isCreatingSafetyGuide, setIsCreatingSafetyGuide] = useState<boolean>(false);
 
-  const [editingEmergencyContact, setEditingEmergencyContact] = useState<FaqEmergencyContact | null>(null);
-  const [isCreatingEmergencyContact, setIsCreatingEmergencyContact] = useState<boolean>(false);
-
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
 
   // 1. DATA QUALITY AUDIT METRICS
   const qualityAudit = useMemo(() => {
-    const routesWithoutGpx = routes.filter(r => !r.gpxFileName || r.coordinates.length <= 2);
-    const routesWithoutLogistics = routes.filter(r => !r.logisticsTransfer?.accessIn || !r.logisticsTransfer?.accessOut);
-    const routesWithoutWarnings = routes.filter(r => !r.warnings || r.warnings.length === 0);
-    const outdatedRoutes = routes.filter(r => {
+    const activeRoutes = filterActiveEntities(routes);
+    const routesWithoutGpx = activeRoutes.filter(r => !r.gpxFileName || r.coordinates.length <= 2);
+    const routesWithoutLogistics = activeRoutes.filter(r => !r.logisticsTransfer?.accessIn || !r.logisticsTransfer?.accessOut);
+    const routesWithoutWarnings = activeRoutes.filter(r => !r.warnings || r.warnings.length === 0);
+    const outdatedRoutes = activeRoutes.filter(r => {
       if (!r.lastVerifiedAt && !r.lastPassportRevision) return true;
       const dateStr = r.lastVerifiedAt || r.lastPassportRevision;
       try {
@@ -179,20 +175,26 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
       }
     });
 
+    const activeNotesCount = filterActiveEntities(notesConfig.notes || []).length;
+    const activeCrewReviewsCount = filterActiveEntities(notesConfig.crewReviews || []).length;
+    const activeRiverReviewsCount = filterActiveEntities(notesConfig.riverReviews || []).length;
+    const totalCommunityItems = activeNotesCount + activeCrewReviewsCount + activeRiverReviewsCount;
+
     return {
-      totalRoutes: routes.length,
+      totalRoutes: activeRoutes.length,
       routesWithoutGpx,
       routesWithoutLogistics,
       routesWithoutWarnings,
       outdatedRoutes,
-      activeTrips: trips.filter(t => t.status === 'recruiting' || t.status === 'confirmed').length,
-      totalUsers: registeredUsers.length,
-      totalArticles: articles.length,
-      qualityScore: Math.round(
-        100 - ((routesWithoutGpx.length * 15 + routesWithoutLogistics.length * 10 + routesWithoutWarnings.length * 10 + outdatedRoutes.length * 5) / (Math.max(1, routes.length) * 0.4))
-      )
+      activeTrips: filterActiveEntities(trips).filter(t => t.status === 'recruiting' || t.status === 'confirmed').length,
+      totalUsers: filterActiveEntities(registeredUsers).length,
+      totalNotes: totalCommunityItems,
+      faqCount: (faqData.faqQuestions || []).length + (faqData.safetyGuides || []).length,
+      qualityScore: Math.max(0, Math.min(100, Math.round(
+        100 - ((routesWithoutGpx.length * 15 + routesWithoutLogistics.length * 10 + routesWithoutWarnings.length * 10 + outdatedRoutes.length * 5) / (Math.max(1, activeRoutes.length) * 0.4))
+      )))
     };
-  }, [routes, trips, registeredUsers, articles]);
+  }, [routes, trips, registeredUsers, notesConfig, faqData]);
 
   // Full Database Sync Trigger
   const handleFullSync = async () => {
@@ -407,44 +409,6 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   };
 
   // ==========================================
-  // ARTICLE ACTIONS
-  // ==========================================
-  const handleSaveArticle = (articleToSave: Article) => {
-    const exists = articles.some(a => a.id === articleToSave.id);
-    const updated = exists
-      ? articles.map(a => a.id === articleToSave.id ? articleToSave : a)
-      : [articleToSave, ...articles];
-
-    if (typeof onUpdateArticles === 'function') {
-      onUpdateArticles(updated as any);
-    }
-    try {
-      localStorage.setItem('splav86_custom_articles', JSON.stringify(updated));
-    } catch (e) {
-      console.error(e);
-    }
-    ArticlesSyncService.saveArticle(articleToSave).catch(console.warn);
-    CloudSqlDbService.saveArticle(articleToSave).catch(console.warn);
-
-    setEditingArticle(null);
-    setIsCreatingArticle(false);
-  };
-
-  const handleDeleteArticleConfirmed = (articleId: string, title: string) => {
-    if (!window.confirm(`Удалить статью "${title}"?`)) return;
-    if (onDeleteArticle) {
-      onDeleteArticle(articleId);
-    } else {
-      const updated = articles.filter(a => a.id !== articleId);
-      if (typeof onUpdateArticles === 'function') {
-        onUpdateArticles(updated as any);
-      }
-      ArticlesSyncService.removeArticle(articleId).catch(console.warn);
-      CloudSqlDbService.deleteArticle(articleId).catch(console.warn);
-    }
-  };
-
-  // ==========================================
   // FAQ & SAFETY ACTIONS
   // ==========================================
   const handleSaveFaqItem = (itemToSave: FaqQuestionItem) => {
@@ -547,6 +511,23 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
     CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
   };
 
+  const handleDeleteRiverReview = (reviewId: string) => {
+    if (!window.confirm('Переместить этот отзыв о реке в корзину?')) return;
+    const updatedReviews = (notesConfig.riverReviews || []).map(r => 
+      r.id === reviewId ? { ...r, isDeleted: true, updatedAt: new Date().toISOString() } : r
+    );
+    const newConfig: TravelNotesConfig = {
+      ...notesConfig,
+      riverReviews: updatedReviews,
+      updatedAt: new Date().toISOString()
+    };
+    if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
+    try {
+      localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
+    } catch (e) {}
+    CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+  };
+
   const handleDeleteCrewReview = (reviewId: string) => {
     if (!window.confirm('Переместить этот отзыв экипажа в корзину?')) return;
     const updatedReviews = (notesConfig.crewReviews || []).map(r => 
@@ -555,6 +536,21 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
     const newConfig: TravelNotesConfig = {
       ...notesConfig,
       crewReviews: updatedReviews,
+      updatedAt: new Date().toISOString()
+    };
+    if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
+    try {
+      localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
+    } catch (e) {}
+    CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+  };
+
+  const handleDeleteChecklistItem = (itemId: string) => {
+    if (!window.confirm('Удалить этот элемент чек-листа?')) return;
+    const updatedChecklist = (notesConfig.checklist || []).filter(c => c.id !== itemId);
+    const newConfig: TravelNotesConfig = {
+      ...notesConfig,
+      checklist: updatedChecklist,
       updatedAt: new Date().toISOString()
     };
     if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
@@ -768,8 +764,7 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
             { id: 'dashboard', label: 'Дашборд & KPI', icon: Activity },
             { id: 'routes', label: 'Паспорта рек & Маршруты', count: filterActiveEntities(routes).length, icon: Compass },
             { id: 'trips', label: 'Сплавы & Заявки', count: filterActiveEntities(trips).length, icon: Users },
-            { id: 'articles', label: 'Статьи & Гайды', count: filterActiveEntities(articles).length, icon: BookOpen },
-            { id: 'travel_notes', label: 'Отчеты & Отзывы', count: filterActiveEntities(notesConfig.notes || []).length + filterActiveEntities(notesConfig.crewReviews || []).length, icon: MessageSquare },
+            { id: 'travel_notes', label: 'Путевые заметки & Отзывы', count: filterActiveEntities(notesConfig.notes || []).length + filterActiveEntities(notesConfig.crewReviews || []).length + filterActiveEntities(notesConfig.riverReviews || []).length, icon: MessageSquare },
             { id: 'faq_safety', label: 'Безопасность & FAQ', count: (faqData.faqQuestions || []).length + (faqData.safetyGuides || []).length, icon: ShieldAlert },
             { id: 'users', label: 'Пользователи (RBAC)', count: filterActiveEntities(registeredUsers).length, icon: ShieldCheck },
             { id: 'recycle_bin', label: 'Корзина', count: totalDeletedCount, icon: Trash2 },
@@ -811,7 +806,7 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
             <div className="bg-white p-4 rounded-2xl border border-[#E5E0D8] shadow-2xs">
               <div className="text-[10px] uppercase font-bold text-[#8B7E6D]">Всего пользователей</div>
               <div className="text-2xl font-black text-[#1A1F1A] mt-1">{qualityAudit.totalUsers}</div>
-              <div className="text-[11px] text-[#2D5A27] font-medium mt-0.5">База синхронизирована</div>
+              <div className="text-[11px] text-[#2D5A27] font-medium mt-0.5">Активные профили туристов</div>
             </div>
 
             <div className="bg-white p-4 rounded-2xl border border-[#E5E0D8] shadow-2xs">
@@ -832,6 +827,81 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
                 {Math.max(0, qualityAudit.qualityScore)}%
               </div>
               <div className="text-[11px] text-[#8B7E6D] font-medium mt-0.5">Полнота паспортов рек</div>
+            </div>
+          </div>
+
+          {/* Quick Actions Hub */}
+          <div className="bg-white p-5 sm:p-6 rounded-3xl border border-[#E5E0D8] shadow-2xs space-y-3">
+            <h3 className="text-sm font-black text-[#1A1F1A] uppercase tracking-wider flex items-center gap-2">
+              <Compass className="w-4 h-4 text-[#8A3B14]" />
+              Центр оперативного управления разделами
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <button
+                onClick={() => setAdminTab('routes')}
+                className="p-3.5 rounded-2xl bg-[#F9F7F4] hover:bg-[#F0EBE1] border border-[#EEEBE6] text-left transition-colors flex items-center justify-between group"
+              >
+                <div>
+                  <div className="text-xs font-bold text-[#1A1F1A] group-hover:text-[#8A3B14] transition-colors">Паспорта рек & Маршруты</div>
+                  <div className="text-[11px] text-[#6B665F]">{filterActiveEntities(routes).length} рек • статусы, GPX, точки POI</div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-[#8B7E6D] group-hover:translate-x-1 transition-transform" />
+              </button>
+
+              <button
+                onClick={() => setAdminTab('trips')}
+                className="p-3.5 rounded-2xl bg-[#F9F7F4] hover:bg-[#F0EBE1] border border-[#EEEBE6] text-left transition-colors flex items-center justify-between group"
+              >
+                <div>
+                  <div className="text-xs font-bold text-[#1A1F1A] group-hover:text-[#8A3B14] transition-colors">Сплавы & Заявки</div>
+                  <div className="text-[11px] text-[#6B665F]">{filterActiveEntities(trips).length} экспедиций • модерация экипажей</div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-[#8B7E6D] group-hover:translate-x-1 transition-transform" />
+              </button>
+
+              <button
+                onClick={() => setAdminTab('travel_notes')}
+                className="p-3.5 rounded-2xl bg-[#F9F7F4] hover:bg-[#F0EBE1] border border-[#EEEBE6] text-left transition-colors flex items-center justify-between group"
+              >
+                <div>
+                  <div className="text-xs font-bold text-[#1A1F1A] group-hover:text-[#8A3B14] transition-colors">Путевые заметки & Отзывы</div>
+                  <div className="text-[11px] text-[#6B665F]">{qualityAudit.totalNotes} записей • дневники и отзывы о реках</div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-[#8B7E6D] group-hover:translate-x-1 transition-transform" />
+              </button>
+
+              <button
+                onClick={() => setAdminTab('faq_safety')}
+                className="p-3.5 rounded-2xl bg-[#F9F7F4] hover:bg-[#F0EBE1] border border-[#EEEBE6] text-left transition-colors flex items-center justify-between group"
+              >
+                <div>
+                  <div className="text-xs font-bold text-[#1A1F1A] group-hover:text-[#8A3B14] transition-colors">Безопасность & FAQ</div>
+                  <div className="text-[11px] text-[#6B665F]">{qualityAudit.faqCount} памяток • МЧС, медведи, радиосвязь</div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-[#8B7E6D] group-hover:translate-x-1 transition-transform" />
+              </button>
+
+              <button
+                onClick={() => setAdminTab('users')}
+                className="p-3.5 rounded-2xl bg-[#F9F7F4] hover:bg-[#F0EBE1] border border-[#EEEBE6] text-left transition-colors flex items-center justify-between group"
+              >
+                <div>
+                  <div className="text-xs font-bold text-[#1A1F1A] group-hover:text-[#8A3B14] transition-colors">Пользователи & Роли RBAC</div>
+                  <div className="text-[11px] text-[#6B665F]">{qualityAudit.totalUsers} участников • админы, организаторы</div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-[#8B7E6D] group-hover:translate-x-1 transition-transform" />
+              </button>
+
+              <button
+                onClick={() => setAdminTab('database')}
+                className="p-3.5 rounded-2xl bg-[#F9F7F4] hover:bg-[#F0EBE1] border border-[#EEEBE6] text-left transition-colors flex items-center justify-between group"
+              >
+                <div>
+                  <div className="text-xs font-bold text-[#1A1F1A] group-hover:text-[#8A3B14] transition-colors">База данных & Бэкап</div>
+                  <div className="text-[11px] text-[#6B665F]">Синхронизация Firestore + Cloud SQL, JSON экспорт</div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-[#8B7E6D] group-hover:translate-x-1 transition-transform" />
+              </button>
             </div>
           </div>
 
@@ -1181,182 +1251,180 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
         </div>
       )}
 
-      {/* 4. ARTICLES & KNOWLEDGE BASE MANAGEMENT */}
-      {adminTab === 'articles' && (
-        <div className="bg-white p-5 sm:p-7 rounded-3xl border border-[#E5E0D8] shadow-2xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-black text-[#1A1F1A]">
-                Управление статьями и гайдами ({articles.length})
-              </h2>
-              <p className="text-xs text-[#6B665F]">
-                Публикация, редактирование текстов, лоций, обложек и удаление материалов
-              </p>
-            </div>
-
-            <button
-              onClick={() => {
-                setEditingArticle({
-                  id: `art-${Date.now()}`,
-                  title: '',
-                  subtitle: '',
-                  author: currentUser?.name || 'Редакция SPLAV86',
-                  authorRank: 'Эксперт по водному туризму',
-                  riverName: 'Северная Сосьва',
-                  region: 'ХМАО',
-                  date: new Date().toISOString().split('T')[0],
-                  readTimeMin: 7,
-                  coverImage: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80',
-                  tags: ['Лоция', 'ХМАО', 'Безопасность'],
-                  summary: '',
-                  fullContent: ['Введение в маршрут...', 'Особенности сплава и стоянки...'],
-                  stats: { distanceKm: 120, days: 5, vessel: 'Байдарка / Катамаран', bestMonth: 'Июль' },
-                  gallery: []
-                });
-                setIsCreatingArticle(true);
-              }}
-              className="px-3.5 py-2 bg-[#2D5A27] hover:bg-[#3D7136] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Создать статью</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-            {articles.map((a) => (
-              <div key={a.id} className="p-4 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6] flex flex-col justify-between space-y-3">
-                <div className="flex gap-3">
-                  <img
-                    src={a.coverImage}
-                    alt={a.title}
-                    referrerPolicy="no-referrer"
-                    className="w-20 h-20 rounded-xl object-cover shrink-0 border border-[#E5E0D8]"
-                  />
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-md bg-[#2D5A27]/10 text-[#2D5A27]">
-                        {a.region}
-                      </span>
-                      <span className="text-[11px] text-[#8B7E6D]">{a.date}</span>
-                    </div>
-                    <h4 className="text-sm font-black text-[#1A1F1A] line-clamp-1">{a.title}</h4>
-                    <p className="text-xs text-[#6B665F] line-clamp-2">{a.summary || a.subtitle}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between border-t border-[#E5E0D8] pt-2.5 text-xs text-[#6B665F]">
-                  <span>Автор: <strong className="text-[#1A1F1A]">{a.author}</strong></span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => {
-                        setEditingArticle(a);
-                        setIsCreatingArticle(false);
-                      }}
-                      className="px-2.5 py-1 text-xs font-bold text-[#2D5A27] hover:bg-[#E8F1E7] rounded-lg transition-colors flex items-center gap-1"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      <span>Изменить</span>
-                    </button>
-                    <button
-                      onClick={() => handleDeleteArticleConfirmed(a.id, a.title)}
-                      className="p-1 text-[#E54B4B] hover:bg-red-50 rounded-lg transition-colors"
-                      title="Удалить"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 5. TRAVEL NOTES & CREW REVIEWS MODERATION */}
+      {/* 4. TRAVEL NOTES & COMMUNITY REVIEWS MODERATION */}
       {adminTab === 'travel_notes' && (
         <div className="bg-white p-5 sm:p-7 rounded-3xl border border-[#E5E0D8] shadow-2xs space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-black text-[#1A1F1A]">
-                Отчеты о реках и Отзывы экипажей
+                Путевые заметки, Отчеты и Отзывы сообщества ({qualityAudit.totalNotes})
               </h2>
               <p className="text-xs text-[#6B665F]">
-                Модерация пользовательских отчетов TravelNotes и взаимных отзывов туристов
+                Модерация пользовательских заметок о реках, взаимных отзывов об экипажах и снаряжения
               </p>
+            </div>
+            
+            {/* Filter Sub-tabs */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {[
+                { id: 'all', label: 'Все материалы' },
+                { id: 'notes', label: `Заметки (${(notesConfig.notes || []).length})` },
+                { id: 'river_reviews', label: `Отзывы о реках (${(notesConfig.riverReviews || []).length})` },
+                { id: 'crew_reviews', label: `Экипажи (${(notesConfig.crewReviews || []).length})` },
+                { id: 'checklist', label: `Чек-листы (${(notesConfig.checklist || []).length})` }
+              ].map((sub) => (
+                <button
+                  key={sub.id}
+                  onClick={() => setNotesSubTab(sub.id as any)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    notesSubTab === sub.id
+                      ? 'bg-[#2D5A27] text-white shadow-xs'
+                      : 'bg-[#F9F7F4] text-[#6B665F] hover:bg-[#EAE7E2]'
+                  }`}
+                >
+                  {sub.label}
+                </button>
+              ))}
             </div>
           </div>
 
           {/* Sub-section: Travel Notes */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-black text-[#1A1F1A] uppercase tracking-wider flex items-center gap-2">
-              <FileText className="w-4 h-4 text-[#2D5A27]" />
-              Заметки и отчеты о реках ({notesConfig.notes?.length || 0})
-            </h3>
+          {(notesSubTab === 'all' || notesSubTab === 'notes') && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-black text-[#1A1F1A] uppercase tracking-wider flex items-center gap-2">
+                <FileText className="w-4 h-4 text-[#2D5A27]" />
+                Заметки и отчеты о реках ({notesConfig.notes?.length || 0})
+              </h3>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {(notesConfig.notes || []).map((n) => (
-                <div key={n.id} className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6] flex flex-col justify-between space-y-2">
-                  <div>
-                    <div className="flex items-center justify-between text-xs text-[#8B7E6D]">
-                      <span className="font-bold text-[#2D5A27]">{n.riverName || 'Река'}</span>
-                      <span>{n.createdAt?.split('T')[0] || '2026'}</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {(notesConfig.notes || []).map((n) => (
+                  <div key={n.id} className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6] flex flex-col justify-between space-y-2">
+                    <div>
+                      <div className="flex items-center justify-between text-xs text-[#8B7E6D]">
+                        <span className="font-bold text-[#2D5A27]">{n.riverName || 'Река'}</span>
+                        <span>{n.createdAt?.split('T')[0] || '2026'}</span>
+                      </div>
+                      <h5 className="text-xs font-bold text-[#1A1F1A] mt-1">{n.title}</h5>
+                      <p className="text-xs text-[#6B665F] line-clamp-2 mt-1">{n.content}</p>
                     </div>
-                    <h5 className="text-xs font-bold text-[#1A1F1A] mt-1">{n.title}</h5>
-                    <p className="text-xs text-[#6B665F] line-clamp-2 mt-1">{n.content}</p>
+                    <div className="flex items-center justify-between border-t border-[#E5E0D8] pt-2 text-[11px] text-[#6B665F]">
+                      <span>Автор: {n.authorName || 'Турист'}</span>
+                      <button
+                        onClick={() => handleDeleteTravelNote(n.id)}
+                        className="text-[#E54B4B] hover:underline font-bold flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>В корзину</span>
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between border-t border-[#E5E0D8] pt-2 text-[11px] text-[#6B665F]">
-                    <span>Автор: {n.authorName || 'Турист'}</span>
-                    <button
-                      onClick={() => handleDeleteTravelNote(n.id)}
-                      className="text-[#E54B4B] hover:underline font-bold flex items-center gap-1"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      <span>Удалить</span>
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Sub-section: River Reviews */}
+          {(notesSubTab === 'all' || notesSubTab === 'river_reviews') && (
+            <div className="space-y-3 border-t border-[#EEEBE6] pt-4">
+              <h3 className="text-sm font-black text-[#1A1F1A] uppercase tracking-wider flex items-center gap-2">
+                <Compass className="w-4 h-4 text-[#2B4C7E]" />
+                Отзывы о реках ({notesConfig.riverReviews?.length || 0})
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {(notesConfig.riverReviews || []).map((rr) => (
+                  <div key={rr.id} className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6] flex flex-col justify-between space-y-2">
+                    <div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-[#1A1F1A]">р. {rr.riverName}</span>
+                        <span className="font-bold text-[#D97706]">★ {rr.ratingOverall} / 5</span>
+                      </div>
+                      <p className="text-xs text-[#6B665F] mt-1 italic">"{rr.comment}"</p>
+                    </div>
+                    <div className="flex items-center justify-between border-t border-[#E5E0D8] pt-2 text-[11px] text-[#6B665F]">
+                      <span>Автор: {rr.userName} ({rr.date})</span>
+                      <button
+                        onClick={() => handleDeleteRiverReview(rr.id)}
+                        className="text-[#E54B4B] hover:underline font-bold flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>В корзину</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Sub-section: Crew Reviews */}
-          <div className="space-y-3 border-t border-[#EEEBE6] pt-4">
-            <h3 className="text-sm font-black text-[#1A1F1A] uppercase tracking-wider flex items-center gap-2">
-              <Star className="w-4 h-4 text-[#D97706]" />
-              Отзывы об участниках экипажей ({notesConfig.crewReviews?.length || 0})
-            </h3>
+          {(notesSubTab === 'all' || notesSubTab === 'crew_reviews') && (
+            <div className="space-y-3 border-t border-[#EEEBE6] pt-4">
+              <h3 className="text-sm font-black text-[#1A1F1A] uppercase tracking-wider flex items-center gap-2">
+                <Star className="w-4 h-4 text-[#D97706]" />
+                Отзывы об участниках экипажей ({notesConfig.crewReviews?.length || 0})
+              </h3>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {(notesConfig.crewReviews || []).map((cr) => (
-                <div key={cr.id} className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6] flex flex-col justify-between space-y-2">
-                  <div>
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-bold text-[#1A1F1A]">О ком: {cr.targetUserName}</span>
-                      <span className="font-bold text-[#D97706]">★ {cr.ratingOverall} / 5</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {(notesConfig.crewReviews || []).map((cr) => (
+                  <div key={cr.id} className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6] flex flex-col justify-between space-y-2">
+                    <div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-[#1A1F1A]">О ком: {cr.targetUserName}</span>
+                        <span className="font-bold text-[#D97706]">★ {cr.ratingOverall} / 5</span>
+                      </div>
+                      <p className="text-xs text-[#6B665F] mt-1 italic">"{cr.comment}"</p>
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {cr.tags?.map((tg, idx) => (
+                          <span key={idx} className="text-[10px] px-1.5 py-0.5 rounded-md bg-[#E5E0D8] text-[#2D332D]">
+                            {tg}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                    <p className="text-xs text-[#6B665F] mt-1 italic">"{cr.comment}"</p>
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {cr.tags?.map((tg, idx) => (
-                        <span key={idx} className="text-[10px] px-1.5 py-0.5 rounded-md bg-[#E5E0D8] text-[#2D332D]">
-                          {tg}
-                        </span>
-                      ))}
+                    <div className="flex items-center justify-between border-t border-[#E5E0D8] pt-2 text-[11px] text-[#6B665F]">
+                      <span>От автора: {cr.authorUserName} ({cr.date})</span>
+                      <button
+                        onClick={() => handleDeleteCrewReview(cr.id)}
+                        className="text-[#E54B4B] hover:underline font-bold flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>В корзину</span>
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between border-t border-[#E5E0D8] pt-2 text-[11px] text-[#6B665F]">
-                    <span>От автора: {cr.authorUserName} ({cr.date})</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Sub-section: Checklist items */}
+          {(notesSubTab === 'all' || notesSubTab === 'checklist') && (
+            <div className="space-y-3 border-t border-[#EEEBE6] pt-4">
+              <h3 className="text-sm font-black text-[#1A1F1A] uppercase tracking-wider flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-[#2D5A27]" />
+                Шаблоны снаряжения чек-листа ({notesConfig.checklist?.length || 0})
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {(notesConfig.checklist || []).map((item) => (
+                  <div key={item.id} className="p-2.5 rounded-xl bg-[#F9F7F4] border border-[#EEEBE6] flex items-center justify-between text-xs">
+                    <div>
+                      <div className="font-bold text-[#1A1F1A]">{item.text}</div>
+                      <div className="text-[10px] text-[#8B7E6D]">{item.category}</div>
+                    </div>
                     <button
-                      onClick={() => handleDeleteCrewReview(cr.id)}
-                      className="text-[#E54B4B] hover:underline font-bold flex items-center gap-1"
+                      onClick={() => handleDeleteChecklistItem(item.id)}
+                      className="text-[#E54B4B] p-1 hover:bg-red-50 rounded"
+                      title="Удалить"
                     >
-                      <Trash2 className="w-3 h-3" />
-                      <span>Удалить</span>
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
         </div>
       )}
@@ -1852,7 +1920,7 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
         </div>
       )}
 
-      {/* 9. DATABASE & BACKUP */}
+      {/* 8. DATABASE & BACKUP */}
       {adminTab === 'database' && (
         <div className="bg-white p-5 sm:p-7 rounded-3xl border border-[#E5E0D8] shadow-2xs space-y-4">
           <h2 className="text-base font-black text-[#1A1F1A]">
@@ -1862,7 +1930,7 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
             Централизованное хранилище Firestore, репликация в Cloud SQL API и полный экспорт состояния
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
             <div className="p-4 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
               <div className="text-xs font-bold text-[#1A1F1A]">Маршруты (Routes)</div>
               <div className="text-lg font-black text-[#2D5A27]">{routes.length} записей</div>
@@ -1872,15 +1940,23 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
               <div className="text-lg font-black text-[#2D5A27]">{trips.length} записей</div>
             </div>
             <div className="p-4 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
-              <div className="text-xs font-bold text-[#1A1F1A]">Статьи & Лоции</div>
-              <div className="text-lg font-black text-[#2D5A27]">{articles.length} записей</div>
+              <div className="text-xs font-bold text-[#1A1F1A]">Заметки & Отзывы</div>
+              <div className="text-lg font-black text-[#2D5A27]">
+                {(notesConfig.notes || []).length + (notesConfig.crewReviews || []).length + (notesConfig.riverReviews || []).length} записей
+              </div>
+            </div>
+            <div className="p-4 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
+              <div className="text-xs font-bold text-[#1A1F1A]">FAQ & Безопасность</div>
+              <div className="text-lg font-black text-[#2D5A27]">
+                {(faqData.faqQuestions || []).length + (faqData.safetyGuides || []).length} записей
+              </div>
             </div>
           </div>
 
           <div className="p-4 rounded-2xl border border-[#E5E0D8] bg-[#FDFCFB] flex flex-col sm:flex-row items-center justify-between gap-3 mt-4">
             <div>
               <h4 className="text-xs font-bold text-[#1A1F1A]">Экспорт полного снапшота базы (JSON)</h4>
-              <p className="text-[11px] text-[#6B665F]">Скачать все маршруты, сплавы, статьи, FAQ и пользователей в один файл</p>
+              <p className="text-[11px] text-[#6B665F]">Скачать все маршруты, сплавы, заметки, FAQ и пользователей в один файл</p>
             </div>
             <button
               onClick={handleExportFullBackup}
@@ -1989,133 +2065,6 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
               </div>
             </div>
 
-          </div>
-        </div>
-      )}
-
-      {/* ARTICLE EDITOR MODAL */}
-      {(editingArticle || isCreatingArticle) && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-white rounded-3xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-5 sm:p-7 space-y-4 border border-[#E5E0D8] shadow-2xl animate-fadeIn">
-            <div className="flex items-center justify-between border-b border-[#EEEBE6] pb-3">
-              <h3 className="text-base font-black text-[#1A1F1A]">
-                {isCreatingArticle ? 'Создание новой статьи / гайда' : 'Редактирование статьи'}
-              </h3>
-              <button
-                onClick={() => {
-                  setEditingArticle(null);
-                  setIsCreatingArticle(false);
-                }}
-                className="p-1.5 text-[#8B7E6D] hover:text-[#1A1F1A] rounded-full hover:bg-gray-100"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {editingArticle && (
-              <div className="space-y-3 text-xs">
-                <div>
-                  <label className="font-bold text-[#1A1F1A] block mb-1">Заголовок статьи</label>
-                  <input
-                    type="text"
-                    value={editingArticle.title}
-                    onChange={(e) => setEditingArticle({ ...editingArticle, title: e.target.value })}
-                    className="w-full p-2.5 rounded-xl bg-[#F9F7F4] border border-[#E5E0D8] font-bold text-sm"
-                    placeholder="Например: Полный путеводитель по реке Собь"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="font-bold text-[#1A1F1A] block mb-1">Река</label>
-                    <input
-                      type="text"
-                      value={editingArticle.riverName}
-                      onChange={(e) => setEditingArticle({ ...editingArticle, riverName: e.target.value })}
-                      className="w-full p-2 rounded-xl bg-[#F9F7F4] border border-[#E5E0D8]"
-                    />
-                  </div>
-                  <div>
-                    <label className="font-bold text-[#1A1F1A] block mb-1">Регион</label>
-                    <select
-                      value={editingArticle.region}
-                      onChange={(e) => setEditingArticle({ ...editingArticle, region: e.target.value as any })}
-                      className="w-full p-2 rounded-xl bg-[#F9F7F4] border border-[#E5E0D8] font-bold"
-                    >
-                      <option value="ХМАО">ХМАО</option>
-                      <option value="ЯНАО">ЯНАО</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="font-bold text-[#1A1F1A] block mb-1">Автор</label>
-                    <input
-                      type="text"
-                      value={editingArticle.author}
-                      onChange={(e) => setEditingArticle({ ...editingArticle, author: e.target.value })}
-                      className="w-full p-2 rounded-xl bg-[#F9F7F4] border border-[#E5E0D8]"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="font-bold text-[#1A1F1A] block mb-1">URL Обложки статьи</label>
-                  <input
-                    type="text"
-                    value={editingArticle.coverImage}
-                    onChange={(e) => setEditingArticle({ ...editingArticle, coverImage: e.target.value })}
-                    className="w-full p-2 rounded-xl bg-[#F9F7F4] border border-[#E5E0D8]"
-                    placeholder="https://..."
-                  />
-                </div>
-
-                <div>
-                  <label className="font-bold text-[#1A1F1A] block mb-1">Краткое содержание (Summary)</label>
-                  <textarea
-                    rows={2}
-                    value={editingArticle.summary}
-                    onChange={(e) => setEditingArticle({ ...editingArticle, summary: e.target.value })}
-                    className="w-full p-2.5 rounded-xl bg-[#F9F7F4] border border-[#E5E0D8]"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-bold text-[#1A1F1A] block mb-1">Полный текст статьи (Абзацы или Markdown)</label>
-                  <textarea
-                    rows={8}
-                    value={Array.isArray(editingArticle.fullContent) ? editingArticle.fullContent.join('\n\n') : (editingArticle.content || '')}
-                    onChange={(e) => {
-                      const text = e.target.value;
-                      setEditingArticle({
-                        ...editingArticle,
-                        fullContent: text.split('\n\n').filter(Boolean),
-                        content: text
-                      });
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-[#F9F7F4] border border-[#E5E0D8] font-mono"
-                    placeholder="Введите текст статьи с переносами строк между абзацами..."
-                  />
-                </div>
-
-                <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#EEEBE6]">
-                  <button
-                    onClick={() => {
-                      setEditingArticle(null);
-                      setIsCreatingArticle(false);
-                    }}
-                    className="px-4 py-2 rounded-xl border border-[#E5E0D8] text-[#6B665F] font-bold hover:bg-gray-100"
-                  >
-                    Отмена
-                  </button>
-                  <button
-                    onClick={() => handleSaveArticle(editingArticle)}
-                    className="px-5 py-2 rounded-xl bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold flex items-center gap-1.5 shadow-xs"
-                  >
-                    <Save className="w-4 h-4" />
-                    <span>Сохранить статью</span>
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}

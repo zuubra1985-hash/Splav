@@ -211,8 +211,9 @@ app.use((req: AuthenticatedRequest, res, next) => {
   next();
 });
 
-// 4. Volumetric JSON body parsing limit (5MB)
-app.use(express.json({ limit: '5mb' }));
+// 4. Volumetric JSON body parsing limit (25MB for photo synchronization)
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ limit: '25mb', extended: true }));
 
 // 5. Rate Limiters
 const authLimiter = rateLimit({

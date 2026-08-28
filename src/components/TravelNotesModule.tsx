@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   BookOpen,
   Plus,
@@ -19,6 +19,7 @@ import {
   Flame,
   Share2,
   ChevronRight,
+  ChevronLeft,
   Info,
   Users,
   Eye,
@@ -32,7 +33,12 @@ import {
   Droplets,
   Navigation,
   Check,
-  MessageSquare
+  MessageSquare,
+  Upload,
+  Camera,
+  Loader2,
+  Maximize2,
+  X as CloseIcon
 } from 'lucide-react';
 import {
   TravelNote,
@@ -62,6 +68,7 @@ import {
   mergeCrewReviews,
   filterActiveEntities
 } from '../utils/syncMerge';
+import { compressImageFile } from '../utils/imageCompressor';
 
 interface TravelNotesModuleProps {
   routes: RiverRoute[];
@@ -159,7 +166,16 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
   const [noteFormAuthorName, setNoteFormAuthorName] = useState('');
   const [noteFormPhotos, setNoteFormPhotos] = useState<string[]>([]);
   const [photoInputUrl, setPhotoInputUrl] = useState('');
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [isCompressingPhotos, setIsCompressingPhotos] = useState(false);
+  const [isDraggingPhotos, setIsDraggingPhotos] = useState(false);
   const [noteFormPinned, setNoteFormPinned] = useState(false);
+
+  // Lightbox Modal state
+  const [lightboxPhotos, setLightboxPhotos] = useState<string[]>([]);
+  const [lightboxPhotoIndex, setLightboxPhotoIndex] = useState<number | null>(null);
+
+  const photoFileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync with Firestore, CloudSQL & LocalStorage
   const syncUpdatedConfig = (updatedPartial: Partial<TravelNotesConfig>) => {
@@ -242,22 +258,88 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
       setNoteFormPinned(false);
     }
     setPhotoInputUrl('');
+    setShowUrlInput(false);
     setIsNewNoteModalOpen(true);
+  };
+
+  // Device file upload with high-efficiency compression
+  const handleUploadPhotosFromDevice = async (files: FileList | File[]) => {
+    if (!files || files.length === 0) return;
+    setIsCompressingPhotos(true);
+    try {
+      const newUrls: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (!file.type || !file.type.startsWith('image/')) continue;
+        const compressedBase64 = await compressImageFile(file, 1280, 960, 0.75);
+        newUrls.push(compressedBase64);
+      }
+      if (newUrls.length > 0) {
+        setNoteFormPhotos((prev) => [...prev, ...newUrls]);
+      }
+    } catch (err: any) {
+      console.error('Error compressing image:', err);
+      alert(err.message || 'Ошибка при загрузке изображения');
+    } finally {
+      setIsCompressingPhotos(false);
+      if (photoFileInputRef.current) {
+        photoFileInputRef.current.value = '';
+      }
+    }
   };
 
   const handleAddPhotoUrl = () => {
     if (!photoInputUrl.trim()) return;
-    if (!photoInputUrl.startsWith('http://') && !photoInputUrl.startsWith('https://')) {
+    if (!photoInputUrl.startsWith('http://') && !photoInputUrl.startsWith('https://') && !photoInputUrl.startsWith('data:image/')) {
       alert('Пожалуйста, укажите корректную ссылку на изображение (начиная с https://)');
       return;
     }
     setNoteFormPhotos((prev) => [...prev, photoInputUrl.trim()]);
     setPhotoInputUrl('');
+    setShowUrlInput(false);
   };
 
-  const handleRemovePhotoUrl = (idx: number) => {
+  const handleRemovePhoto = (idx: number) => {
     setNoteFormPhotos((prev) => prev.filter((_, i) => i !== idx));
   };
+
+  const handleSetCoverPhoto = (idx: number) => {
+    if (idx === 0) return;
+    setNoteFormPhotos((prev) => {
+      const list = [...prev];
+      const [target] = list.splice(idx, 1);
+      return [target, ...list];
+    });
+  };
+
+  const handleOpenLightbox = (photos: string[], initialIdx = 0) => {
+    setLightboxPhotos(photos);
+    setLightboxPhotoIndex(initialIdx);
+  };
+
+  const handleCloseLightbox = () => {
+    setLightboxPhotoIndex(null);
+    setLightboxPhotos([]);
+  };
+
+  useEffect(() => {
+    if (lightboxPhotoIndex === null) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        handleCloseLightbox();
+      } else if (e.key === 'ArrowLeft') {
+        setLightboxPhotoIndex((prev) =>
+          prev !== null ? (prev - 1 + lightboxPhotos.length) % lightboxPhotos.length : null
+        );
+      } else if (e.key === 'ArrowRight') {
+        setLightboxPhotoIndex((prev) =>
+          prev !== null ? (prev + 1) % lightboxPhotos.length : null
+        );
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [lightboxPhotoIndex, lightboxPhotos.length]);
 
   const handleSaveNote = () => {
     if (!noteFormTitle.trim() || !noteFormContent.trim()) {
@@ -806,16 +888,30 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
 
             {/* Photos Gallery */}
             {viewingNote.photos && viewingNote.photos.length > 0 && (
-              <div className="space-y-2">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] text-[#6B665F]">
+                  <span className="font-bold text-[#1A1F1A]">Фотографии ({viewingNote.photos.length})</span>
+                  <span>Нажмите на фото для полноэкранного просмотра</span>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {viewingNote.photos.map((ph, idx) => (
-                    <div key={idx} className="rounded-xl overflow-hidden h-48 border border-[#E5E0D8] bg-stone-100">
+                    <div
+                      key={idx}
+                      onClick={() => handleOpenLightbox(viewingNote.photos || [], idx)}
+                      className="group relative rounded-xl overflow-hidden h-48 border border-[#E5E0D8] bg-stone-100 cursor-pointer"
+                    >
                       <img
                         src={ph}
-                        alt="Photo"
+                        alt={`Photo ${idx + 1}`}
                         referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       />
+                      <div className="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <div className="px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-xs text-white text-xs font-bold flex items-center gap-1.5">
+                          <Maximize2 className="w-3.5 h-3.5" />
+                          <span>Увеличить</span>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1058,40 +1154,180 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
                 />
               </div>
 
-              {/* Photos URL Input */}
-              <div>
-                <label className="block font-bold text-[#1A1F1A] mb-1">Фотографии похода (URL)</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="https://images.unsplash.com/..."
-                    value={photoInputUrl}
-                    onChange={(e) => setPhotoInputUrl(e.target.value)}
-                    className="flex-1 bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl px-3 py-2 text-xs text-[#1A1F1A] outline-none"
-                  />
+              {/* Photos Upload & Management Section */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block font-bold text-[#1A1F1A]">
+                    Фотографии похода ({noteFormPhotos.length})
+                  </label>
                   <button
                     type="button"
-                    onClick={handleAddPhotoUrl}
-                    className="px-3.5 py-2 bg-[#2D5A27] text-white text-xs font-bold rounded-xl hover:bg-[#3D7136] cursor-pointer"
+                    onClick={() => setShowUrlInput(!showUrlInput)}
+                    className="text-[11px] font-bold text-[#2D5A27] hover:underline cursor-pointer flex items-center gap-1"
                   >
-                    + Фото
+                    {showUrlInput ? '✕ Скрыть ввод ссылки' : '🔗 Вставить по ссылке (URL)'}
                   </button>
                 </div>
 
-                {noteFormPhotos.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-2">
-                    {noteFormPhotos.map((ph, i) => (
-                      <div key={i} className="relative w-14 h-14 rounded-lg overflow-hidden border border-[#E5E0D8]">
-                        <img src={ph} alt="Preview" className="w-full h-full object-cover" />
-                        <button
-                          type="button"
-                          onClick={() => handleRemovePhotoUrl(i)}
-                          className="absolute top-0 right-0 bg-red-600 text-white text-[10px] w-4 h-4 flex items-center justify-center cursor-pointer"
-                        >
-                          ✕
-                        </button>
+                {/* Hidden File Input for Device Files */}
+                <input
+                  type="file"
+                  ref={photoFileInputRef}
+                  accept="image/jpeg,image/png,image/webp,image/heic,image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      handleUploadPhotosFromDevice(e.target.files);
+                    }
+                  }}
+                />
+
+                {/* Drag and Drop Zone / Device Picker */}
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDraggingPhotos(true);
+                  }}
+                  onDragLeave={() => setIsDraggingPhotos(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDraggingPhotos(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                      handleUploadPhotosFromDevice(e.dataTransfer.files);
+                    }
+                  }}
+                  onClick={() => photoFileInputRef.current?.click()}
+                  className={`p-4 rounded-xl border-2 border-dashed transition-all cursor-pointer text-center space-y-2 select-none ${
+                    isDraggingPhotos
+                      ? 'border-[#2D5A27] bg-[#E8F1E7]/80 ring-2 ring-[#2D5A27]/20 scale-[1.01]'
+                      : 'border-[#DDD7CE] bg-[#F9F7F4] hover:bg-[#F4F1EA] hover:border-[#2D5A27]'
+                  }`}
+                >
+                  {isCompressingPhotos ? (
+                    <div className="flex flex-col items-center justify-center py-2 space-y-2">
+                      <Loader2 className="w-7 h-7 text-[#2D5A27] animate-spin" />
+                      <div className="text-xs font-bold text-[#2D5A27]">
+                        Сжатие и подготовка фото для быстрой синхронизации...
                       </div>
-                    ))}
+                      <div className="text-[10px] text-[#6B665F]">
+                        Автоматическая оптимизация размера без потери качества
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 py-1">
+                      <div className="flex items-center justify-center gap-2 text-[#2D5A27]">
+                        <Camera className="w-5 h-5" />
+                        <Upload className="w-5 h-5" />
+                      </div>
+                      <div className="text-xs font-bold text-[#1A1F1A]">
+                        Нажмите для выбора фото с телефона / ПК или перетащите сюда
+                      </div>
+                      <p className="text-[10px] text-[#8B7E6D]">
+                        Поддерживаются форматы JPG, PNG, WebP • Можно выбрать сразу несколько фото • Мгновенная синхронизация
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Optional URL Input */}
+                {showUrlInput && (
+                  <div className="flex gap-2 pt-1">
+                    <input
+                      type="text"
+                      placeholder="https://images.unsplash.com/... или ссылка на фото"
+                      value={photoInputUrl}
+                      onChange={(e) => setPhotoInputUrl(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddPhotoUrl();
+                        }
+                      }}
+                      className="flex-1 bg-[#F9F7F4] border border-[#E5E0D8] rounded-xl px-3 py-2 text-xs text-[#1A1F1A] outline-none focus:border-[#2D5A27]"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddPhotoUrl}
+                      className="px-3.5 py-2 bg-[#2D5A27] text-white text-xs font-bold rounded-xl hover:bg-[#3D7136] cursor-pointer"
+                    >
+                      + Добавить
+                    </button>
+                  </div>
+                )}
+
+                {/* Uploaded Photos Thumbnails & Controls */}
+                {noteFormPhotos.length > 0 && (
+                  <div className="space-y-1.5 pt-1.5">
+                    <div className="text-[11px] text-[#6B665F] flex items-center justify-between">
+                      <span>Первое фото будет главной обложкой карточки</span>
+                      <button
+                        type="button"
+                        onClick={() => photoFileInputRef.current?.click()}
+                        className="text-[#2D5A27] font-bold hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Добавить еще</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2.5">
+                      {noteFormPhotos.map((ph, idx) => (
+                        <div
+                          key={idx}
+                          className={`relative group rounded-xl overflow-hidden border aspect-square bg-stone-100 shadow-2xs ${
+                            idx === 0
+                              ? 'border-[#2D5A27] ring-2 ring-[#2D5A27]/30'
+                              : 'border-[#E5E0D8]'
+                          }`}
+                        >
+                          <img
+                            src={ph}
+                            alt={`Photo ${idx + 1}`}
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover cursor-pointer group-hover:scale-105 transition-transform"
+                            onClick={() => handleOpenLightbox(noteFormPhotos, idx)}
+                          />
+
+                          {/* Cover Badge */}
+                          {idx === 0 && (
+                            <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded-md bg-[#2D5A27] text-white text-[9px] font-bold shadow-xs">
+                              🌟 Обложка
+                            </div>
+                          )}
+
+                          {/* Hover action bar */}
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-1.5">
+                            <div className="flex items-center justify-end">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRemovePhoto(idx);
+                                }}
+                                title="Удалить фото"
+                                className="w-6 h-6 rounded-lg bg-rose-600/90 hover:bg-rose-600 text-white flex items-center justify-center text-xs shadow-xs cursor-pointer"
+                              >
+                                ✕
+                              </button>
+                            </div>
+
+                            {idx > 0 && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSetCoverPhoto(idx);
+                                }}
+                                className="w-full py-1 bg-white/90 hover:bg-white text-[#1A1F1A] text-[9px] font-bold rounded-md text-center shadow-xs cursor-pointer"
+                              >
+                                Сделать обложкой
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1156,6 +1392,75 @@ export const TravelNotesModule: React.FC<TravelNotesModuleProps> = ({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* =========================================================
+          LIGHTBOX MODAL (FULLSCREEN PHOTO VIEWER)
+          ========================================================= */}
+      {lightboxPhotoIndex !== null && lightboxPhotos.length > 0 && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 select-none"
+          onClick={handleCloseLightbox}
+        >
+          {/* Top Bar: Counter & Close */}
+          <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-10 text-white">
+            <div className="px-3 py-1.5 rounded-full bg-white/10 backdrop-blur-md text-xs font-bold border border-white/15">
+              Фото {lightboxPhotoIndex + 1} из {lightboxPhotos.length}
+            </div>
+            <button
+              onClick={handleCloseLightbox}
+              className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+              title="Закрыть (Esc)"
+            >
+              <CloseIcon className="w-6 h-6" />
+            </button>
+          </div>
+
+          {/* Previous Button */}
+          {lightboxPhotos.length > 1 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightboxPhotoIndex((prev) =>
+                  prev !== null ? (prev - 1 + lightboxPhotos.length) % lightboxPhotos.length : 0
+                );
+              }}
+              className="absolute left-3 sm:left-6 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer z-10"
+              title="Предыдущее фото (←)"
+            >
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+          )}
+
+          {/* Main Photo */}
+          <div
+            className="max-w-5xl max-h-[85vh] flex items-center justify-center relative p-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={lightboxPhotos[lightboxPhotoIndex]}
+              alt={`Photo ${lightboxPhotoIndex + 1}`}
+              referrerPolicy="no-referrer"
+              className="max-w-full max-h-[82vh] rounded-2xl object-contain shadow-2xl"
+            />
+          </div>
+
+          {/* Next Button */}
+          {lightboxPhotos.length > 1 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightboxPhotoIndex((prev) =>
+                  prev !== null ? (prev + 1) % lightboxPhotos.length : 0
+                );
+              }}
+              className="absolute right-3 sm:right-6 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer z-10"
+              title="Следующее фото (→)"
+            >
+              <ChevronRight className="w-6 h-6" />
+            </button>
+          )}
         </div>
       )}
 
