@@ -233,13 +233,14 @@ export default function App() {
       const stored = localStorage.getItem('splav86_custom_routes_v5');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
           const deleted = getDeletedRouteIds();
-          return parsed.filter((r) => !deleted.has(r.id));
+          const filtered = parsed.filter((r) => !deleted.has(r.id));
+          return mergeRoutes(RIVERS_DATA, filtered);
         }
       }
     } catch {}
-    return [];
+    return RIVERS_DATA;
   });
 
   const [articles, setArticles] = useState<ArticleReport[]>(() => {
@@ -247,13 +248,14 @@ export default function App() {
       const stored = localStorage.getItem('splav86_custom_articles');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
           const deleted = getDeletedArticleIds();
-          return parsed.filter((a) => !deleted.has(a.id));
+          const filtered = parsed.filter((a) => !deleted.has(a.id));
+          return mergeArticles(ARTICLES_DATA, filtered);
         }
       }
     } catch {}
-    return [];
+    return ARTICLES_DATA;
   });
 
   const [trips, setTrips] = useState<CompanionTrip[]>(() => {
@@ -261,13 +263,14 @@ export default function App() {
       const stored = localStorage.getItem('splav86_custom_trips_v5');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
           const deleted = getDeletedTripIds();
-          return parsed.filter((t) => !deleted.has(t.id));
+          const filtered = parsed.filter((t) => !deleted.has(t.id));
+          return mergeTrips(COMPANION_TRIPS_DATA, filtered);
         }
       }
     } catch {}
-    return [];
+    return COMPANION_TRIPS_DATA;
   });
 
   const [faqData, setFaqData] = useState<FaqDataConfig>(() => {
@@ -420,13 +423,14 @@ export default function App() {
     // 1. Initial SQL fetch and Subscribe to Trips (Real-time expeditions)
     CloudSqlDbService.fetchTrips().then((sqlTrips) => {
       if (sqlTrips && sqlTrips.length > 0) {
-        setTrips((prev) => filterActiveEntities(mergeTrips(prev, sqlTrips)));
+        setTrips((prev) => filterActiveEntities(mergeTrips(prev.length > 0 ? prev : COMPANION_TRIPS_DATA, sqlTrips)));
       }
     }).catch(console.warn);
 
     const unsubTrips = TripsSyncService.subscribeToTrips((cloudTrips) => {
       setTrips((prev) => {
-        const merged = mergeTrips(prev, cloudTrips || []);
+        const base = prev.length > 0 ? prev : COMPANION_TRIPS_DATA;
+        const merged = mergeTrips(base, cloudTrips || []);
         const active = filterActiveEntities(merged);
         try {
           localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(active));
@@ -440,13 +444,14 @@ export default function App() {
     // 2. Initial SQL fetch and Subscribe to Routes (River passports and catalog)
     CloudSqlDbService.fetchRoutes().then((sqlRoutes) => {
       if (sqlRoutes && sqlRoutes.length > 0) {
-        setRoutes((prev) => filterActiveEntities(mergeRoutes(prev, sqlRoutes)));
+        setRoutes((prev) => filterActiveEntities(mergeRoutes(prev.length > 0 ? prev : RIVERS_DATA, sqlRoutes)));
       }
     }).catch(console.warn);
 
     const unsubRoutes = RoutesSyncService.subscribeToRoutes((cloudRoutes) => {
       setRoutes((prev) => {
-        const merged = mergeRoutes(prev, cloudRoutes || []);
+        const base = prev.length > 0 ? prev : RIVERS_DATA;
+        const merged = mergeRoutes(base, cloudRoutes || []);
         const active = filterActiveEntities(merged);
         try {
           localStorage.setItem('splav86_custom_routes_v5', JSON.stringify(active));
@@ -460,7 +465,7 @@ export default function App() {
     // 3. Subscribe to Users (Tourists, Organizers, Admins)
     CloudSqlDbService.fetchUsers().then((sqlUsers) => {
       if (sqlUsers && sqlUsers.length > 0) {
-        setRegisteredUsers((prev) => filterActiveEntities(mergeUsers(prev, sqlUsers)));
+        setRegisteredUsers((prev) => filterActiveEntities(mergeUsers(prev.length > 0 ? prev : INITIAL_USERS, sqlUsers)));
       }
     }).catch(console.warn);
 
@@ -475,7 +480,7 @@ export default function App() {
         }
       } else {
         setRegisteredUsers((prev) => {
-          const merged = mergeUsers(prev, cloudUsers);
+          const merged = mergeUsers(prev.length > 0 ? prev : INITIAL_USERS, cloudUsers);
           const active = filterActiveEntities(merged);
           try {
             localStorage.setItem('splav86_users', JSON.stringify(active));
@@ -490,13 +495,14 @@ export default function App() {
     // 4. Initial SQL fetch and Subscribe to Articles & Reports
     CloudSqlDbService.fetchArticles().then((sqlArticles) => {
       if (sqlArticles && sqlArticles.length > 0) {
-        setArticles((prev) => filterActiveEntities(mergeArticles(prev, sqlArticles)));
+        setArticles((prev) => filterActiveEntities(mergeArticles(prev.length > 0 ? prev : ARTICLES_DATA, sqlArticles)));
       }
     }).catch(console.warn);
 
     const unsubArticles = ArticlesSyncService.subscribeToArticles((cloudArticles) => {
       setArticles((prev) => {
-        const merged = mergeArticles(prev, cloudArticles || []);
+        const base = prev.length > 0 ? prev : ARTICLES_DATA;
+        const merged = mergeArticles(base, cloudArticles || []);
         const active = filterActiveEntities(merged);
         try {
           localStorage.setItem('splav86_custom_articles', JSON.stringify(active));
@@ -762,15 +768,16 @@ export default function App() {
 
     // If current user is the deleted user, log out
     if (currentUser && (currentUser.id === userId || (targetEmail && currentUser.email?.trim().toLowerCase() === targetEmail))) {
-      setCurrentUser(null);
-      try {
-        localStorage.removeItem('splav86_current_user');
-      } catch (e) {}
+      handleLogout();
     }
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
+    try {
+      localStorage.removeItem('splav86_current_user');
+    } catch (e) {}
+    CloudSqlDbService.logout().catch(console.warn);
   };
 
   const handleUpdateCurrentUser = (updatedUser: AppUser) => {
@@ -779,7 +786,13 @@ export default function App() {
       isDeleted: false,
       updatedAt: new Date().toISOString()
     };
-    setCurrentUser(userWithMeta);
+    
+    if (currentUser && (currentUser.id === userWithMeta.id || currentUser.email?.trim().toLowerCase() === userWithMeta.email?.trim().toLowerCase())) {
+      setCurrentUser(userWithMeta);
+      try {
+        localStorage.setItem('splav86_current_user', JSON.stringify(userWithMeta));
+      } catch (e) {}
+    }
 
     // 1. Update in registeredUsers list (by ID and normalized Email)
     const normEmail = (userWithMeta.email || '').trim().toLowerCase();
@@ -1624,6 +1637,7 @@ export default function App() {
               onUpdateNotesConfig={setNotesConfig}
               onUpdateFaqData={setFaqData}
               onUpdateUserRole={handleUpdateUserRole}
+              onUpdateUser={handleUpdateCurrentUser}
               onDeleteUser={handleDeleteUser}
               onDeleteRoute={handleDeleteRoute}
               onDeleteTrip={handleDeleteTrip}

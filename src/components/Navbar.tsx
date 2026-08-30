@@ -236,7 +236,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             activeTab === 'cabinet' || activeTab === 'admin' ? 'text-[#2D5A27] font-black' : 'text-[#6B665F]'
           }`}
         >
-          <User className={`w-5 h-5 ${activeTab === 'cabinet' || activeTab === 'admin' ? 'stroke-[2.5]' : 'stroke-2'}`} />
+          {currentUser?.avatar ? (
+            <img
+              src={currentUser.avatar}
+              alt={currentUser.name}
+              className={`w-5 h-5 rounded-full object-cover border ${
+                activeTab === 'cabinet' || activeTab === 'admin' ? 'border-[#2D5A27] ring-1 ring-[#2D5A27]' : 'border-gray-300'
+              }`}
+            />
+          ) : (
+            <User className={`w-5 h-5 ${activeTab === 'cabinet' || activeTab === 'admin' ? 'stroke-[2.5]' : 'stroke-2'}`} />
+          )}
           <span className="text-[10px] mt-0.5 leading-none">{currentUser ? 'Профиль' : 'Войти'}</span>
         </button>
       </div>

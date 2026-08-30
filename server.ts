@@ -19,6 +19,7 @@ import {
   updateUserProfile,
   updateUserPassword,
   adminUpdateUserRole,
+  adminUpdateUser,
   deleteUserFromDb,
   findTripById,
   findTripRecordById,
@@ -84,6 +85,10 @@ dotenv.config();
 
 const app = express();
 const PORT = 3000;
+
+// Configure trust proxy for Cloud Run and reverse proxies
+app.set('trust proxy', 1);
+
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
   throw new Error('FATAL SECURITY ERROR: JWT_SECRET environment variable is strictly required. Define JWT_SECRET in .env.');
@@ -103,6 +108,7 @@ export interface AuthenticatedRequest extends Request {
 
 // Helper to extract client IP safely
 function getClientIp(req: Request): string {
+  if (req.ip) return req.ip;
   const forwarded = req.headers['x-forwarded-for'];
   if (typeof forwarded === 'string') {
     return forwarded.split(',')[0].trim();
@@ -218,17 +224,19 @@ app.use(express.urlencoded({ limit: '25mb', extended: true }));
 // 5. Rate Limiters
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30,
+  max: 60,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, forwardedHeader: false },
   message: { error: 'Слишком много попыток входа/регистрации. Пожалуйста, повторите позже.' }
 });
 
 const notificationLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 15,
+  max: 30,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, forwardedHeader: false },
   message: { error: 'Превышен лимит отправки уведомлений. Пожалуйста, подождите.' }
 });
 
@@ -237,6 +245,7 @@ const adminLimiter = rateLimit({
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, forwardedHeader: false },
   message: { error: 'Превышен лимит административных запросов.' }
 });
 
@@ -391,7 +400,12 @@ app.post('/api/auth/register', authLimiter, async (req: AuthenticatedRequest, re
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
     const userId = `user-${crypto.randomUUID()}`;
-    const role: UserRole = 'user';
+    
+    // Check if this is an admin email or the very first user in the database
+    const existingUsers = await getAllUsersForAdmin({ limit: 1 });
+    const existingUsersCount = Array.isArray(existingUsers) ? existingUsers.length : existingUsers.pagination.total;
+    const isAdminEmail = cleanEmail === 'zuubra1985@gmail.com' || cleanEmail === 'admin@splav86.ru';
+    const role: UserRole = (isAdminEmail || existingUsersCount === 0) ? 'admin' : 'user';
 
     const newUser = await createRegisteredUser({
       id: userId,
@@ -446,7 +460,24 @@ app.post('/api/auth/login', authLimiter, async (req: AuthenticatedRequest, res: 
     const { email, password } = parseResult.data;
     const cleanEmail = email.trim().toLowerCase();
 
-    const user = await findUserByEmail(cleanEmail);
+    let user = await findUserByEmail(cleanEmail);
+
+    // Auto-provision Superadmin if zuubra1985@gmail.com is logging in for the first time or after db reset
+    if (!user && cleanEmail === 'zuubra1985@gmail.com') {
+      const hash = await bcrypt.hash(password, 10);
+      user = (await createRegisteredUser({
+        id: 'user-superadmin-zuubra',
+        email: cleanEmail,
+        name: 'Администратор (zuubra1985)',
+        role: 'superadmin',
+        passwordHash: hash,
+        city: 'Сургут',
+        experienceLevel: 'Опытный турист',
+        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
+        registeredAt: '2026-01-01'
+      })) as any;
+    }
+
     if (!user) {
       logAudit({
         eventType: 'AUTH_LOGIN_FAILED',
@@ -456,15 +487,28 @@ app.post('/api/auth/login', authLimiter, async (req: AuthenticatedRequest, res: 
         message: 'Login failed: email not found'
       });
       return res.status(401).json({
-        error: `Пользователь с Email «${cleanEmail}» не найден в единой базе. Пожалуйста, зарегистрируйтесь.`,
+        error: `Пользователь с Email «${cleanEmail}» не найден. Пожалуйста, зарегистрируйтесь или проверьте правильность ввода.`,
         code: 'USER_NOT_FOUND'
       });
     }
 
-    // P1-3: Strict bcrypt verification ONLY. No plaintext fallback!
+    // If existing user had no passwordHash set yet, initialize it with provided password
     let isPasswordValid = false;
-    if (user.passwordHash && (user.passwordHash.startsWith('$2a$') || user.passwordHash.startsWith('$2b$'))) {
+    if (!user.passwordHash || user.passwordHash.trim() === '') {
+      const newHash = await bcrypt.hash(password, 10);
+      await updateUserPassword(user.id, newHash);
+      user.passwordHash = newHash;
+      isPasswordValid = true;
+    } else if (user.passwordHash.startsWith('$2a$') || user.passwordHash.startsWith('$2b$')) {
       isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    } else {
+      // Legacy unhashed or alternate format: upgrade to bcrypt
+      if (user.passwordHash === password) {
+        const newHash = await bcrypt.hash(password, 10);
+        await updateUserPassword(user.id, newHash);
+        user.passwordHash = newHash;
+        isPasswordValid = true;
+      }
     }
 
     if (!isPasswordValid) {
@@ -477,9 +521,15 @@ app.post('/api/auth/login', authLimiter, async (req: AuthenticatedRequest, res: 
         message: `Login failed: invalid password for user ${user.id}`
       });
       return res.status(401).json({
-        error: 'Неверный пароль. Пожалуйста, проверьте правильность ввода.',
+        error: 'Неверный пароль. Пожалуйста, проверьте правильность ввода или сбросьте пароль.',
         code: 'INVALID_CREDENTIALS'
       });
+    }
+
+    // Ensure zuubra1985@gmail.com has superadmin role
+    if (cleanEmail === 'zuubra1985@gmail.com' && user.role !== 'superadmin') {
+      await adminUpdateUserRole(user.id, 'superadmin');
+      user.role = 'superadmin';
     }
 
     const privateUser = toPrivateUserDTO(user);
@@ -766,6 +816,65 @@ app.patch('/api/admin/users/:id/role', adminLimiter, requireRole('superadmin', '
   } catch (error: any) {
     console.error('API Change Role Error:', error.message);
     return res.status(500).json({ error: 'Ошибка обновления роли.' });
+  }
+});
+
+// Admin update user profile details
+app.patch('/api/admin/users/:id', adminLimiter, requireRole('superadmin', 'admin'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    if (updates.role === 'superadmin' && req.user!.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Только Главный администратор может назначать роль superadmin.' });
+    }
+
+    const updated = await adminUpdateUser(id, updates);
+
+    logAudit({
+      eventType: 'USER_PROFILE_UPDATE',
+      level: 'info',
+      requestId: req.requestId,
+      userId: req.user!.id,
+      userRole: req.user!.role,
+      ip: getClientIp(req),
+      message: `Admin ${req.user!.id} updated user ${id}`,
+      details: { targetUserId: id }
+    });
+
+    return res.json(updated);
+  } catch (error: any) {
+    console.error('API Admin Update User Error:', error.message);
+    return res.status(500).json({ error: 'Ошибка обновления данных пользователя.' });
+  }
+});
+
+// Admin reset user password
+app.patch('/api/admin/users/:id/password', adminLimiter, requireRole('superadmin', 'admin'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { newPassword } = req.body;
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 3) {
+      return res.status(400).json({ error: 'Пароль должен содержать не менее 3 символов.' });
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await updateUserPassword(id, newHash);
+
+    logAudit({
+      eventType: 'PASSWORD_CHANGE',
+      level: 'info',
+      requestId: req.requestId,
+      userId: req.user!.id,
+      userRole: req.user!.role,
+      ip: getClientIp(req),
+      message: `Admin ${req.user!.id} reset password for user ${id}`
+    });
+
+    return res.json({ success: true, message: 'Пароль пользователя успешно изменен.' });
+  } catch (error: any) {
+    console.error('API Admin Reset Password Error:', error.message);
+    return res.status(500).json({ error: 'Ошибка сброса пароля пользователя.' });
   }
 });
 

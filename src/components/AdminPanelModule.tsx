@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
   AppUser, 
   UserRole, 
@@ -56,6 +56,8 @@ import {
   ExternalLink,
   HelpCircle,
   RotateCcw,
+  Camera,
+  Key,
   X
 } from 'lucide-react';
 import { CloudSqlDbService } from '../services/cloudSqlDb';
@@ -69,6 +71,7 @@ import {
 } from '../firebase';
 import { CentralSyncManager } from '../services/centralSyncManager';
 import { filterActiveEntities, filterDeletedEntities } from '../utils/syncMerge';
+import { compressAvatarFile } from '../utils/imageCompressor';
 
 interface AdminPanelModuleProps {
   currentUser: AppUser | null;
@@ -85,6 +88,7 @@ interface AdminPanelModuleProps {
   onUpdateNotesConfig?: (config: TravelNotesConfig) => void;
   onUpdateFaqData?: (faq: FaqDataConfig) => void;
   onUpdateUserRole: (userId: string, newRole: UserRole) => void;
+  onUpdateUser?: (updatedUser: AppUser) => void;
   onDeleteUser: (userId: string) => void;
   onDeleteRoute?: (routeId: string) => void;
   onDeleteTrip?: (tripId: string) => void;
@@ -108,6 +112,7 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   onUpdateNotesConfig,
   onUpdateFaqData,
   onUpdateUserRole,
+  onUpdateUser,
   onDeleteUser,
   onDeleteRoute,
   onDeleteTrip,
@@ -157,6 +162,93 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   const [isCreatingSafetyGuide, setIsCreatingSafetyGuide] = useState<boolean>(false);
 
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
+  const [userToDelete, setUserToDelete] = useState<AppUser | null>(null);
+  const [userNewPassword, setUserNewPassword] = useState<string>('');
+  const [userActionMessage, setUserActionMessage] = useState<string>('');
+  const [isSavingUser, setIsSavingUser] = useState<boolean>(false);
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleUserAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !editingUser) return;
+    try {
+      const compressed = await compressAvatarFile(file);
+      setEditingUser({ ...editingUser, avatar: compressed });
+      setUserActionMessage('Фото успешно загружено и сжато');
+    } catch (err) {
+      console.warn('Avatar compression error:', err);
+      setUserActionMessage('Ошибка загрузки фото');
+    }
+  };
+
+  const handleSaveUser = async () => {
+    if (!editingUser) return;
+    setIsSavingUser(true);
+    setUserActionMessage('');
+    try {
+      const updatedUser: AppUser = {
+        ...editingUser,
+        isDeleted: false,
+        updatedAt: new Date().toISOString()
+      };
+
+      // 1. Call prop handler
+      if (onUpdateUser) {
+        onUpdateUser(updatedUser);
+      }
+      
+      // 2. Call CloudSQL update
+      try {
+        await CloudSqlDbService.adminUpdateUser(updatedUser.id, updatedUser);
+      } catch (err) {
+        console.warn('Admin API update user note:', err);
+      }
+
+      // 3. Sync to CentralSyncManager
+      CentralSyncManager.saveUser(updatedUser).catch(console.warn);
+
+      // 4. Update role if changed
+      if (editingUser.role) {
+        onUpdateUserRole(editingUser.id, editingUser.role);
+      }
+
+      setUserActionMessage('Данные пользователя успешно сохранены');
+      setTimeout(() => {
+        setEditingUser(null);
+        setUserActionMessage('');
+      }, 700);
+    } catch (err: any) {
+      setUserActionMessage(err.message || 'Ошибка сохранения данных');
+    } finally {
+      setIsSavingUser(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!editingUser || !userNewPassword.trim()) return;
+    try {
+      await CloudSqlDbService.adminResetUserPassword(editingUser.id, userNewPassword.trim());
+      setUserActionMessage('Пароль пользователя успешно обновлен!');
+      setUserNewPassword('');
+    } catch (err: any) {
+      setUserActionMessage(err.message || 'Ошибка смены пароля');
+    }
+  };
+
+  const handleConfirmDeleteUser = async () => {
+    if (!userToDelete) return;
+    try {
+      onDeleteUser(userToDelete.id);
+      try {
+        await CloudSqlDbService.adminDeleteUser(userToDelete.id);
+      } catch (e) {
+        console.warn('CloudSQL admin delete note:', e);
+      }
+      setUserToDelete(null);
+    } catch (err: any) {
+      console.error('Failed to delete user:', err);
+    }
+  };
 
   // 1. DATA QUALITY AUDIT METRICS
   const qualityAudit = useMemo(() => {
@@ -233,13 +325,85 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
       articles,
       faqData,
       notesConfig,
-      registeredUsers: registeredUsers.map(u => ({ ...u, password: '[PROTECTED]' }))
+      registeredUsers: registeredUsers.map(u => ({ ...u, password: '[PROTECTED]', passwordHash: '[PROTECTED]' }))
     };
     const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `splav86_full_backup_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Export Users JSON
+  const handleExportUsers = () => {
+    const usersData = {
+      exportedAt: new Date().toISOString(),
+      totalUsers: registeredUsers.length,
+      users: registeredUsers.map(u => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        phone: u.phone,
+        city: u.city,
+        experienceLevel: u.experienceLevel,
+        telegram: u.telegram,
+        vk: u.vk,
+        vesselsOwned: u.vesselsOwned,
+        gearInventory: u.gearInventory,
+        badges: u.badges,
+        fstrRank: u.fstrRank,
+        registeredAt: u.registeredAt,
+        updatedAt: u.updatedAt
+      }))
+    };
+    const blob = new Blob([JSON.stringify(usersData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `splav86_users_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Export Notes and Reviews JSON
+  const handleExportNotes = () => {
+    const notesData = {
+      exportedAt: new Date().toISOString(),
+      travelNotes: notesConfig.notes || [],
+      riverReviews: notesConfig.riverReviews || [],
+      crewReviews: notesConfig.crewReviews || [],
+      checklist: notesConfig.checklist || []
+    };
+    const blob = new Blob([JSON.stringify(notesData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `splav86_travel_notes_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Export Routes Catalog JSON
+  const handleExportRoutes = () => {
+    const routesData = {
+      exportedAt: new Date().toISOString(),
+      totalRoutes: routes.length,
+      routes
+    };
+    const blob = new Blob([JSON.stringify(routesData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `splav86_routes_${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -953,15 +1117,26 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
               </p>
             </div>
 
-            {onOpenPassportEditor && (
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => onOpenPassportEditor(null)}
-                className="px-3.5 py-2 bg-[#2D5A27] hover:bg-[#3D7136] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-colors"
+                onClick={handleExportRoutes}
+                className="px-3.5 py-2 bg-[#F9F7F4] hover:bg-[#EAE7E2] text-[#1A1F1A] border border-[#E5E0D8] text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors"
+                title="Скачать все паспорта рек в формате JSON"
               >
-                <Plus className="w-4 h-4" />
-                <span>Создать паспорт реки</span>
+                <Download className="w-4 h-4 text-[#8A3B14]" />
+                <span>Экспорт маршрутов</span>
               </button>
-            )}
+
+              {onOpenPassportEditor && (
+                <button
+                  onClick={() => onOpenPassportEditor(null)}
+                  className="px-3.5 py-2 bg-[#2D5A27] hover:bg-[#3D7136] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Создать паспорт реки</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Filters & Search */}
@@ -1264,27 +1439,38 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
               </p>
             </div>
             
-            {/* Filter Sub-tabs */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {[
-                { id: 'all', label: 'Все материалы' },
-                { id: 'notes', label: `Заметки (${(notesConfig.notes || []).length})` },
-                { id: 'river_reviews', label: `Отзывы о реках (${(notesConfig.riverReviews || []).length})` },
-                { id: 'crew_reviews', label: `Экипажи (${(notesConfig.crewReviews || []).length})` },
-                { id: 'checklist', label: `Чек-листы (${(notesConfig.checklist || []).length})` }
-              ].map((sub) => (
-                <button
-                  key={sub.id}
-                  onClick={() => setNotesSubTab(sub.id as any)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                    notesSubTab === sub.id
-                      ? 'bg-[#2D5A27] text-white shadow-xs'
-                      : 'bg-[#F9F7F4] text-[#6B665F] hover:bg-[#EAE7E2]'
-                  }`}
-                >
-                  {sub.label}
-                </button>
-              ))}
+            {/* Filter Sub-tabs and Export */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {[
+                  { id: 'all', label: 'Все материалы' },
+                  { id: 'notes', label: `Заметки (${(notesConfig.notes || []).length})` },
+                  { id: 'river_reviews', label: `Отзывы о реках (${(notesConfig.riverReviews || []).length})` },
+                  { id: 'crew_reviews', label: `Экипажи (${(notesConfig.crewReviews || []).length})` },
+                  { id: 'checklist', label: `Чек-листы (${(notesConfig.checklist || []).length})` }
+                ].map((sub) => (
+                  <button
+                    key={sub.id}
+                    onClick={() => setNotesSubTab(sub.id as any)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      notesSubTab === sub.id
+                        ? 'bg-[#2D5A27] text-white shadow-xs'
+                        : 'bg-[#F9F7F4] text-[#6B665F] hover:bg-[#EAE7E2]'
+                    }`}
+                  >
+                    {sub.label}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={handleExportNotes}
+                className="px-3 py-1.5 bg-[#F9F7F4] hover:bg-[#EAE7E2] text-[#1A1F1A] border border-[#E5E0D8] text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors"
+                title="Скачать все заметки и отзывы в формате JSON"
+              >
+                <Download className="w-3.5 h-3.5 text-purple-600" />
+                <span>Экспорт заметок</span>
+              </button>
             </div>
           </div>
 
@@ -1581,6 +1767,15 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
                 Назначение прав: Пользователь / Организатор / Редактор / Администратор / Суперадмин
               </p>
             </div>
+
+            <button
+              onClick={handleExportUsers}
+              className="px-3.5 py-2 bg-[#F9F7F4] hover:bg-[#EAE7E2] text-[#1A1F1A] border border-[#E5E0D8] text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors"
+              title="Скачать список пользователей в формате JSON"
+            >
+              <Download className="w-4 h-4 text-blue-600" />
+              <span>Экспорт пользователей</span>
+            </button>
           </div>
 
           <div className="overflow-x-auto">
@@ -1596,24 +1791,48 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
               </thead>
               <tbody className="divide-y divide-[#EEEBE6]">
                 {registeredUsers.map((u) => (
-                  <tr key={u.id} className="hover:bg-[#F9F7F4]">
+                  <tr key={u.id} className="hover:bg-[#F9F7F4] transition-colors">
                     <td className="py-3 px-3">
-                      <div className="font-bold text-[#1A1F1A]">{u.name}</div>
-                      <div className="text-[11px] text-[#6B665F]">Опыт: {u.experienceLevel || u.experience || 'Турист'}</div>
+                      <div className="flex items-center gap-3">
+                        <div className="relative shrink-0">
+                          {u.avatar ? (
+                            <img
+                              src={u.avatar}
+                              alt={u.name}
+                              className="w-9 h-9 rounded-xl object-cover border border-[#CDE0CC]"
+                            />
+                          ) : (
+                            <div className="w-9 h-9 rounded-xl bg-[#2D5A27] text-white flex items-center justify-center font-bold text-xs">
+                              {u.name ? u.name.charAt(0).toUpperCase() : 'U'}
+                            </div>
+                          )}
+                        </div>
+                        <div>
+                          <div className="font-bold text-[#1A1F1A] flex items-center gap-1.5">
+                            <span>{u.name}</span>
+                            {u.id === currentUser?.id && (
+                              <span className="text-[10px] bg-[#E8F1E7] text-[#2D5A27] font-bold px-1.5 py-0.2 rounded">Вы</span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-[#6B665F]">Опыт: {u.experienceLevel || u.experience || 'Турист'}</div>
+                        </div>
+                      </div>
                     </td>
                     <td className="py-3 px-3 text-[11px] text-[#4A443E]">
-                      <div>{u.email}</div>
+                      <div className="font-mono">{u.email}</div>
                       {u.phone && <div>{u.phone}</div>}
+                      {u.telegram && <div className="text-blue-600">{u.telegram}</div>}
                     </td>
                     <td className="py-3 px-3 text-[11px]">
-                      {u.callsign && <span className="font-mono font-bold text-[#2D5A27]">{u.callsign}</span>}
+                      {u.callsign && <span className="font-mono font-bold text-[#2D5A27] block">{u.callsign}</span>}
                       {u.fstrRank && <div className="text-[#8B7E6D]">{u.fstrRank}</div>}
+                      {u.city && <div className="text-[#6B665F] text-[10px]">г. {u.city}</div>}
                     </td>
                     <td className="py-3 px-3">
                       <select
                         value={u.role}
                         onChange={(e) => onUpdateUserRole(u.id, e.target.value as any)}
-                        className="px-2.5 py-1 rounded-lg text-xs font-bold border border-[#E5E0D8] bg-white"
+                        className="px-2.5 py-1 rounded-lg text-xs font-bold border border-[#E5E0D8] bg-white cursor-pointer"
                       >
                         <option value="user">Пользователь</option>
                         <option value="organizer">Организатор</option>
@@ -1623,25 +1842,27 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
                       </select>
                     </td>
                     <td className="py-3 px-3 text-right">
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="flex items-center justify-end gap-1.5">
                         <button
-                          onClick={() => setEditingUser(u)}
-                          className="p-1.5 text-[#2D5A27] hover:bg-[#E8F1E7] rounded-lg transition-colors"
-                          title="Редактировать профиль"
+                          onClick={() => {
+                            setEditingUser({ ...u });
+                            setUserNewPassword('');
+                            setUserActionMessage('');
+                          }}
+                          className="px-2.5 py-1.5 bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                          title="Редактировать профиль и аватар"
                         >
-                          <Edit3 className="w-4 h-4" />
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Изменить</span>
                         </button>
                         {u.id !== currentUser?.id && (
                           <button
-                            onClick={() => {
-                              if (window.confirm(`Удалить пользователя ${u.name}?`)) {
-                                onDeleteUser(u.id);
-                              }
-                            }}
-                            className="p-1.5 text-[#E54B4B] hover:bg-red-50 rounded-lg transition-colors"
-                            title="Удалить"
+                            onClick={() => setUserToDelete(u)}
+                            className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                            title="Удалить пользователя"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Удалить</span>
                           </button>
                         )}
                       </div>
@@ -1953,18 +2174,87 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl border border-[#E5E0D8] bg-[#FDFCFB] flex flex-col sm:flex-row items-center justify-between gap-3 mt-4">
-            <div>
-              <h4 className="text-xs font-bold text-[#1A1F1A]">Экспорт полного снапшота базы (JSON)</h4>
-              <p className="text-[11px] text-[#6B665F]">Скачать все маршруты, сплавы, заметки, FAQ и пользователей в один файл</p>
+          <div className="space-y-3 mt-4">
+            <h3 className="text-xs font-black uppercase text-[#1A1F1A] tracking-wider">
+              Целевой экспорт разделов базы данных
+            </h3>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Export Users */}
+              <div className="p-4 rounded-2xl border border-[#E5E0D8] bg-[#FDFCFB] flex flex-col justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0" />
+                    <h4 className="text-xs font-bold text-[#1A1F1A]">Пользователи (JSON)</h4>
+                  </div>
+                  <p className="text-[11px] text-[#6B665F]">
+                    Экспорт всех профилей ({registeredUsers.length} чел.) с контактными данными и ролями
+                  </p>
+                </div>
+                <button
+                  onClick={handleExportUsers}
+                  className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-2xs transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Скачать пользователей</span>
+                </button>
+              </div>
+
+              {/* Export Notes & Reviews */}
+              <div className="p-4 rounded-2xl border border-[#E5E0D8] bg-[#FDFCFB] flex flex-col justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <MessageSquare className="w-4 h-4 text-purple-600 shrink-0" />
+                    <h4 className="text-xs font-bold text-[#1A1F1A]">Заметки & Отзывы (JSON)</h4>
+                  </div>
+                  <p className="text-[11px] text-[#6B665F]">
+                    Экспорт путевых заметок, отзывов экипажа, отзывов о реках и чек-листов
+                  </p>
+                </div>
+                <button
+                  onClick={handleExportNotes}
+                  className="w-full py-2 px-3 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-2xs transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Скачать заметки</span>
+                </button>
+              </div>
+
+              {/* Export Routes */}
+              <div className="p-4 rounded-2xl border border-[#E5E0D8] bg-[#FDFCFB] flex flex-col justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Compass className="w-4 h-4 text-[#8A3B14] shrink-0" />
+                    <h4 className="text-xs font-bold text-[#1A1F1A]">Паспорта рек & GPX (JSON)</h4>
+                  </div>
+                  <p className="text-[11px] text-[#6B665F]">
+                    Экспорт каталога рек ({routes.length} маршрутов) с точками POI и нитками треков
+                  </p>
+                </div>
+                <button
+                  onClick={handleExportRoutes}
+                  className="w-full py-2 px-3 bg-[#8A3B14] hover:bg-[#A34718] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-2xs transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Скачать маршруты</span>
+                </button>
+              </div>
             </div>
-            <button
-              onClick={handleExportFullBackup}
-              className="px-4 py-2 bg-[#2D5A27] hover:bg-[#3D7136] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-colors shrink-0"
-            >
-              <Download className="w-4 h-4" />
-              <span>Скачать резервную копию</span>
-            </button>
+
+            {/* Full Site Backup */}
+            <div className="p-4 rounded-2xl border border-[#CDE0CC] bg-[#E8F1E7]/50 flex flex-col sm:flex-row items-center justify-between gap-3 mt-4">
+              <div>
+                <h4 className="text-xs font-bold text-[#2D5A27]">Экспорт полного комплексного снапшота базы (JSON)</h4>
+                <p className="text-[11px] text-[#6B665F]">Включает маршруты, походы, статьи, FAQ, заметки, отзывы и пользователей</p>
+              </div>
+              <button
+                onClick={handleExportFullBackup}
+                className="px-5 py-2.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs transition-colors shrink-0"
+              >
+                <Download className="w-4 h-4" />
+                <span>Скачать полный бэкап (.json)</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2420,6 +2710,309 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 9. MODAL: EDIT USER & AVATAR (АДМИН РЕДАКТИРОВАНИЕ ПОЛЬЗОВАТЕЛЯ) */}
+      {editingUser && (
+        <div className="fixed inset-0 z-[3300] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 space-y-5 border border-[#E5E0D8] shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto my-auto text-[#2D332D]">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-[#EEEBE6] pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-[#E8F1E7] text-[#2D5A27] rounded-xl">
+                  <Edit3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-[#1A1F1A]">
+                    Редактирование профиля туриста
+                  </h3>
+                  <p className="text-xs text-[#8B7E6D]">
+                    ID: <span className="font-mono">{editingUser.id}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingUser(null);
+                  setUserActionMessage('');
+                }}
+                className="p-1.5 text-[#8B7E6D] hover:text-[#1A1F1A] rounded-xl cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Status Message */}
+            {userActionMessage && (
+              <div className="p-3 bg-[#E8F1E7] border border-[#CDE0CC] text-[#2D5A27] rounded-xl text-xs font-bold animate-fade-in flex items-center gap-2">
+                <Check className="w-4 h-4 shrink-0" />
+                <span>{userActionMessage}</span>
+              </div>
+            )}
+
+            {/* Avatar Section */}
+            <div className="p-4 bg-[#F9F7F4] rounded-2xl border border-[#EEEBE6] space-y-3">
+              <div className="text-xs font-bold text-[#1A1F1A] flex items-center gap-1.5">
+                <Camera className="w-4 h-4 text-[#2D5A27]" />
+                <span>Аватарка пользователя</span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                <div className="relative shrink-0">
+                  {editingUser.avatar ? (
+                    <img
+                      src={editingUser.avatar}
+                      alt={editingUser.name}
+                      className="w-20 h-20 rounded-2xl object-cover border-2 border-[#2D5A27] shadow-xs"
+                    />
+                  ) : (
+                    <div className="w-20 h-20 rounded-2xl bg-[#2D5A27] text-white flex items-center justify-center text-2xl font-black">
+                      {editingUser.name ? editingUser.name.charAt(0).toUpperCase() : 'U'}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2 flex-1 text-center sm:text-left">
+                  <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
+                    <button
+                      type="button"
+                      onClick={() => avatarFileInputRef.current?.click()}
+                      className="px-3 py-1.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Загрузить с устройства</span>
+                    </button>
+                    {editingUser.avatar && (
+                      <button
+                        type="button"
+                        onClick={() => setEditingUser({ ...editingUser, avatar: '' })}
+                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Удалить фото</span>
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="file"
+                    ref={avatarFileInputRef}
+                    onChange={handleUserAvatarUpload}
+                    accept="image/*"
+                    className="hidden"
+                  />
+                  <p className="text-[11px] text-[#8B7E6D]">
+                    Поддерживаются любые фото (JPG, PNG, WebP). Автоматически оптимизируется и синхронизируется.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Form Fields */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="font-bold text-[#4A443E] block mb-1">Имя и фамилия *</label>
+                <input
+                  type="text"
+                  required
+                  value={editingUser.name || ''}
+                  onChange={(e) => setEditingUser({ ...editingUser, name: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-[#F9F7F4] border border-[#E5E0D8] text-[#1A1F1A] font-bold outline-none focus:border-[#2D5A27]"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-[#4A443E] block mb-1">Email адрес *</label>
+                <input
+                  type="email"
+                  required
+                  value={editingUser.email || ''}
+                  onChange={(e) => setEditingUser({ ...editingUser, email: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-[#F9F7F4] border border-[#E5E0D8] text-[#1A1F1A] outline-none focus:border-[#2D5A27]"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-[#4A443E] block mb-1">Роль в системе (RBAC)</label>
+                <select
+                  value={editingUser.role || 'user'}
+                  onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value as UserRole })}
+                  className="w-full px-3 py-2 rounded-xl bg-[#F9F7F4] border border-[#E5E0D8] text-[#1A1F1A] font-bold outline-none focus:border-[#2D5A27]"
+                >
+                  <option value="user">Пользователь (Турист)</option>
+                  <option value="organizer">Организатор походов</option>
+                  <option value="editor">Редактор контента</option>
+                  <option value="admin">Администратор</option>
+                  <option value="superadmin">Суперадмин</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-[#4A443E] block mb-1">Телефон</label>
+                <input
+                  type="text"
+                  placeholder="+7 (922)..."
+                  value={editingUser.phone || ''}
+                  onChange={(e) => setEditingUser({ ...editingUser, phone: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-[#F9F7F4] border border-[#E5E0D8] text-[#1A1F1A] outline-none focus:border-[#2D5A27]"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-[#4A443E] block mb-1">Город проживания</label>
+                <input
+                  type="text"
+                  placeholder="Сургут / Ханты-Мансийск / Салехард"
+                  value={editingUser.city || ''}
+                  onChange={(e) => setEditingUser({ ...editingUser, city: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-[#F9F7F4] border border-[#E5E0D8] text-[#1A1F1A] outline-none focus:border-[#2D5A27]"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-[#4A443E] block mb-1">Опыт сплавов</label>
+                <select
+                  value={editingUser.experienceLevel || editingUser.experience || 'Любитель водных сплавов'}
+                  onChange={(e) => setEditingUser({ 
+                    ...editingUser, 
+                    experienceLevel: e.target.value,
+                    experience: e.target.value 
+                  })}
+                  className="w-full px-3 py-2 rounded-xl bg-[#F9F7F4] border border-[#E5E0D8] text-[#1A1F1A] outline-none focus:border-[#2D5A27]"
+                >
+                  <option value="Начинающий (0-1 сплав)">Начинающий (0-1 сплав)</option>
+                  <option value="Средний (2-4 сплава)">Средний (2-4 сплава)</option>
+                  <option value="Опытный (5+ сплавов, пороги)">Опытный (5+ сплавов, пороги)</option>
+                  <option value="Эксперт / Инструктор-проводник">Эксперт / Инструктор-проводник</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-[#4A443E] block mb-1">Позывной радиосвязи</label>
+                <input
+                  type="text"
+                  placeholder="Кедр-86"
+                  value={editingUser.callsign || editingUser.radioCallsign || ''}
+                  onChange={(e) => setEditingUser({ 
+                    ...editingUser, 
+                    callsign: e.target.value,
+                    radioCallsign: e.target.value 
+                  })}
+                  className="w-full px-3 py-2 rounded-xl bg-[#F9F7F4] border border-[#E5E0D8] text-[#1A1F1A] font-mono outline-none focus:border-[#2D5A27]"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-[#4A443E] block mb-1">Telegram (@username)</label>
+                <input
+                  type="text"
+                  placeholder="@tourist_86"
+                  value={editingUser.telegram || ''}
+                  onChange={(e) => setEditingUser({ ...editingUser, telegram: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-[#F9F7F4] border border-[#E5E0D8] text-[#1A1F1A] outline-none focus:border-[#2D5A27]"
+                />
+              </div>
+            </div>
+
+            {/* Quick Password Reset by Admin */}
+            <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-2xl space-y-2 text-xs">
+              <div className="font-bold text-amber-900 flex items-center gap-1.5">
+                <Key className="w-4 h-4 text-amber-700" />
+                <span>Сброс / изменение пароля туриста</span>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  placeholder="Новый пароль (мин. 6 символов)"
+                  value={userNewPassword}
+                  onChange={(e) => setUserNewPassword(e.target.value)}
+                  className="flex-1 px-3 py-2 rounded-xl bg-white border border-amber-300 text-[#1A1F1A] outline-none focus:border-amber-600"
+                />
+                <button
+                  type="button"
+                  disabled={!userNewPassword.trim() || userNewPassword.trim().length < 6}
+                  onClick={handleResetPassword}
+                  className="px-3.5 py-2 bg-amber-700 hover:bg-amber-800 disabled:opacity-50 text-white font-bold rounded-xl transition-colors cursor-pointer"
+                >
+                  Установить пароль
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#EEEBE6]">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingUser(null);
+                  setUserActionMessage('');
+                }}
+                className="px-4 py-2 rounded-xl border border-[#E5E0D8] text-[#6B665F] hover:bg-[#F9F7F4] font-bold text-xs cursor-pointer transition-colors"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                disabled={isSavingUser}
+                onClick={handleSaveUser}
+                className="px-5 py-2 rounded-xl bg-[#2D5A27] hover:bg-[#3D7136] disabled:opacity-50 text-white font-bold text-xs cursor-pointer shadow-xs transition-colors flex items-center gap-1.5"
+              >
+                <Check className="w-4 h-4" />
+                <span>{isSavingUser ? 'Сохранение...' : 'Сохранить профиль'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 10. MODAL: DELETE USER CONFIRMATION (БЕЗОПАСНОЕ УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ) */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-[3300] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 border border-[#E5E0D8] shadow-2xl animate-fade-in text-[#2D332D]">
+            <div className="flex items-center gap-3 text-rose-700">
+              <div className="p-3 bg-rose-100 rounded-2xl">
+                <Trash2 className="w-6 h-6 text-rose-700" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-[#1A1F1A]">
+                  Удаление пользователя
+                </h3>
+                <p className="text-xs text-[#8B7E6D]">
+                  Подтверждение удаления аккаунта
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-900 space-y-1.5">
+              <p>
+                Вы уверены, что хотите удалить пользователя:
+              </p>
+              <div className="font-bold text-[#1A1F1A] text-sm bg-white p-2 rounded-xl border border-rose-200">
+                {userToDelete.name} ({userToDelete.email})
+              </div>
+              <p className="text-[11px] text-rose-700">
+                Роль: <strong>{userToDelete.role}</strong>. Доступ пользователя к системе будет прекращен.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#EEEBE6]">
+              <button
+                type="button"
+                onClick={() => setUserToDelete(null)}
+                className="px-4 py-2 rounded-xl border border-[#E5E0D8] text-[#6B665F] hover:bg-[#F9F7F4] font-bold text-xs cursor-pointer transition-colors"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteUser}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs cursor-pointer shadow-xs transition-colors flex items-center gap-1.5"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Удалить аккаунт</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

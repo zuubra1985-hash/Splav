@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { 
   AppUser, 
   RiverRoute, 
@@ -102,6 +102,87 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const gpxInputRef = useRef<HTMLInputElement>(null);
 
+  // Sync profile editing fields when currentUser changes
+  useEffect(() => {
+    if (currentUser) {
+      setName(currentUser.name || '');
+      setPhone(currentUser.phone || '');
+      setTelegram(currentUser.telegram || '');
+      setExperience(currentUser.experience || currentUser.experienceLevel || 'Любитель (1-3 сезона)');
+      setRadioCallsign(currentUser.radioCallsign || currentUser.callsign || '');
+      setOwnedVessels(currentUser.ownedVessels || currentUser.vesselsOwned || ['kayak']);
+      setEmergencyContactName(currentUser.emergencyContact?.name || '');
+      setEmergencyContactPhone(currentUser.emergencyContact?.phone || '');
+    }
+  }, [currentUser]);
+
+  // Favorite routes
+  const favoriteRoutes = useMemo(() => {
+    if (!currentUser || !currentUser.favoriteRouteIds) return [];
+    return routes.filter((r) => currentUser.favoriteRouteIds?.includes(r.id));
+  }, [routes, currentUser]);
+  
+  // Authored routes by current user (by authorId, email, or personal authored flag)
+  const authoredRoutes = useMemo(() => {
+    if (!currentUser) return [];
+    return routes.filter((r) => {
+      if (r.authorId && r.authorId === currentUser.id) return true;
+      if (r.authorEmail && currentUser.email && r.authorEmail.toLowerCase() === currentUser.email.toLowerCase()) return true;
+      if (r.isPersonal && r.authorName && currentUser.name && r.authorName.toLowerCase() === currentUser.name.toLowerCase()) return true;
+      return false;
+    });
+  }, [routes, currentUser]);
+
+  // Filtered authored routes
+  const filteredAuthoredRoutes = useMemo(() => {
+    if (routesFilter === 'public') return authoredRoutes.filter(r => r.isPublic);
+    if (routesFilter === 'private') return authoredRoutes.filter(r => !r.isPublic);
+    return authoredRoutes;
+  }, [authoredRoutes, routesFilter]);
+
+  // User's Trips from CompanionTrip & MyTrips
+  const myCompanionTrips = useMemo(() => {
+    if (!currentUser) return [];
+    return trips.filter((t) => t.organizer.userId === currentUser.id || t.participants.some(p => p.userId === currentUser.id));
+  }, [trips, currentUser]);
+
+  const myPlannerTrips = useMemo(() => {
+    if (!currentUser) return [];
+    return MyTripsStore.getMyTrips(currentUser.id);
+  }, [currentUser]);
+
+  // User's Trip applications (sent by this user)
+  const sentApplications = useMemo(() => {
+    if (!currentUser) return [];
+    return trips.flatMap(t => 
+      (t.applications || []).filter(a => a.userId === currentUser.id).map(a => ({ 
+        ...a, 
+        tripId: t.id,
+        tripTitle: t.title, 
+        riverName: t.riverName,
+        organizerName: t.organizer.name,
+        organizerPhone: t.organizer.phone,
+        startDate: t.startDate
+      }))
+    );
+  }, [trips, currentUser]);
+
+  // Incoming applications to trips organized by current user
+  const incomingApplications = useMemo(() => {
+    if (!currentUser) return [];
+    return trips
+      .filter(t => t.organizer.userId === currentUser.id)
+      .flatMap(t => 
+        (t.applications || []).map(a => ({
+          ...a,
+          tripId: t.id,
+          tripTitle: t.title,
+          riverName: t.riverName,
+          trip: t
+        }))
+      );
+  }, [trips, currentUser]);
+
   if (!currentUser) {
     return (
       <div className="max-w-md mx-auto px-4 py-16 text-center space-y-4">
@@ -121,56 +202,6 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
       </div>
     );
   }
-
-  // Favorite routes
-  const favoriteRoutes = routes.filter((r) => currentUser.favoriteRouteIds?.includes(r.id));
-  
-  // Authored routes by current user (by authorId, email, or personal authored flag)
-  const authoredRoutes = useMemo(() => {
-    return routes.filter((r) => {
-      if (r.authorId && r.authorId === currentUser.id) return true;
-      if (r.authorEmail && currentUser.email && r.authorEmail.toLowerCase() === currentUser.email.toLowerCase()) return true;
-      if (r.isPersonal && r.authorName && currentUser.name && r.authorName.toLowerCase() === currentUser.name.toLowerCase()) return true;
-      return false;
-    });
-  }, [routes, currentUser]);
-
-  // Filtered authored routes
-  const filteredAuthoredRoutes = useMemo(() => {
-    if (routesFilter === 'public') return authoredRoutes.filter(r => r.isPublic);
-    if (routesFilter === 'private') return authoredRoutes.filter(r => !r.isPublic);
-    return authoredRoutes;
-  }, [authoredRoutes, routesFilter]);
-
-  // User's Trips from CompanionTrip & MyTrips
-  const myCompanionTrips = trips.filter((t) => t.organizer.userId === currentUser.id || t.participants.some(p => p.userId === currentUser.id));
-  const myPlannerTrips = MyTripsStore.getMyTrips(currentUser.id);
-
-  // User's Trip applications (sent by this user)
-  const sentApplications = trips.flatMap(t => 
-    (t.applications || []).filter(a => a.userId === currentUser.id).map(a => ({ 
-      ...a, 
-      tripId: t.id,
-      tripTitle: t.title, 
-      riverName: t.riverName,
-      organizerName: t.organizer.name,
-      organizerPhone: t.organizer.phone,
-      startDate: t.startDate
-    }))
-  );
-
-  // Incoming applications to trips organized by current user
-  const incomingApplications = trips
-    .filter(t => t.organizer.userId === currentUser.id)
-    .flatMap(t => 
-      (t.applications || []).map(a => ({
-        ...a,
-        tripId: t.id,
-        tripTitle: t.title,
-        riverName: t.riverName,
-        trip: t
-      }))
-    );
 
   // Handle avatar upload
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -374,28 +405,52 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
       <div className="bg-white p-5 sm:p-7 rounded-3xl border border-[#E5E0D8] shadow-2xs space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="relative group cursor-pointer shrink-0" onClick={() => avatarInputRef.current?.click()}>
-              {currentUser.avatar ? (
-                <img
-                  src={currentUser.avatar}
-                  alt={currentUser.name}
-                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover border-2 border-[#2D5A27]"
-                />
-              ) : (
-                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-[#2D5A27] text-white flex items-center justify-center text-2xl font-black">
-                  {currentUser.name.charAt(0).toUpperCase()}
+            <div className="flex flex-col items-start gap-1.5 shrink-0">
+              <div className="relative group cursor-pointer" onClick={() => avatarInputRef.current?.click()}>
+                {currentUser.avatar ? (
+                  <img
+                    src={currentUser.avatar}
+                    alt={currentUser.name}
+                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover border-2 border-[#2D5A27] shadow-xs"
+                  />
+                ) : (
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-[#2D5A27] text-white flex items-center justify-center text-2xl font-black">
+                    {currentUser.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-black/40 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                  <Camera className="w-5 h-5" />
                 </div>
-              )}
-              <div className="absolute inset-0 bg-black/40 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
-                <Camera className="w-5 h-5" />
+                <input
+                  type="file"
+                  ref={avatarInputRef}
+                  onChange={handleAvatarChange}
+                  accept="image/*"
+                  className="hidden"
+                />
               </div>
-              <input
-                type="file"
-                ref={avatarInputRef}
-                onChange={handleAvatarChange}
-                accept="image/*"
-                className="hidden"
-              />
+
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  className="text-[10px] font-bold text-[#2D5A27] hover:underline flex items-center gap-0.5 cursor-pointer"
+                >
+                  <Camera className="w-3 h-3" />
+                  <span>Фото</span>
+                </button>
+                {currentUser.avatar && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUpdateCurrentUser({ ...currentUser, avatar: '' });
+                    }}
+                    className="text-[10px] font-bold text-rose-600 hover:underline ml-1 cursor-pointer"
+                  >
+                    × Сброс
+                  </button>
+                )}
+              </div>
             </div>
 
             <div>

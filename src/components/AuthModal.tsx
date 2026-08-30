@@ -144,8 +144,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    if (!cleanPassword || cleanPassword.length < 12) {
-      setErrorMessage('Пароль должен содержать не менее 12 символов.');
+    if (!cleanPassword || cleanPassword.length < 6) {
+      setErrorMessage('Пароль должен содержать не менее 6 символов.');
       return;
     }
 
@@ -264,9 +264,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Error message */}
         {errorMessage && (
-          <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-medium flex items-start gap-2 animate-fade-in">
-            <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
-            <span>{errorMessage}</span>
+          <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-800 font-medium space-y-2 animate-fade-in">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
+              <span className="leading-snug">{errorMessage}</span>
+            </div>
+            {errorMessage.includes('не найден') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setRegEmail(loginEmail);
+                  setRegPassword(loginPassword);
+                  setRegConfirmPassword(loginPassword);
+                  setAuthMode('register');
+                  setErrorMessage(null);
+                }}
+                className="w-full mt-1.5 py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-center cursor-pointer transition-colors shadow-xs"
+              >
+                Зарегистрировать «{loginEmail}» прямо сейчас →
+              </button>
+            )}
           </div>
         )}
 
@@ -421,12 +438,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
-                <label className="block text-[#4A443E] font-medium mb-1">Пароль для входа (мин. 12 симв.) *</label>
+                <label className="block text-[#4A443E] font-medium mb-1">Пароль (мин. 6 симв.) *</label>
                 <input
                   type="password"
                   required
-                  minLength={12}
-                  placeholder="Минимум 12 символов"
+                  minLength={6}
+                  placeholder="Минимум 6 символов"
                   value={regPassword}
                   onChange={(e) => {
                     setRegPassword(e.target.value);
@@ -440,7 +457,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <input
                   type="password"
                   required
-                  minLength={12}
+                  minLength={6}
                   placeholder="Повторите пароль"
                   value={regConfirmPassword}
                   onChange={(e) => {

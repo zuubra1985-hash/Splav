@@ -316,6 +316,41 @@ export async function adminUpdateUserRole(id: string, newRole: UserRole): Promis
   }
 }
 
+// 8b. Admin update full user details
+export async function adminUpdateUser(id: string, updates: Partial<AppUser>): Promise<PrivateUserDTO> {
+  try {
+    const existing = await findUserById(id);
+    if (!existing) {
+      throw new Error('User not found');
+    }
+
+    const updateData: any = {
+      updatedAt: new Date()
+    };
+
+    if (updates.name !== undefined) updateData.name = updates.name.trim();
+    if (updates.email !== undefined) updateData.email = updates.email.trim().toLowerCase();
+    if (updates.role !== undefined) updateData.role = updates.role;
+    if (updates.phone !== undefined) updateData.phone = updates.phone;
+    if (updates.city !== undefined) updateData.city = updates.city;
+    if (updates.avatar !== undefined) updateData.avatar = updates.avatar;
+    if (updates.experienceLevel !== undefined) updateData.experienceLevel = updates.experienceLevel;
+    if (updates.callsign !== undefined) updateData.callsign = updates.callsign;
+    if (updates.fstrRank !== undefined) updateData.fstrRank = updates.fstrRank;
+    if (updates.telegram !== undefined) updateData.telegram = updates.telegram;
+    if (updates.vk !== undefined) updateData.vk = updates.vk;
+    if (updates.bio !== undefined) updateData.bio = updates.bio;
+    if (updates.isReadyForExpeditions !== undefined) updateData.isReadyForExpeditions = updates.isReadyForExpeditions;
+    if (updates.showContactsPublicly !== undefined) updateData.showContactsPublicly = updates.showContactsPublicly;
+
+    const updated = await db.update(users).set(updateData).where(eq(users.id, id)).returning();
+    return toPrivateUserDTO(updated[0]);
+  } catch (error) {
+    console.error('Error updating user by admin:', error);
+    throw new Error('Database update failed for admin user update.');
+  }
+}
+
 // 9. Delete user from DB with transaction
 export async function deleteUserFromDb(userId: string) {
   return await db.transaction(async (tx) => {
@@ -872,7 +907,8 @@ export async function saveCustomRouteInDb(route: any, ownerId?: string) {
     if (!route || !route.id) throw new Error('Invalid route payload');
     const existing = await db.select().from(customRoutes).where(eq(customRoutes.id, route.id));
     const finalOwnerId = ownerId || (existing[0]?.ownerId) || route.authorId || '';
-    const visibility = route.isPersonal ? 'private' : 'public';
+    const isExplicitlyPrivate = route.isPersonal && route.isPublic === false;
+    const visibility = (isExplicitlyPrivate || route.visibility === 'private') ? 'private' : 'public';
 
     if (finalOwnerId) {
       if (ownerId) {
@@ -910,7 +946,8 @@ export async function saveCustomRoutesInDb(routesList: any[], ownerId?: string) 
       if (!route || !route.id) continue;
       const existing = await tx.select().from(customRoutes).where(eq(customRoutes.id, route.id));
       const finalOwnerId = ownerId || (existing[0]?.ownerId) || route.authorId || '';
-      const visibility = route.isPersonal ? 'private' : 'public';
+      const isExplicitlyPrivate = route.isPersonal && route.isPublic === false;
+      const visibility = (isExplicitlyPrivate || route.visibility === 'private') ? 'private' : 'public';
 
       if (finalOwnerId) {
         if (ownerId) {

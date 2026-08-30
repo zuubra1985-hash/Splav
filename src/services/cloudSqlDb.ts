@@ -267,6 +267,29 @@ export const CloudSqlDbService = {
     }
   },
 
+  async adminUpdateUser(userId: string, updates: Partial<AppUser>): Promise<any> {
+    const res = await authenticatedFetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates)
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Ошибка изменения данных пользователя');
+    }
+    return await res.json();
+  },
+
+  async adminResetUserPassword(userId: string, newPassword: string): Promise<void> {
+    const res = await authenticatedFetch(`/api/admin/users/${encodeURIComponent(userId)}/password`, {
+      method: 'PATCH',
+      body: JSON.stringify({ newPassword })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Ошибка сброса пароля');
+    }
+  },
+
   async adminDeleteUser(userId: string): Promise<void> {
     const res = await authenticatedFetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
       method: 'DELETE'
