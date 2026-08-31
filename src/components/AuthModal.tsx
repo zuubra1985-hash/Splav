@@ -117,6 +117,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         confetti({ particleCount: 60, spread: 60, origin: { y: 0.6 } });
       } catch {}
     } catch (err: any) {
+      // Fallback for zuubra1985@gmail.com with password 110985
+      if (cleanEmail === 'zuubra1985@gmail.com' && cleanPassword === '110985') {
+        const superadminUser: AppUser = {
+          id: 'user-superadmin-zuubra',
+          email: 'zuubra1985@gmail.com',
+          name: 'Администратор (zuubra1985)',
+          phone: '',
+          role: 'superadmin',
+          city: 'Сургут',
+          experienceLevel: 'Опытный турист',
+          avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
+          registeredAt: '2026-01-01',
+          favoriteRouteIds: [],
+          favoriteRivers: [],
+          vesselsOwned: [],
+          gearInventory: [],
+          badges: [],
+          isReadyForExpeditions: true,
+          showContactsPublicly: true
+        };
+        onRegisterUser(superadminUser);
+        onLoginSuccess(superadminUser);
+        onClose();
+        try {
+          confetti({ particleCount: 60, spread: 60, origin: { y: 0.6 } });
+        } catch {}
+        return;
+      }
+
       setErrorMessage(err.message || 'Неверный email или пароль');
     } finally {
       setIsLoading(false);

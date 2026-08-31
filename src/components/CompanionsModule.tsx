@@ -146,6 +146,16 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
     });
   };
 
+  const getUserAvatar = (userId?: string, name?: string, fallbackAvatar?: string) => {
+    if (registeredUsers && registeredUsers.length > 0) {
+      const match = registeredUsers.find(
+        (u) => (userId && u.id === userId) || (name && u.name && u.name.trim().toLowerCase() === name.trim().toLowerCase())
+      );
+      if (match?.avatar) return match.avatar;
+    }
+    return fallbackAvatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80';
+  };
+
   const handleOpenUserProfile = (person: {
     userId?: string;
     name: string;
@@ -158,7 +168,7 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
   }) => {
     // 1. Search in registered users first
     const matched = registeredUsers.find(
-      (u) => (person.userId && u.id === person.userId) || u.name.toLowerCase() === person.name.toLowerCase()
+      (u) => (person.userId && u.id === person.userId) || (person.name && u.name && u.name.trim().toLowerCase() === person.name.trim().toLowerCase())
     );
     if (matched) {
       setViewingUserModal(matched);
@@ -175,7 +185,7 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
       city: 'Югра / Ямал',
       experienceLevel: person.experienceLevel || (person.experienceYears ? `Опыт ${person.experienceYears} лет` : 'Любитель водного туризма'),
       fstrRank: person.fstrRank || '',
-      avatar: person.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
+      avatar: getUserAvatar(person.userId, person.name, person.avatar),
       registeredAt: '2026 г.',
       favoriteRouteIds: [],
       vesselsOwned: ['catamaran'],
@@ -1484,7 +1494,7 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
               {/* Organizer Badge */}
               <div className="flex items-center gap-3 bg-[#F9F7F4] p-2.5 rounded-2xl border border-[#EEEBE6]">
                 <img
-                  src={trip.organizer.avatar}
+                  src={getUserAvatar(trip.organizer.userId, trip.organizer.name, trip.organizer.avatar)}
                   alt={trip.organizer.name}
                   className="w-9 h-9 rounded-full object-cover border border-[#CDE0CC]"
                 />
@@ -1772,7 +1782,7 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
                   >
                     <div className="relative">
                       <img
-                        src={selectedTrip.organizer.avatar}
+                        src={getUserAvatar(selectedTrip.organizer.userId, selectedTrip.organizer.name, selectedTrip.organizer.avatar)}
                         alt={selectedTrip.organizer.name}
                         className="w-12 h-12 rounded-2xl object-cover border-2 border-[#2D5A27] group-hover:scale-105 transition-transform"
                       />
@@ -1892,7 +1902,7 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
                         >
                           <div className="flex items-center gap-2.5 min-w-0">
                             <img
-                              src={p.avatar}
+                              src={getUserAvatar(p.userId, p.name, p.avatar)}
                               alt={p.name}
                               className="w-9 h-9 rounded-xl object-cover border border-[#CDE0CC] group-hover:scale-105 transition-transform shrink-0"
                             />
@@ -2145,7 +2155,7 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
                             title={`${userPresence.name} (${userPresence.role === 'organizer' ? 'Организатор' : 'Участник'}) — в сети`}
                           >
                             <img
-                              src={userPresence.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80'}
+                              src={getUserAvatar(userPresence.userId, userPresence.name, userPresence.avatar)}
                               alt={userPresence.name}
                               className="w-6 h-6 rounded-full border-2 border-white object-cover shadow-2xs"
                             />
@@ -2190,13 +2200,11 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
                         >
                           <div className="flex items-center justify-between text-[11px] text-[#8B7E6D]">
                             <div className="flex items-center gap-2">
-                              {msg.authorAvatar && (
-                                <img
-                                  src={msg.authorAvatar}
-                                  alt={msg.authorName}
-                                  className="w-5 h-5 rounded-full object-cover border border-[#CDE0CC]"
-                                />
-                              )}
+                              <img
+                                src={getUserAvatar(msg.userId, msg.authorName, msg.authorAvatar)}
+                                alt={msg.authorName}
+                                className="w-5 h-5 rounded-full object-cover border border-[#CDE0CC]"
+                              />
                               <span className="font-bold text-[#1A1F1A] flex items-center gap-1.5">
                                 {msg.authorName}
                                 {msg.role === 'organizer' && (
@@ -2406,10 +2414,17 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
                       className="p-3.5 bg-[#F9F7F4] border border-[#EEEBE6] rounded-2xl space-y-2.5 text-xs shadow-2xs"
                     >
                       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="font-bold text-[#1A1F1A] text-sm break-words">{app.applicantName}</div>
-                          <div className="text-[11px] text-[#8B7E6D]">
-                            Опыт: {app.experienceLevel} • Судно: {app.vesselType?.toUpperCase()}
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <img
+                            src={getUserAvatar(app.userId, app.applicantName, app.applicantAvatar)}
+                            alt={app.applicantName}
+                            className="w-8 h-8 rounded-full object-cover border border-[#CDE0CC] shrink-0"
+                          />
+                          <div className="min-w-0">
+                            <div className="font-bold text-[#1A1F1A] text-sm break-words">{app.applicantName}</div>
+                            <div className="text-[11px] text-[#8B7E6D]">
+                              Опыт: {app.experienceLevel} • Судно: {app.vesselType?.toUpperCase()}
+                            </div>
                           </div>
                         </div>
                         <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full self-start shrink-0 ${

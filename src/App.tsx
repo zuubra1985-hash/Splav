@@ -35,7 +35,8 @@ import {
   mergeTravelNotesConfigs,
   mergeArticles,
   mergeUsers,
-  filterActiveEntities
+  filterActiveEntities,
+  parseTimestamp
 } from './utils/syncMerge';
 import { INITIAL_FAQ_DATA } from './data/faqData';
 import { INITIAL_TRAVEL_NOTES_CONFIG } from './data/logbookData';
@@ -469,6 +470,28 @@ export default function App() {
       }
     }).catch(console.warn);
 
+    // Initial check of /api/users/me if token exists to ensure freshest avatar & profile
+    CloudSqlDbService.fetchCurrentUser().then((remoteMe) => {
+      if (remoteMe) {
+        setCurrentUser((prev) => {
+          if (!prev) return prev;
+          const merged: AppUser = {
+            ...prev,
+            ...remoteMe,
+            id: remoteMe.id || prev.id,
+            role: (remoteMe.role as UserRole) || prev.role,
+            avatar: remoteMe.avatar || prev.avatar,
+            name: remoteMe.name || prev.name,
+            updatedAt: remoteMe.registeredAt || prev.updatedAt || new Date().toISOString()
+          };
+          try {
+            localStorage.setItem('splav86_current_user', JSON.stringify(merged));
+          } catch (e) {}
+          return merged;
+        });
+      }
+    }).catch(console.warn);
+
     const unsubUsers = UsersSyncService.subscribeToUsers((cloudUsers) => {
       if (!cloudUsers || cloudUsers.length === 0) {
         if (!isBootstrappingUsers) {
@@ -589,6 +612,34 @@ export default function App() {
           setFaqData(sqlFaq);
         }
       }).catch(console.warn);
+
+      // Periodic check of /api/users/me if token exists
+      CloudSqlDbService.fetchCurrentUser().then((remoteMe) => {
+        if (remoteMe) {
+          setCurrentUser((prev) => {
+            if (!prev) return prev;
+            const isAvatarDiff = remoteMe.avatar && remoteMe.avatar !== prev.avatar;
+            const isNameDiff = remoteMe.name && remoteMe.name !== prev.name;
+            const isRoleDiff = remoteMe.role && remoteMe.role !== prev.role;
+            if (isAvatarDiff || isNameDiff || isRoleDiff) {
+              const updated: AppUser = {
+                ...prev,
+                ...remoteMe,
+                id: remoteMe.id || prev.id,
+                role: (remoteMe.role as UserRole) || prev.role,
+                avatar: remoteMe.avatar || prev.avatar,
+                name: remoteMe.name || prev.name,
+                updatedAt: remoteMe.registeredAt || prev.updatedAt || new Date().toISOString()
+              };
+              try {
+                localStorage.setItem('splav86_current_user', JSON.stringify(updated));
+              } catch (e) {}
+              return updated;
+            }
+            return prev;
+          });
+        }
+      }).catch(console.warn);
     };
 
     const syncInterval = setInterval(handleSilentSync, 20000);
@@ -605,6 +656,35 @@ export default function App() {
       unsubNotes();
     };
   }, []);
+
+  // Continuous real-time bidirectional synchronization of currentUser with cloud users stream (like routes & notes)
+  useEffect(() => {
+    if (!currentUser) return;
+    const currentEmail = (currentUser.email || '').trim().toLowerCase();
+    const matchingUser = registeredUsers.find(
+      (u) => u.id === currentUser.id || (currentEmail && (u.email || '').trim().toLowerCase() === currentEmail)
+    );
+    if (matchingUser) {
+      const localTs = parseTimestamp(currentUser.updatedAt);
+      const remoteTs = parseTimestamp(matchingUser.updatedAt);
+      const isAvatarDifferent = Boolean(matchingUser.avatar && matchingUser.avatar !== currentUser.avatar);
+      const isNameDifferent = Boolean(matchingUser.name && matchingUser.name !== currentUser.name);
+      const isRoleDifferent = Boolean(matchingUser.role && matchingUser.role !== currentUser.role);
+
+      if (remoteTs > localTs || isAvatarDifferent || isNameDifferent || isRoleDifferent) {
+        const syncedUser: AppUser = {
+          ...currentUser,
+          ...matchingUser,
+          avatar: matchingUser.avatar || currentUser.avatar,
+          updatedAt: matchingUser.updatedAt || new Date().toISOString()
+        };
+        setCurrentUser(syncedUser);
+        try {
+          localStorage.setItem('splav86_current_user', JSON.stringify(syncedUser));
+        } catch (e) {}
+      }
+    }
+  }, [registeredUsers]);
 
   // Sync state changes to localStorage
   useEffect(() => {
@@ -898,12 +978,27 @@ export default function App() {
       return filterActiveEntities(nextArticles);
     });
 
-    // 4. Save user via CentralSyncManager
+    // 4. Save user via CentralSyncManager (Firestore Realtime + CloudSQL sync queue)
     CentralSyncManager.saveUser(userWithMeta).catch((err) => {
       console.warn('CentralSyncManager saveUser error:', err);
     });
 
-    // 5. Persist to localStorage
+    // 5. Direct update to CloudSQL /api/users/me if authenticated
+    CloudSqlDbService.updateCurrentUser({
+      name: userWithMeta.name,
+      avatar: userWithMeta.avatar,
+      phone: userWithMeta.phone,
+      telegram: userWithMeta.telegram,
+      city: userWithMeta.city,
+      experienceLevel: userWithMeta.experienceLevel || userWithMeta.experience,
+      bio: userWithMeta.bio,
+      callsign: userWithMeta.callsign || userWithMeta.radioCallsign,
+      fstrRank: userWithMeta.fstrRank
+    }).catch((err) => {
+      console.warn('CloudSqlDbService.updateCurrentUser silent note:', err.message);
+    });
+
+    // 6. Persist to localStorage
     try {
       localStorage.setItem('splav86_current_user', JSON.stringify(userWithMeta));
       const allUsers = registeredUsers.map((u) => {
@@ -1729,7 +1824,18 @@ export default function App() {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
-        onLoginSuccess={(user) => setCurrentUser(user)}
+        onLoginSuccess={(user) => {
+          const userWithMeta: AppUser = {
+            ...user,
+            isDeleted: false,
+            updatedAt: user.updatedAt || new Date().toISOString()
+          };
+          setCurrentUser(userWithMeta);
+          try {
+            localStorage.setItem('splav86_current_user', JSON.stringify(userWithMeta));
+          } catch (e) {}
+          handleRegisterUser(userWithMeta);
+        }}
         registeredUsers={registeredUsers}
         onRegisterUser={handleRegisterUser}
       />

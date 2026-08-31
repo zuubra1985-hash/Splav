@@ -128,10 +128,18 @@ export const ArticlesModule: React.FC<ArticlesModuleProps> = ({
 
                 {/* Author & Read More */}
                 <div className="pt-3 border-t border-[#E5E0D8] flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-full bg-[#E8F1E7] border border-[#CDE0CC] flex items-center justify-center text-[10px] font-bold text-[#2D5A27]">
-                      {art.author.slice(0, 1)}
-                    </div>
+                  <div className="flex items-center gap-2 min-w-0">
+                    {art.authorAvatar ? (
+                      <img
+                        src={art.authorAvatar}
+                        alt={art.author}
+                        className="w-6 h-6 rounded-full object-cover border border-[#CDE0CC] shrink-0"
+                      />
+                    ) : (
+                      <div className="w-6 h-6 rounded-full bg-[#E8F1E7] border border-[#CDE0CC] flex items-center justify-center text-[10px] font-bold text-[#2D5A27] shrink-0">
+                        {art.author.slice(0, 1)}
+                      </div>
+                    )}
                     <span className="text-xs text-[#2D332D] font-medium truncate max-w-[110px] sm:max-w-[130px]">{art.author}</span>
                   </div>
 
@@ -200,10 +208,25 @@ export const ArticlesModule: React.FC<ArticlesModuleProps> = ({
               
               {/* Author bar */}
               <div className="flex items-center justify-between pb-4 border-b border-[#E5E0D8] text-xs text-[#8B7E6D]">
-                <div className="flex items-center gap-2">
-                  <Award className="w-4 h-4 text-[#D97706]" />
-                  <span className="text-[#1A1F1A] font-bold">{selectedArticle.author}</span>
-                  <span className="text-[#8B7E6D]">({selectedArticle.authorRank})</span>
+                <div className="flex items-center gap-2.5">
+                  {selectedArticle.authorAvatar ? (
+                    <img
+                      src={selectedArticle.authorAvatar}
+                      alt={selectedArticle.author}
+                      className="w-8 h-8 rounded-full object-cover border border-[#CDE0CC]"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-[#E8F1E7] border border-[#CDE0CC] flex items-center justify-center text-xs font-bold text-[#2D5A27]">
+                      {selectedArticle.author.slice(0, 1)}
+                    </div>
+                  )}
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[#1A1F1A] font-bold">{selectedArticle.author}</span>
+                      <Award className="w-3.5 h-3.5 text-[#D97706]" />
+                    </div>
+                    <span className="text-[11px] text-[#8B7E6D]">({selectedArticle.authorRank})</span>
+                  </div>
                 </div>
                 <span>{selectedArticle.date}</span>
               </div>

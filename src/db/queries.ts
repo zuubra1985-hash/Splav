@@ -33,22 +33,47 @@ export interface PaginatedResult<T> {
 }
 
 // Helper to sanitize internal user object to PrivateUserDTO
-export function toPrivateUserDTO(u: typeof users.$inferSelect): PrivateUserDTO {
+export function toPrivateUserDTO(u: any): PrivateUserDTO {
+  if (!u) {
+    return {
+      id: 'guest',
+      email: '',
+      name: 'Гость',
+      role: 'user',
+      phone: '',
+      city: 'Сургут',
+      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
+      experienceLevel: 'Любитель водных походов',
+      registeredAt: new Date().toISOString().slice(0, 10),
+      favoriteRouteIds: [],
+      favoriteRivers: [],
+      vesselsOwned: [],
+      gearInventory: [],
+      badges: [],
+      bio: '',
+      callsign: '',
+      fstrRank: '',
+      telegram: '',
+      vk: '',
+      isReadyForExpeditions: true,
+      showContactsPublicly: false
+    };
+  }
   return {
-    id: u.id,
-    email: u.email,
-    name: u.name,
+    id: u.id || 'user-id',
+    email: u.email || '',
+    name: u.name || 'Пользователь',
     role: (u.role as UserRole) || 'user',
     phone: u.phone || '',
     city: u.city || 'Сургут',
     avatar: u.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
     experienceLevel: u.experienceLevel || 'Любитель водных походов',
     registeredAt: u.registeredAt || new Date().toISOString().slice(0, 10),
-    favoriteRouteIds: (u.favoriteRouteIds as string[]) || [],
-    favoriteRivers: (u.favoriteRivers as string[]) || [],
-    vesselsOwned: (u.vesselsOwned as any[]) || [],
-    gearInventory: (u.gearInventory as string[]) || [],
-    badges: (u.badges as string[]) || [],
+    favoriteRouteIds: Array.isArray(u.favoriteRouteIds) ? u.favoriteRouteIds : [],
+    favoriteRivers: Array.isArray(u.favoriteRivers) ? u.favoriteRivers : [],
+    vesselsOwned: Array.isArray(u.vesselsOwned) ? u.vesselsOwned : [],
+    gearInventory: Array.isArray(u.gearInventory) ? u.gearInventory : [],
+    badges: Array.isArray(u.badges) ? u.badges : [],
     bio: u.bio || '',
     callsign: u.callsign || '',
     fstrRank: u.fstrRank || '',
@@ -60,20 +85,37 @@ export function toPrivateUserDTO(u: typeof users.$inferSelect): PrivateUserDTO {
 }
 
 // Helper to sanitize to PublicUserDTO (Default: phone and telegram are private)
-export function toPublicUserDTO(u: typeof users.$inferSelect): PublicUserDTO {
+export function toPublicUserDTO(u: any): PublicUserDTO {
+  if (!u) {
+    return {
+      id: 'guest',
+      name: 'Гость',
+      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
+      city: 'Сургут',
+      experienceLevel: 'Любитель водных походов',
+      badges: [],
+      bio: '',
+      callsign: '',
+      fstrRank: '',
+      favoriteRivers: [],
+      vesselsOwned: [],
+      isReadyForExpeditions: true,
+      registeredAt: '2026-01-01'
+    };
+  }
   const isPublicContact = u.showContactsPublicly === true;
   return {
     id: u.id,
-    name: u.name,
+    name: u.name || 'Турист',
     avatar: u.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
     city: u.city || 'Сургут',
     experienceLevel: u.experienceLevel || 'Любитель водных походов',
-    badges: (u.badges as string[]) || [],
+    badges: Array.isArray(u.badges) ? u.badges : [],
     bio: u.bio || '',
     callsign: u.callsign || '',
     fstrRank: u.fstrRank || '',
-    favoriteRivers: (u.favoriteRivers as string[]) || [],
-    vesselsOwned: (u.vesselsOwned as any[]) || [],
+    favoriteRivers: Array.isArray(u.favoriteRivers) ? u.favoriteRivers : [],
+    vesselsOwned: Array.isArray(u.vesselsOwned) ? u.vesselsOwned : [],
     isReadyForExpeditions: u.isReadyForExpeditions !== false,
     registeredAt: u.registeredAt || '2026-01-01',
     telegram: isPublicContact ? (u.telegram || '') : undefined,
@@ -121,8 +163,8 @@ export async function findUserByEmail(email: string) {
     const list = await db.select().from(users).where(eq(users.email, cleanEmail));
     return list[0] || null;
   } catch (error) {
-    console.error('Error finding user by email:', error);
-    throw new Error('Database lookup failed.');
+    console.warn('DB lookup note for user by email:', error);
+    return null;
   }
 }
 
@@ -132,8 +174,8 @@ export async function findUserById(id: string) {
     const list = await db.select().from(users).where(eq(users.id, id));
     return list[0] || null;
   } catch (error) {
-    console.error('Error finding user by id:', error);
-    throw new Error('Database lookup failed.');
+    console.warn('DB lookup note for user by id:', error);
+    return null;
   }
 }
 
