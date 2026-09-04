@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { RiverRoute, RoutePOI, VesselType } from '../types';
 import { 
   X, 
@@ -146,11 +146,24 @@ export const RiverPassportEditorModal: React.FC<RiverPassportEditorModalProps> =
   const [newGearItem, setNewGearItem] = useState('');
 
   // Wikipedia Integration State
-  const [wikiInfo, setWikiInfo] = useState<WikipediaRiverInfo | null>(null);
+  const [wikiInfo, setWikiInfo] = useState<WikipediaRiverInfo | null>(() => {
+    if (initialRoute?.wikipediaExtract) {
+      return {
+        found: true,
+        title: initialRoute.riverName || initialRoute.name,
+        displayTitle: initialRoute.riverName || initialRoute.name,
+        extract: initialRoute.wikipediaExtract,
+        pageUrl: initialRoute.wikipediaUrl || `https://ru.wikipedia.org/wiki/${encodeURIComponent(initialRoute.riverName || '')}`,
+        lengthKm: initialRoute.lengthKm,
+        riverBasin: initialRoute.riverBasin,
+        thumbnailUrl: initialRoute.coverImage
+      };
+    }
+    return null;
+  });
   const [isLoadingWiki, setIsLoadingWiki] = useState<boolean>(false);
-  const [wikiSearchQuery, setWikiSearchQuery] = useState<string>('');
+  const [wikiSearchAttempted, setWikiSearchAttempted] = useState<boolean>(false);
   const [wikiSuggestions, setWikiSuggestions] = useState<Array<{ title: string; snippet: string }>>([]);
-  const [showWikiDropdown, setShowWikiDropdown] = useState<boolean>(false);
   const [wikiApplied, setWikiApplied] = useState<boolean>(false);
 
   // Auto-search Wikipedia when riverName changes (debounced)
@@ -175,18 +188,21 @@ export const RiverPassportEditorModal: React.FC<RiverPassportEditorModalProps> =
     } else {
       setWikiInfo(null);
       setWikiSuggestions([]);
+      setWikiSearchAttempted(false);
     }
   };
 
   const fetchWikiForQuery = async (query: string) => {
-    if (!query || query.trim().length < 2) return;
+    const clean = cleanRiverName(query);
+    if (!clean || clean.length < 2) return;
     setIsLoadingWiki(true);
+    setWikiSearchAttempted(true);
     try {
-      const data = await fetchWikipediaRiverData(query);
+      const data = await fetchWikipediaRiverData(clean);
       setWikiInfo(data);
       if (!data) {
         // Look up suggestions
-        const suggestions = await searchWikipediaSuggestions(query);
+        const suggestions = await searchWikipediaSuggestions(clean);
         setWikiSuggestions(suggestions);
       } else {
         setWikiSuggestions([]);
@@ -507,9 +523,30 @@ export const RiverPassportEditorModal: React.FC<RiverPassportEditorModalProps> =
     onClose();
   };
 
+  // Add Escape key handler to close modal easily
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   return (
-    <div className="fixed inset-0 z-[3000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
-      <div className="bg-white border border-[#E5E0D8] rounded-[28px] max-w-4xl w-full max-h-[92vh] overflow-hidden shadow-2xl flex flex-col my-auto text-[#2D332D]">
+    <div 
+      className="fixed inset-0 z-[3000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-y-auto"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div 
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white border border-[#E5E0D8] rounded-[28px] max-w-4xl w-full max-h-[92vh] overflow-hidden shadow-2xl flex flex-col my-auto text-[#2D332D]"
+      >
         
         {/* Hidden inputs for device uploads */}
         <input
@@ -750,20 +787,28 @@ export const RiverPassportEditorModal: React.FC<RiverPassportEditorModalProps> =
               {/* WIKIPEDIA SUGGESTIONS (if direct not matched) */}
               {!wikiInfo && wikiSuggestions.length > 0 && (
                 <div className="p-3 bg-[#F9F7F4] rounded-xl border border-[#E5E0D8] space-y-2 animate-fade-in text-xs">
-                  <span className="text-[#8B7E6D] font-bold">Найдено в Википедии по запросу:</span>
+                  <span className="text-[#8B7E6D] font-bold">Найдено несколько статей в Википедии — выберите подходящую:</span>
                   <div className="space-y-1">
                     {wikiSuggestions.map((sug, idx) => (
                       <button
                         key={idx}
                         type="button"
                         onClick={() => fetchWikiForQuery(sug.title)}
-                        className="w-full text-left p-2 rounded-lg bg-white hover:bg-[#E8F1E7] border border-[#E5E0D8] transition-colors flex items-center justify-between gap-2"
+                        className="w-full text-left p-2.5 rounded-lg bg-white hover:bg-[#E8F1E7] border border-[#E5E0D8] transition-colors flex items-center justify-between gap-2 group cursor-pointer"
                       >
-                        <span className="font-bold text-[#2D5A27]">{sug.title}</span>
+                        <span className="font-bold text-[#2D5A27] group-hover:underline">{sug.title}</span>
                         <span className="text-[11px] text-[#8B7E6D] truncate max-w-xs">{sug.snippet}</span>
                       </button>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Wikipedia Not Found Notice */}
+              {!wikiInfo && !isLoadingWiki && wikiSearchAttempted && wikiSuggestions.length === 0 && (
+                <div className="p-3 bg-[#FFF8EE] rounded-xl border border-[#F4DCB9] text-xs text-[#855B27] flex items-center gap-2 animate-fade-in">
+                  <AlertTriangle className="w-4 h-4 text-[#D97706] shrink-0" />
+                  <span>По запросу «{cleanRiverName(formData.riverName)}» статья в Википедии не найдена. Проверьте написание или введите параметры реки вручную.</span>
                 </div>
               )}
 

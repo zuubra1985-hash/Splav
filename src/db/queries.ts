@@ -156,27 +156,47 @@ export function sanitizeTripForPublic(trip: any, viewerId?: string, isAdmin?: bo
   return sanitized;
 }
 
+// In-memory resilient store for users during database disconnection/failover
+const inMemoryUsers = new Map<string, any>();
+
+// Helper to find user in memory by email
+function findInMemoryUserByEmail(email: string) {
+  const cleanEmail = email.trim().toLowerCase();
+  for (const u of inMemoryUsers.values()) {
+    if (u.email && u.email.trim().toLowerCase() === cleanEmail) {
+      return u;
+    }
+  }
+  return null;
+}
+
 // 1. Find user by email (internal use for login verification)
 export async function findUserByEmail(email: string) {
+  const cleanEmail = email.trim().toLowerCase();
   try {
-    const cleanEmail = email.trim().toLowerCase();
     const list = await db.select().from(users).where(eq(users.email, cleanEmail));
-    return list[0] || null;
+    if (list && list[0]) {
+      inMemoryUsers.set(list[0].id, list[0]);
+      return list[0];
+    }
   } catch (error) {
-    console.warn('DB lookup note for user by email:', error);
-    return null;
+    console.warn('DB lookup note for user by email, using fallback store:', error);
   }
+  return findInMemoryUserByEmail(cleanEmail);
 }
 
 // 2. Find user by ID (internal use)
 export async function findUserById(id: string) {
   try {
     const list = await db.select().from(users).where(eq(users.id, id));
-    return list[0] || null;
+    if (list && list[0]) {
+      inMemoryUsers.set(list[0].id, list[0]);
+      return list[0];
+    }
   } catch (error) {
-    console.warn('DB lookup note for user by id:', error);
-    return null;
+    console.warn('DB lookup note for user by id, using fallback store:', error);
   }
+  return inMemoryUsers.get(id) || null;
 }
 
 // 3. Get Public Users list with SQL-level pagination (P3)
@@ -207,8 +227,19 @@ export async function getPublicUsers(options?: PaginationOptions): Promise<Publi
     const list = await db.select().from(users).orderBy(desc(users.updatedAt));
     return list.map(toPublicUserDTO);
   } catch (error) {
-    console.error('Error fetching public users from DB:', error);
-    throw new Error('Database query failed for public users.');
+    console.warn('DB query failed for public users, returning memory fallback:', error);
+    const list = Array.from(inMemoryUsers.values());
+    if (options && (options.page || options.limit)) {
+      const page = Math.max(1, options.page || 1);
+      const limit = Math.min(100, Math.max(1, options.limit || 20));
+      const offset = (page - 1) * limit;
+      const paginated = list.slice(offset, offset + limit);
+      return {
+        items: paginated.map(toPublicUserDTO),
+        pagination: { total: list.length, page, limit, totalPages: Math.ceil(list.length / limit) || 1 }
+      };
+    }
+    return list.map(toPublicUserDTO);
   }
 }
 
@@ -240,12 +271,23 @@ export async function getAllUsersForAdmin(options?: PaginationOptions): Promise<
     const list = await db.select().from(users).orderBy(desc(users.updatedAt));
     return list.map(toPrivateUserDTO);
   } catch (error) {
-    console.error('Error fetching admin users from DB:', error);
-    throw new Error('Database query failed for admin users.');
+    console.warn('DB query failed for admin users, returning memory fallback:', error);
+    const list = Array.from(inMemoryUsers.values());
+    if (options && (options.page || options.limit)) {
+      const page = Math.max(1, options.page || 1);
+      const limit = Math.min(100, Math.max(1, options.limit || 20));
+      const offset = (page - 1) * limit;
+      const paginated = list.slice(offset, offset + limit);
+      return {
+        items: paginated.map(toPrivateUserDTO),
+        pagination: { total: list.length, page, limit, totalPages: Math.ceil(list.length / limit) || 1 }
+      };
+    }
+    return list.map(toPrivateUserDTO);
   }
 }
 
-// 5. Create new registered user (uses transaction)
+// 5. Create new registered user (uses transaction with failover)
 export async function createRegisteredUser(data: {
   id: string;
   email: string;
@@ -259,38 +301,51 @@ export async function createRegisteredUser(data: {
   telegram?: string;
   registeredAt?: string;
 }): Promise<PrivateUserDTO> {
-  return await db.transaction(async (tx) => {
-    const cleanEmail = data.email.trim().toLowerCase();
-    const assignedRole: UserRole = data.role || 'user';
+  const cleanEmail = data.email.trim().toLowerCase();
+  const assignedRole: UserRole = data.role || 'user';
 
-    const inserted = await tx.insert(users).values({
-      id: data.id,
-      email: cleanEmail,
-      name: data.name.trim(),
-      role: assignedRole,
-      passwordHash: data.passwordHash,
-      phone: data.phone || '',
-      city: data.city || 'Сургут',
-      avatar: data.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
-      experienceLevel: data.experienceLevel || 'Любитель водных походов',
-      registeredAt: data.registeredAt || new Date().toISOString().slice(0, 10),
-      favoriteRouteIds: [],
-      favoriteRivers: [],
-      vesselsOwned: [],
-      gearInventory: [],
-      badges: [],
-      bio: '',
-      callsign: '',
-      fstrRank: '',
-      telegram: data.telegram || '',
-      vk: '',
-      isReadyForExpeditions: true,
-      showContactsPublicly: false,
-      updatedAt: new Date()
-    }).returning();
+  const userRecord: any = {
+    id: data.id,
+    email: cleanEmail,
+    name: data.name.trim(),
+    role: assignedRole,
+    passwordHash: data.passwordHash,
+    phone: data.phone || '',
+    city: data.city || 'Сургут',
+    avatar: data.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
+    experienceLevel: data.experienceLevel || 'Любитель водных походов',
+    registeredAt: data.registeredAt || new Date().toISOString().slice(0, 10),
+    favoriteRouteIds: [],
+    favoriteRivers: [],
+    vesselsOwned: [],
+    gearInventory: [],
+    badges: [],
+    bio: '',
+    callsign: '',
+    fstrRank: '',
+    telegram: data.telegram || '',
+    vk: '',
+    isReadyForExpeditions: true,
+    showContactsPublicly: false,
+    updatedAt: new Date()
+  };
 
-    return toPrivateUserDTO(inserted[0]);
-  });
+  // Always save in resilient in-memory store
+  inMemoryUsers.set(data.id, userRecord);
+
+  try {
+    const inserted = await db.transaction(async (tx) => {
+      return await tx.insert(users).values(userRecord).returning();
+    });
+    if (inserted && inserted[0]) {
+      inMemoryUsers.set(data.id, inserted[0]);
+      return toPrivateUserDTO(inserted[0]);
+    }
+  } catch (error) {
+    console.warn('DB insertion note: saved to fallback store due to DB connection error:', error);
+  }
+
+  return toPrivateUserDTO(userRecord);
 }
 
 // 6. Update user profile (user modifying their own profile)

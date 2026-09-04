@@ -3,6 +3,7 @@ import L from 'leaflet';
 import { RoutePOI } from '../types';
 import { MapPin, Navigation, Mountain, Download } from 'lucide-react';
 import { generateGpxString } from '../utils/gpxParser';
+import { cleanRiverTrackCoordinates } from '../utils/geoUtils';
 
 interface TripRouteMiniMapProps {
   coordinates: [number, number][];
@@ -16,7 +17,7 @@ interface TripRouteMiniMapProps {
 }
 
 export const TripRouteMiniMap: React.FC<TripRouteMiniMapProps> = ({
-  coordinates,
+  coordinates: rawCoordinates,
   startPoint,
   endPoint,
   waypoints = [],
@@ -27,6 +28,7 @@ export const TripRouteMiniMap: React.FC<TripRouteMiniMapProps> = ({
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
+  const coordinates = cleanRiverTrackCoordinates(rawCoordinates);
 
   useEffect(() => {
     if (!mapContainerRef.current) return;

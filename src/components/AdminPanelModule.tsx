@@ -58,7 +58,15 @@ import {
   RotateCcw,
   Camera,
   Key,
-  X
+  X,
+  Code2,
+  FileCode,
+  Copy,
+  FileUp,
+  FileSpreadsheet,
+  CheckCheck,
+  Wrench,
+  Info
 } from 'lucide-react';
 import { CloudSqlDbService } from '../services/cloudSqlDb';
 import { 
@@ -70,7 +78,17 @@ import {
   TravelNotesSyncService 
 } from '../firebase';
 import { CentralSyncManager } from '../services/centralSyncManager';
-import { filterActiveEntities, filterDeletedEntities } from '../utils/syncMerge';
+import { 
+  filterActiveEntities, 
+  filterDeletedEntities, 
+  deduplicateUsers,
+  mergeRoutes,
+  mergeTrips,
+  mergeArticles,
+  mergeTravelNotesConfigs,
+  mergeFaqConfigs,
+  mergeUsers
+} from '../utils/syncMerge';
 import { compressAvatarFile } from '../utils/imageCompressor';
 
 interface AdminPanelModuleProps {
@@ -87,6 +105,7 @@ interface AdminPanelModuleProps {
   onUpdateArticles: React.Dispatch<React.SetStateAction<Article[]>> | ((articles: Article[]) => void);
   onUpdateNotesConfig?: (config: TravelNotesConfig) => void;
   onUpdateFaqData?: (faq: FaqDataConfig) => void;
+  onUpdateUsers?: (users: AppUser[]) => void;
   onUpdateUserRole: (userId: string, newRole: UserRole) => void;
   onUpdateUser?: (updatedUser: AppUser) => void;
   onDeleteUser: (userId: string) => void;
@@ -111,6 +130,7 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   onUpdateArticles,
   onUpdateNotesConfig,
   onUpdateFaqData,
+  onUpdateUsers,
   onUpdateUserRole,
   onUpdateUser,
   onDeleteUser,
@@ -130,6 +150,12 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   const [isSyncingAll, setIsSyncingAll] = useState<boolean>(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState<string>('');
 
+  // Active entities computed for main view
+  const activeNotes = useMemo(() => filterActiveEntities(notesConfig.notes || []), [notesConfig.notes]);
+  const activeChecklist = useMemo(() => filterActiveEntities(notesConfig.checklist || []), [notesConfig.checklist]);
+  const activeRiverReviews = useMemo(() => filterActiveEntities(notesConfig.riverReviews || []), [notesConfig.riverReviews]);
+  const activeCrewReviews = useMemo(() => filterActiveEntities(notesConfig.crewReviews || []), [notesConfig.crewReviews]);
+
   // Deleted entities computed for Recycle Bin
   const deletedRoutes = useMemo(() => filterDeletedEntities(routes), [routes]);
   const deletedTrips = useMemo(() => filterDeletedEntities(trips), [trips]);
@@ -138,7 +164,8 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   const deletedChecklist = useMemo(() => filterDeletedEntities(notesConfig.checklist || []), [notesConfig.checklist]);
   const deletedRiverReviews = useMemo(() => filterDeletedEntities(notesConfig.riverReviews || []), [notesConfig.riverReviews]);
   const deletedCrewReviews = useMemo(() => filterDeletedEntities(notesConfig.crewReviews || []), [notesConfig.crewReviews]);
-  const deletedUsers = useMemo(() => filterDeletedEntities(registeredUsers), [registeredUsers]);
+  const activeUsers = useMemo(() => deduplicateUsers(filterActiveEntities(registeredUsers)), [registeredUsers]);
+  const deletedUsers = useMemo(() => deduplicateUsers(filterDeletedEntities(registeredUsers)), [registeredUsers]);
 
   const totalDeletedCount = 
     deletedRoutes.length + 
@@ -163,6 +190,13 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
 
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
   const [userToDelete, setUserToDelete] = useState<AppUser | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<{
+    type: 'route' | 'trip' | 'article' | 'faq' | 'guide' | 'note' | 'riverReview' | 'crewReview' | 'checklist' | 'permanent_route' | 'permanent_trip' | 'permanent_article' | 'permanent_note' | 'permanent_riverReview' | 'permanent_crewReview' | 'permanent_checklist' | 'permanent_user';
+    id: string;
+    name: string;
+    subtitle?: string;
+    isPermanent?: boolean;
+  } | null>(null);
   const [userNewPassword, setUserNewPassword] = useState<string>('');
   const [userActionMessage, setUserActionMessage] = useState<string>('');
   const [isSavingUser, setIsSavingUser] = useState<boolean>(false);
@@ -411,6 +445,270 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   };
 
   // ==========================================
+  // BACKUP IMPORT & RESTORE ENGINE
+  // ==========================================
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState<boolean>(false);
+  const [backupRawJson, setBackupRawJson] = useState<string>('');
+  const [backupFileName, setBackupFileName] = useState<string>('splav86_full_backup.json');
+  const [backupImportMode, setBackupImportMode] = useState<'merge' | 'replace'>('merge');
+  const [isApplyingBackup, setIsApplyingBackup] = useState<boolean>(false);
+  const [isDraggingBackupFile, setIsDraggingBackupFile] = useState<boolean>(false);
+  const backupFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Dynamic statistics and validation of the JSON payload
+  const backupStats = useMemo(() => {
+    if (!backupRawJson.trim()) {
+      return { isValid: false, error: 'JSON пустой', counts: null, parsed: null };
+    }
+    try {
+      const parsed = JSON.parse(backupRawJson);
+      let routesCount = 0;
+      let tripsCount = 0;
+      let articlesCount = 0;
+      let usersCount = 0;
+      let notesCount = 0;
+      let reviewsCount = 0;
+      let faqQuestionsCount = 0;
+      let safetyGuidesCount = 0;
+
+      if (Array.isArray(parsed)) {
+        if (parsed.length > 0) {
+          const first = parsed[0];
+          if (first && (first.riverName || first.riverLengthKm !== undefined || first.gpxTrack || first.startPoint)) {
+            routesCount = parsed.length;
+          } else if (first && (first.email || first.role || first.experienceLevel)) {
+            usersCount = parsed.length;
+          } else if (first && (first.organizer || first.meetingPoint || first.dates)) {
+            tripsCount = parsed.length;
+          } else if (first && (first.title && (first.content || first.readingTime))) {
+            articlesCount = parsed.length;
+          } else {
+            routesCount = parsed.length;
+          }
+        }
+      } else if (typeof parsed === 'object' && parsed !== null) {
+        if (Array.isArray(parsed.routes)) routesCount = parsed.routes.length;
+        if (Array.isArray(parsed.trips)) tripsCount = parsed.trips.length;
+        if (Array.isArray(parsed.articles)) articlesCount = parsed.articles.length;
+        if (Array.isArray(parsed.registeredUsers)) usersCount = parsed.registeredUsers.length;
+        else if (Array.isArray(parsed.users)) usersCount = parsed.users.length;
+
+        if (parsed.notesConfig) {
+          if (Array.isArray(parsed.notesConfig.notes)) notesCount += parsed.notesConfig.notes.length;
+          if (Array.isArray(parsed.notesConfig.riverReviews)) reviewsCount += parsed.notesConfig.riverReviews.length;
+          if (Array.isArray(parsed.notesConfig.crewReviews)) reviewsCount += parsed.notesConfig.crewReviews.length;
+        }
+        if (Array.isArray(parsed.travelNotes)) notesCount += parsed.travelNotes.length;
+        if (Array.isArray(parsed.notes)) notesCount += parsed.notes.length;
+        if (Array.isArray(parsed.riverReviews)) reviewsCount += parsed.riverReviews.length;
+        if (Array.isArray(parsed.crewReviews)) reviewsCount += parsed.crewReviews.length;
+
+        if (parsed.faqData) {
+          if (Array.isArray(parsed.faqData.faqQuestions)) faqQuestionsCount += parsed.faqData.faqQuestions.length;
+          if (Array.isArray(parsed.faqData.safetyGuides)) safetyGuidesCount += parsed.faqData.safetyGuides.length;
+        }
+        if (Array.isArray(parsed.faqQuestions)) faqQuestionsCount += parsed.faqQuestions.length;
+        if (Array.isArray(parsed.safetyGuides)) safetyGuidesCount += parsed.safetyGuides.length;
+      }
+
+      const total = routesCount + tripsCount + articlesCount + usersCount + notesCount + reviewsCount + faqQuestionsCount + safetyGuidesCount;
+
+      return {
+        isValid: true,
+        error: null,
+        parsed,
+        counts: {
+          routes: routesCount,
+          trips: tripsCount,
+          articles: articlesCount,
+          users: usersCount,
+          notes: notesCount,
+          reviews: reviewsCount,
+          faqQuestions: faqQuestionsCount,
+          safetyGuides: safetyGuidesCount,
+          totalRecognized: total
+        }
+      };
+    } catch (err: any) {
+      return {
+        isValid: false,
+        error: err.message || 'Синтаксическая ошибка в формате JSON',
+        counts: null,
+        parsed: null
+      };
+    }
+  }, [backupRawJson]);
+
+  const handleTriggerUploadBackup = () => {
+    if (backupFileInputRef.current) {
+      backupFileInputRef.current.value = '';
+      backupFileInputRef.current.click();
+    }
+  };
+
+  const handleBackupFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    loadBackupFile(file);
+  };
+
+  const loadBackupFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = (event.target?.result as string) || '';
+        const parsed = JSON.parse(content);
+        setBackupFileName(file.name);
+        setBackupRawJson(JSON.stringify(parsed, null, 2));
+        setIsBackupModalOpen(true);
+      } catch (err: any) {
+        alert(`Ошибка при чтении файла «${file.name}»: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleApplyBackup = async () => {
+    if (!backupStats.isValid || !backupStats.parsed) {
+      alert('Невозможно применить бэкап: исправьте синтаксические ошибки в JSON');
+      return;
+    }
+
+    setIsApplyingBackup(true);
+    try {
+      const parsed = backupStats.parsed;
+      const isReplace = backupImportMode === 'replace';
+      const appliedSummary: string[] = [];
+
+      // 1. ROUTES
+      let nextRoutes = routes;
+      const incomingRoutes: RiverRoute[] | undefined = 
+        Array.isArray(parsed) && parsed[0]?.riverName ? parsed :
+        Array.isArray(parsed.routes) ? parsed.routes : undefined;
+
+      if (incomingRoutes && incomingRoutes.length > 0) {
+        nextRoutes = isReplace ? filterActiveEntities(incomingRoutes) : mergeRoutes(routes, incomingRoutes);
+        onUpdateRoutes(nextRoutes);
+        try {
+          localStorage.setItem('splav86_custom_routes_v5', JSON.stringify(nextRoutes));
+        } catch (e) {}
+        appliedSummary.push(`Маршрутов: ${nextRoutes.length}`);
+      }
+
+      // 2. TRIPS
+      let nextTrips = trips;
+      const incomingTrips: CompanionTrip[] | undefined =
+        Array.isArray(parsed) && (parsed[0]?.meetingPoint || parsed[0]?.organizer) ? parsed :
+        Array.isArray(parsed.trips) ? parsed.trips : undefined;
+
+      if (incomingTrips && incomingTrips.length > 0) {
+        nextTrips = isReplace ? filterActiveEntities(incomingTrips) : mergeTrips(trips, incomingTrips);
+        onUpdateTrips(nextTrips);
+        try {
+          localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(nextTrips));
+        } catch (e) {}
+        appliedSummary.push(`Сплавов: ${nextTrips.length}`);
+      }
+
+      // 3. ARTICLES
+      let nextArticles = articles;
+      const incomingArticles: Article[] | undefined =
+        Array.isArray(parsed) && parsed[0]?.title && (parsed[0]?.content || parsed[0]?.readingTime) ? parsed :
+        Array.isArray(parsed.articles) ? parsed.articles : undefined;
+
+      if (incomingArticles && incomingArticles.length > 0) {
+        nextArticles = isReplace ? filterActiveEntities(incomingArticles) : (mergeArticles(articles as any, incomingArticles as any) as any);
+        onUpdateArticles(nextArticles);
+        try {
+          localStorage.setItem('splav86_custom_articles', JSON.stringify(nextArticles));
+        } catch (e) {}
+        appliedSummary.push(`Статей: ${nextArticles.length}`);
+      }
+
+      // 4. NOTES & REVIEWS (TravelNotesConfig)
+      let nextNotesConfig = notesConfig;
+      const incomingNotesConfig: TravelNotesConfig | undefined = 
+        parsed.notesConfig ? parsed.notesConfig :
+        (parsed.travelNotes || parsed.notes || parsed.riverReviews || parsed.crewReviews || parsed.checklist) ? {
+          id: notesConfig.id || 'splav86_travel_notes_main',
+          notes: parsed.travelNotes || parsed.notes || notesConfig.notes || [],
+          riverReviews: parsed.riverReviews || notesConfig.riverReviews || [],
+          crewReviews: parsed.crewReviews || notesConfig.crewReviews || [],
+          checklist: parsed.checklist || notesConfig.checklist || [],
+          logbookTrips: parsed.logbookTrips || notesConfig.logbookTrips || [],
+          updatedAt: new Date().toISOString()
+        } : undefined;
+
+      if (incomingNotesConfig) {
+        nextNotesConfig = isReplace ? incomingNotesConfig : mergeTravelNotesConfigs(notesConfig, incomingNotesConfig);
+        if (onUpdateNotesConfig) onUpdateNotesConfig(nextNotesConfig);
+        try {
+          localStorage.setItem('splav86_travel_notes_config', JSON.stringify(nextNotesConfig));
+        } catch (e) {}
+        appliedSummary.push(`Заметок: ${(nextNotesConfig.notes || []).length}`);
+      }
+
+      // 5. FAQ & SAFETY DATA
+      let nextFaqData = faqData;
+      const incomingFaqData: FaqDataConfig | undefined =
+        parsed.faqData ? parsed.faqData :
+        (parsed.faqQuestions || parsed.safetyGuides || parsed.emergencyContacts || parsed.radioFrequencies || parsed.visualSignals) ? {
+          ...faqData,
+          faqQuestions: parsed.faqQuestions || faqData.faqQuestions || [],
+          safetyGuides: parsed.safetyGuides || faqData.safetyGuides || [],
+          emergencyContacts: parsed.emergencyContacts || faqData.emergencyContacts || [],
+          radioFrequencies: parsed.radioFrequencies || faqData.radioFrequencies || [],
+          visualSignals: parsed.visualSignals || faqData.visualSignals || [],
+          updatedAt: new Date().toISOString()
+        } : undefined;
+
+      if (incomingFaqData) {
+        nextFaqData = isReplace ? incomingFaqData : mergeFaqConfigs(faqData, incomingFaqData);
+        if (onUpdateFaqData) onUpdateFaqData(nextFaqData);
+        try {
+          localStorage.setItem('splav86_faq_data', JSON.stringify(nextFaqData));
+        } catch (e) {}
+        appliedSummary.push(`FAQ/Безопасность: ${(nextFaqData.faqQuestions || []).length + (nextFaqData.safetyGuides || []).length}`);
+      }
+
+      // 6. USERS
+      const incomingUsers: AppUser[] | undefined =
+        Array.isArray(parsed) && parsed[0]?.email && parsed[0]?.role ? parsed :
+        Array.isArray(parsed.registeredUsers) ? parsed.registeredUsers :
+        Array.isArray(parsed.users) ? parsed.users : undefined;
+
+      if (incomingUsers && incomingUsers.length > 0) {
+        const nextUsers = isReplace ? deduplicateUsers(filterActiveEntities(incomingUsers)) : mergeUsers(registeredUsers, incomingUsers);
+        if (onUpdateUsers) onUpdateUsers(nextUsers);
+        try {
+          localStorage.setItem('splav86_users', JSON.stringify(nextUsers));
+        } catch (e) {}
+        appliedSummary.push(`Пользователей: ${nextUsers.length}`);
+      }
+
+      // 7. Background synchronization with Firestore & Cloud SQL
+      CentralSyncManager.saveRoutes(nextRoutes).catch(console.warn);
+      CentralSyncManager.saveTrips(nextTrips).catch(console.warn);
+      CentralSyncManager.saveArticles(nextArticles).catch(console.warn);
+      if (nextNotesConfig) CentralSyncManager.saveNotesConfig(nextNotesConfig).catch(console.warn);
+      if (nextFaqData) CentralSyncManager.saveFaqData(nextFaqData).catch(console.warn);
+
+      setSyncStatusMsg(
+        `Бэкап успешно применен (${isReplace ? 'Полная замена' : 'Умное слияние'}): ${
+          appliedSummary.join(', ') || 'Все данные синхронизированы'
+        }`
+      );
+      setIsBackupModalOpen(false);
+      setTimeout(() => setSyncStatusMsg(''), 6000);
+    } catch (err: any) {
+      console.error('Failed to apply backup:', err);
+      alert(`Ошибка применения бэкапа: ${err.message}`);
+    } finally {
+      setIsApplyingBackup(false);
+    }
+  };
+
+  // ==========================================
   // ROUTE ACTIONS
   // ==========================================
   const handleSetRouteStatus = (routeId: string, status: 'verified' | 'incomplete' | 'needs_review') => {
@@ -461,17 +759,13 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   };
 
   const handleDeleteRouteConfirmed = (routeId: string, name: string) => {
-    if (!window.confirm(`Удалить паспорт маршрута "${name}" безвозвратно?`)) return;
-    if (onDeleteRoute) {
-      onDeleteRoute(routeId);
-    } else {
-      const updated = routes.filter(r => r.id !== routeId);
-      if (typeof onUpdateRoutes === 'function') {
-        onUpdateRoutes(updated as any);
-      }
-      RoutesSyncService.removeRoute(routeId).catch(console.warn);
-      CloudSqlDbService.deleteRoute(routeId).catch(console.warn);
-    }
+    const target = routes.find(r => r.id === routeId);
+    setItemToDelete({
+      type: 'route',
+      id: routeId,
+      name: name || target?.name || 'Маршрут',
+      subtitle: target ? `р. ${target.riverName} • ${target.lengthKm} км • ${target.fstrCategory}` : undefined
+    });
   };
 
   // Filtered routes list
@@ -511,18 +805,13 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   };
 
   const handleDeleteTripConfirmed = (tripId: string, title: string) => {
-    if (!window.confirm(`Удалить сплав "${title}"?`)) return;
-    if (onDeleteTrip) {
-      onDeleteTrip(tripId);
-    } else {
-      const updated = trips.filter(t => t.id !== tripId);
-      if (typeof onUpdateTrips === 'function') {
-        onUpdateTrips(updated as any);
-      }
-      TripsSyncService.removeTrip(tripId).catch(console.warn);
-      CloudSqlDbService.deleteTrip(tripId).catch(console.warn);
-    }
-    if (selectedTripForApps?.id === tripId) setSelectedTripForApps(null);
+    const target = trips.find(t => t.id === tripId);
+    setItemToDelete({
+      type: 'trip',
+      id: tripId,
+      name: title || target?.title || 'Сплав',
+      subtitle: target ? `Река: ${target.riverName || 'не указана'} • Даты: ${target.startDate} – ${target.endDate}` : undefined
+    });
   };
 
   const handleUpdateTripApplicationStatus = (tripId: string, appId: string, newStatus: 'accepted' | 'declined') => {
@@ -600,19 +889,12 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   };
 
   const handleDeleteFaqItem = (itemId: string) => {
-    if (!window.confirm('Удалить этот вопрос FAQ?')) return;
-    const updatedQuestions = (faqData.faqQuestions || []).filter(q => q.id !== itemId);
-    const updatedFaq: FaqDataConfig = {
-      ...faqData,
-      faqQuestions: updatedQuestions,
-      updatedAt: new Date().toISOString()
-    };
-    if (onUpdateFaqData) onUpdateFaqData(updatedFaq);
-    try {
-      localStorage.setItem('splav86_faq_data_v1', JSON.stringify(updatedFaq));
-    } catch (e) {}
-    FaqSyncService.saveFaq(updatedFaq).catch(console.warn);
-    CloudSqlDbService.saveFaq(updatedFaq).catch(console.warn);
+    const q = (faqData.faqQuestions || []).find(x => x.id === itemId);
+    setItemToDelete({
+      type: 'faq',
+      id: itemId,
+      name: q?.question || 'Вопрос FAQ'
+    });
   };
 
   const handleSaveSafetyGuide = (guideToSave: SafetyGuide) => {
@@ -640,88 +922,51 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   };
 
   const handleDeleteSafetyGuide = (guideId: string) => {
-    if (!window.confirm('Удалить эту памятку безопасности?')) return;
-    const updatedGuides = (faqData.safetyGuides || []).filter(g => g.id !== guideId);
-    const updatedFaq: FaqDataConfig = {
-      ...faqData,
-      safetyGuides: updatedGuides,
-      updatedAt: new Date().toISOString()
-    };
-    if (onUpdateFaqData) onUpdateFaqData(updatedFaq);
-    try {
-      localStorage.setItem('splav86_faq_data_v1', JSON.stringify(updatedFaq));
-    } catch (e) {}
-    FaqSyncService.saveFaq(updatedFaq).catch(console.warn);
-    CloudSqlDbService.saveFaq(updatedFaq).catch(console.warn);
+    const g = (faqData.safetyGuides || []).find(x => x.id === guideId);
+    setItemToDelete({
+      type: 'guide',
+      id: guideId,
+      name: g?.title || 'Памятка безопасности'
+    });
   };
 
   // ==========================================
   // TRAVEL NOTES & REVIEWS MODERATION
   // ==========================================
   const handleDeleteTravelNote = (noteId: string) => {
-    if (!window.confirm('Переместить эту заметку/отчет в корзину?')) return;
-    const updatedNotes = (notesConfig.notes || []).map(n => 
-      n.id === noteId ? { ...n, isDeleted: true, updatedAt: new Date().toISOString() } : n
-    );
-    const newConfig: TravelNotesConfig = {
-      ...notesConfig,
-      notes: updatedNotes,
-      updatedAt: new Date().toISOString()
-    };
-    if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
-    try {
-      localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
-    } catch (e) {}
-    CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+    const n = (notesConfig.notes || []).find(x => x.id === noteId);
+    setItemToDelete({
+      type: 'note',
+      id: noteId,
+      name: n?.title || 'Заметка/отчет'
+    });
   };
 
   const handleDeleteRiverReview = (reviewId: string) => {
-    if (!window.confirm('Переместить этот отзыв о реке в корзину?')) return;
-    const updatedReviews = (notesConfig.riverReviews || []).map(r => 
-      r.id === reviewId ? { ...r, isDeleted: true, updatedAt: new Date().toISOString() } : r
-    );
-    const newConfig: TravelNotesConfig = {
-      ...notesConfig,
-      riverReviews: updatedReviews,
-      updatedAt: new Date().toISOString()
-    };
-    if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
-    try {
-      localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
-    } catch (e) {}
-    CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+    const r = (notesConfig.riverReviews || []).find(x => x.id === reviewId);
+    setItemToDelete({
+      type: 'riverReview',
+      id: reviewId,
+      name: r ? `Отзыв о реке ${r.riverName}` : 'Отзыв о реке'
+    });
   };
 
   const handleDeleteCrewReview = (reviewId: string) => {
-    if (!window.confirm('Переместить этот отзыв экипажа в корзину?')) return;
-    const updatedReviews = (notesConfig.crewReviews || []).map(r => 
-      r.id === reviewId ? { ...r, isDeleted: true, updatedAt: new Date().toISOString() } : r
-    );
-    const newConfig: TravelNotesConfig = {
-      ...notesConfig,
-      crewReviews: updatedReviews,
-      updatedAt: new Date().toISOString()
-    };
-    if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
-    try {
-      localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
-    } catch (e) {}
-    CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+    const r = (notesConfig.crewReviews || []).find(x => x.id === reviewId);
+    setItemToDelete({
+      type: 'crewReview',
+      id: reviewId,
+      name: r ? `Отзыв от ${r.authorUserName}` : 'Отзыв экипажа'
+    });
   };
 
   const handleDeleteChecklistItem = (itemId: string) => {
-    if (!window.confirm('Удалить этот элемент чек-листа?')) return;
-    const updatedChecklist = (notesConfig.checklist || []).filter(c => c.id !== itemId);
-    const newConfig: TravelNotesConfig = {
-      ...notesConfig,
-      checklist: updatedChecklist,
-      updatedAt: new Date().toISOString()
-    };
-    if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
-    try {
-      localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
-    } catch (e) {}
-    CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+    const c = (notesConfig.checklist || []).find(x => x.id === itemId);
+    setItemToDelete({
+      type: 'checklist',
+      id: itemId,
+      name: c?.text || 'Элемент чек-листа'
+    });
   };
 
   // ==========================================
@@ -743,13 +988,13 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   };
 
   const handlePermanentDeleteRoute = (routeId: string) => {
-    if (!window.confirm('Удалить маршрут НАВСЕГДА без возможности восстановления?')) return;
-    const updated = routes.filter(r => r.id !== routeId);
-    if (typeof onUpdateRoutes === 'function') onUpdateRoutes(updated as any);
-    RoutesSyncService.removeRoute(routeId).catch(console.warn);
-    CloudSqlDbService.deleteRoute(routeId).catch(console.warn);
-    setSyncStatusMsg('Маршрут окончательно удален из базы');
-    setTimeout(() => setSyncStatusMsg(''), 3000);
+    const target = routes.find(r => r.id === routeId);
+    setItemToDelete({
+      type: 'permanent_route',
+      id: routeId,
+      name: target?.name || 'Маршрут',
+      isPermanent: true
+    });
   };
 
   const handleRestoreTrip = (tripId: string) => {
@@ -768,13 +1013,13 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   };
 
   const handlePermanentDeleteTrip = (tripId: string) => {
-    if (!window.confirm('Удалить сплав НАВСЕГДА без возможности восстановления?')) return;
-    const updated = trips.filter(t => t.id !== tripId);
-    if (typeof onUpdateTrips === 'function') onUpdateTrips(updated as any);
-    TripsSyncService.removeTrip(tripId).catch(console.warn);
-    CloudSqlDbService.deleteTrip(tripId).catch(console.warn);
-    setSyncStatusMsg('Сплав окончательно удален из базы');
-    setTimeout(() => setSyncStatusMsg(''), 3000);
+    const target = trips.find(t => t.id === tripId);
+    setItemToDelete({
+      type: 'permanent_trip',
+      id: tripId,
+      name: target?.title || 'Сплав',
+      isPermanent: true
+    });
   };
 
   const handleRestoreArticle = (articleId: string) => {
@@ -793,13 +1038,356 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
   };
 
   const handlePermanentDeleteArticle = (articleId: string) => {
-    if (!window.confirm('Удалить статью НАВСЕГДА?')) return;
-    const updated = articles.filter(a => a.id !== articleId);
-    if (typeof onUpdateArticles === 'function') onUpdateArticles(updated as any);
-    ArticlesSyncService.removeArticle(articleId).catch(console.warn);
-    CloudSqlDbService.deleteArticle(articleId).catch(console.warn);
-    setSyncStatusMsg('Статья окончательно удалена');
-    setTimeout(() => setSyncStatusMsg(''), 3000);
+    const target = articles.find(a => a.id === articleId);
+    setItemToDelete({
+      type: 'permanent_article',
+      id: articleId,
+      name: target?.title || 'Статья',
+      isPermanent: true
+    });
+  };
+
+  const handlePermanentDeleteNote = (noteId: string) => {
+    const target = (notesConfig.notes || []).find(n => n.id === noteId);
+    setItemToDelete({
+      type: 'permanent_note',
+      id: noteId,
+      name: target?.title || 'Заметка',
+      isPermanent: true
+    });
+  };
+
+  const handlePermanentDeleteCrewReview = (reviewId: string) => {
+    const target = (notesConfig.crewReviews || []).find(r => r.id === reviewId);
+    setItemToDelete({
+      type: 'permanent_crewReview',
+      id: reviewId,
+      name: target ? `Отзыв об участнике ${target.targetUserName}` : 'Отзыв экипажа',
+      isPermanent: true
+    });
+  };
+
+  const handlePermanentDeleteRiverReview = (reviewId: string) => {
+    const target = (notesConfig.riverReviews || []).find(r => r.id === reviewId);
+    setItemToDelete({
+      type: 'permanent_riverReview',
+      id: reviewId,
+      name: target ? `Отзыв о реке ${target.riverName}` : 'Отзыв о реке',
+      isPermanent: true
+    });
+  };
+
+  const handlePermanentDeleteChecklistItem = (itemId: string) => {
+    const target = (notesConfig.checklist || []).find(c => c.id === itemId);
+    setItemToDelete({
+      type: 'permanent_checklist',
+      id: itemId,
+      name: target?.text || 'Пункт чек-листа',
+      isPermanent: true
+    });
+  };
+
+  const handlePermanentDeleteUser = (userId: string) => {
+    const target = registeredUsers.find(u => u.id === userId);
+    setItemToDelete({
+      type: 'permanent_user',
+      id: userId,
+      name: target?.name || 'Пользователь',
+      isPermanent: true
+    });
+  };
+
+  // Master delete execution handler
+  const handleExecuteDeleteItem = async () => {
+    if (!itemToDelete) return;
+    const { type, id, name } = itemToDelete;
+
+    switch (type) {
+      case 'route': {
+        if (onDeleteRoute) {
+          onDeleteRoute(id);
+        }
+        const updated = routes.filter(r => r.id !== id);
+        if (typeof onUpdateRoutes === 'function') {
+          onUpdateRoutes(updated as any);
+        }
+        try {
+          localStorage.setItem('splav86_custom_routes_v5', JSON.stringify(updated));
+        } catch (e) {}
+        RoutesSyncService.removeRoute(id).catch(console.warn);
+        CloudSqlDbService.deleteRoute(id).catch(console.warn);
+        CentralSyncManager.deleteRoute(id).catch(console.warn);
+        setSyncStatusMsg(`Маршрут "${name}" успешно удален`);
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+      case 'permanent_route': {
+        const updated = routes.filter(r => r.id !== id);
+        if (typeof onUpdateRoutes === 'function') onUpdateRoutes(updated as any);
+        try {
+          localStorage.setItem('splav86_custom_routes_v5', JSON.stringify(updated));
+        } catch (e) {}
+        RoutesSyncService.removeRoute(id).catch(console.warn);
+        CloudSqlDbService.deleteRoute(id).catch(console.warn);
+        CentralSyncManager.deleteRoute(id).catch(console.warn);
+        setSyncStatusMsg('Маршрут окончательно удален из базы');
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+      case 'trip': {
+        if (onDeleteTrip) {
+          onDeleteTrip(id);
+        }
+        const updated = trips.filter(t => t.id !== id);
+        if (typeof onUpdateTrips === 'function') {
+          onUpdateTrips(updated as any);
+        }
+        try {
+          localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(updated));
+        } catch (e) {}
+        TripsSyncService.removeTrip(id).catch(console.warn);
+        CloudSqlDbService.deleteTrip(id).catch(console.warn);
+        if (selectedTripForApps?.id === id) setSelectedTripForApps(null);
+        setSyncStatusMsg(`Сплав "${name}" успешно удален`);
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+      case 'permanent_trip': {
+        const updated = trips.filter(t => t.id !== id);
+        if (typeof onUpdateTrips === 'function') onUpdateTrips(updated as any);
+        try {
+          localStorage.setItem('splav86_custom_trips_v5', JSON.stringify(updated));
+        } catch (e) {}
+        TripsSyncService.removeTrip(id).catch(console.warn);
+        CloudSqlDbService.deleteTrip(id).catch(console.warn);
+        setSyncStatusMsg('Сплав окончательно удален из базы');
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+      case 'article': {
+        if (onDeleteArticle) {
+          onDeleteArticle(id);
+        }
+        const updated = articles.filter(a => a.id !== id);
+        if (typeof onUpdateArticles === 'function') {
+          onUpdateArticles(updated as any);
+        }
+        ArticlesSyncService.removeArticle(id).catch(console.warn);
+        CloudSqlDbService.deleteArticle(id).catch(console.warn);
+        setSyncStatusMsg(`Статья "${name}" удалена`);
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+      case 'permanent_article': {
+        const updated = articles.filter(a => a.id !== id);
+        if (typeof onUpdateArticles === 'function') onUpdateArticles(updated as any);
+        ArticlesSyncService.removeArticle(id).catch(console.warn);
+        CloudSqlDbService.deleteArticle(id).catch(console.warn);
+        setSyncStatusMsg('Статья окончательно удалена');
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+      case 'faq': {
+        const updatedQuestions = (faqData.faqQuestions || []).filter(q => q.id !== id);
+        const updatedFaq: FaqDataConfig = {
+          ...faqData,
+          faqQuestions: updatedQuestions,
+          updatedAt: new Date().toISOString()
+        };
+        if (onUpdateFaqData) onUpdateFaqData(updatedFaq);
+        try {
+          localStorage.setItem('splav86_faq_data_v1', JSON.stringify(updatedFaq));
+        } catch (e) {}
+        FaqSyncService.saveFaq(updatedFaq).catch(console.warn);
+        CloudSqlDbService.saveFaq(updatedFaq).catch(console.warn);
+        setSyncStatusMsg('Вопрос FAQ удален');
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+      case 'guide': {
+        const updatedGuides = (faqData.safetyGuides || []).filter(g => g.id !== id);
+        const updatedFaq: FaqDataConfig = {
+          ...faqData,
+          safetyGuides: updatedGuides,
+          updatedAt: new Date().toISOString()
+        };
+        if (onUpdateFaqData) onUpdateFaqData(updatedFaq);
+        try {
+          localStorage.setItem('splav86_faq_data_v1', JSON.stringify(updatedFaq));
+        } catch (e) {}
+        FaqSyncService.saveFaq(updatedFaq).catch(console.warn);
+        CloudSqlDbService.saveFaq(updatedFaq).catch(console.warn);
+        setSyncStatusMsg('Памятка безопасности удалена');
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+      case 'note': {
+        const updatedNotes = (notesConfig.notes || []).map(n => 
+          n.id === id ? { ...n, isDeleted: true, updatedAt: new Date().toISOString() } : n
+        );
+        const newConfig: TravelNotesConfig = {
+          ...notesConfig,
+          notes: updatedNotes,
+          updatedAt: new Date().toISOString()
+        };
+        if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
+        try {
+          localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
+        } catch (e) {}
+        CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+        setSyncStatusMsg('Заметка перемещена в корзину');
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+      case 'riverReview': {
+        const updatedReviews = (notesConfig.riverReviews || []).map(r => 
+          r.id === id ? { ...r, isDeleted: true, updatedAt: new Date().toISOString() } : r
+        );
+        const newConfig: TravelNotesConfig = {
+          ...notesConfig,
+          riverReviews: updatedReviews,
+          updatedAt: new Date().toISOString()
+        };
+        if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
+        try {
+          localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
+        } catch (e) {}
+        CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+        setSyncStatusMsg('Отзыв о реке перемещен в корзину');
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+      case 'crewReview': {
+        const updatedReviews = (notesConfig.crewReviews || []).map(r => 
+          r.id === id ? { ...r, isDeleted: true, updatedAt: new Date().toISOString() } : r
+        );
+        const newConfig: TravelNotesConfig = {
+          ...notesConfig,
+          crewReviews: updatedReviews,
+          updatedAt: new Date().toISOString()
+        };
+        if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
+        try {
+          localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
+        } catch (e) {}
+        CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+        setSyncStatusMsg('Отзыв экипажа перемещен в корзину');
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+      case 'permanent_note': {
+        const updatedNotes = (notesConfig.notes || []).filter(n => n.id !== id);
+        const newConfig: TravelNotesConfig = {
+          ...notesConfig,
+          notes: updatedNotes,
+          updatedAt: new Date().toISOString()
+        };
+        if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
+        try {
+          localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
+          const storedNotes = localStorage.getItem('splav86_travel_notes_v2');
+          if (storedNotes) {
+            try {
+              const list = JSON.parse(storedNotes);
+              if (Array.isArray(list)) {
+                localStorage.setItem('splav86_travel_notes_v2', JSON.stringify(list.filter((x: any) => x.id !== id)));
+              }
+            } catch (e) {}
+          }
+        } catch (e) {}
+        CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+        setSyncStatusMsg('Заметка окончательно удалена из базы');
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+      case 'permanent_riverReview': {
+        const updatedReviews = (notesConfig.riverReviews || []).filter(r => r.id !== id);
+        const newConfig: TravelNotesConfig = {
+          ...notesConfig,
+          riverReviews: updatedReviews,
+          updatedAt: new Date().toISOString()
+        };
+        if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
+        try {
+          localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
+        } catch (e) {}
+        CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+        setSyncStatusMsg('Отзыв о реке окончательно удален');
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+      case 'permanent_crewReview': {
+        const updatedReviews = (notesConfig.crewReviews || []).filter(r => r.id !== id);
+        const newConfig: TravelNotesConfig = {
+          ...notesConfig,
+          crewReviews: updatedReviews,
+          updatedAt: new Date().toISOString()
+        };
+        if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
+        try {
+          localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
+          const storedCrew = localStorage.getItem('splav86_crew_reviews_v2');
+          if (storedCrew) {
+            try {
+              const list = JSON.parse(storedCrew);
+              if (Array.isArray(list)) {
+                localStorage.setItem('splav86_crew_reviews_v2', JSON.stringify(list.filter((x: any) => x.id !== id)));
+              }
+            } catch (e) {}
+          }
+        } catch (e) {}
+        CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+        setSyncStatusMsg('Отзыв экипажа окончательно удален');
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+      case 'permanent_checklist': {
+        const updatedChecklist = (notesConfig.checklist || []).filter(c => c.id !== id);
+        const newConfig: TravelNotesConfig = {
+          ...notesConfig,
+          checklist: updatedChecklist,
+          updatedAt: new Date().toISOString()
+        };
+        if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
+        try {
+          localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
+        } catch (e) {}
+        CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+        setSyncStatusMsg('Элемент чек-листа окончательно удален');
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+      case 'checklist': {
+        const updatedChecklist = (notesConfig.checklist || []).filter(c => c.id !== id);
+        const newConfig: TravelNotesConfig = {
+          ...notesConfig,
+          checklist: updatedChecklist,
+          updatedAt: new Date().toISOString()
+        };
+        if (onUpdateNotesConfig) onUpdateNotesConfig(newConfig);
+        try {
+          localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
+        } catch (e) {}
+        CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
+        setSyncStatusMsg('Элемент чек-листа удален');
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+      case 'permanent_user': {
+        const updatedUsers = registeredUsers.filter(u => u.id !== id);
+        if (onUpdateUsers) onUpdateUsers(updatedUsers);
+        try {
+          await CloudSqlDbService.adminDeleteUser(id);
+        } catch (e) {
+          console.warn('CloudSQL admin permanent delete user:', e);
+        }
+        setSyncStatusMsg('Пользователь окончательно удален из базы');
+        setTimeout(() => setSyncStatusMsg(''), 3500);
+        break;
+      }
+    }
+
+    setItemToDelete(null);
   };
 
   const handleRestoreUser = (userId: string) => {
@@ -895,13 +1483,30 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            <input
+              type="file"
+              ref={backupFileInputRef}
+              accept=".json,application/json"
+              onChange={handleBackupFileChange}
+              className="hidden"
+            />
+
             <button
               onClick={handleExportFullBackup}
               className="px-3 py-2 rounded-xl text-xs font-bold bg-[#F9F7F4] hover:bg-[#EAE7E2] text-[#4A443E] border border-[#E5E0D8] flex items-center gap-1.5 transition-colors"
-              title="Выгрузить резервную копию JSON всего сайта"
+              title="Выгрузить резервную копию всей базы данных (JSON)"
             >
-              <Download className="w-3.5 h-3.5" />
-              <span>Экспорт бэкапа</span>
+              <Download className="w-3.5 h-3.5 text-[#8A3B14]" />
+              <span>Скачать бэкап</span>
+            </button>
+
+            <button
+              onClick={handleTriggerUploadBackup}
+              className="px-3 py-2 rounded-xl text-xs font-bold bg-[#F9F7F4] hover:bg-[#EAE7E2] text-[#4A443E] border border-[#E5E0D8] flex items-center gap-1.5 transition-colors"
+              title="Загрузить и применить резервную копию JSON"
+            >
+              <Upload className="w-3.5 h-3.5 text-blue-600" />
+              <span>Загрузить бэкап</span>
             </button>
 
             <button
@@ -1443,11 +2048,11 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
             <div className="flex items-center gap-2 flex-wrap">
               <div className="flex items-center gap-1.5 flex-wrap">
                 {[
-                  { id: 'all', label: 'Все материалы' },
-                  { id: 'notes', label: `Заметки (${(notesConfig.notes || []).length})` },
-                  { id: 'river_reviews', label: `Отзывы о реках (${(notesConfig.riverReviews || []).length})` },
-                  { id: 'crew_reviews', label: `Экипажи (${(notesConfig.crewReviews || []).length})` },
-                  { id: 'checklist', label: `Чек-листы (${(notesConfig.checklist || []).length})` }
+                  { id: 'all', label: `Все материалы (${activeNotes.length + activeRiverReviews.length + activeCrewReviews.length + activeChecklist.length})` },
+                  { id: 'notes', label: `Заметки (${activeNotes.length})` },
+                  { id: 'river_reviews', label: `Отзывы о реках (${activeRiverReviews.length})` },
+                  { id: 'crew_reviews', label: `Экипажи (${activeCrewReviews.length})` },
+                  { id: 'checklist', label: `Чек-листы (${activeChecklist.length})` }
                 ].map((sub) => (
                   <button
                     key={sub.id}
@@ -1479,33 +2084,39 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
             <div className="space-y-3">
               <h3 className="text-sm font-black text-[#1A1F1A] uppercase tracking-wider flex items-center gap-2">
                 <FileText className="w-4 h-4 text-[#2D5A27]" />
-                Заметки и отчеты о реках ({notesConfig.notes?.length || 0})
+                Заметки и отчеты о реках ({activeNotes.length})
               </h3>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {(notesConfig.notes || []).map((n) => (
-                  <div key={n.id} className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6] flex flex-col justify-between space-y-2">
-                    <div>
-                      <div className="flex items-center justify-between text-xs text-[#8B7E6D]">
-                        <span className="font-bold text-[#2D5A27]">{n.riverName || 'Река'}</span>
-                        <span>{n.createdAt?.split('T')[0] || '2026'}</span>
+              {activeNotes.length === 0 ? (
+                <div className="p-4 text-center text-xs text-[#8B7E6D] bg-[#F9F7F4] rounded-2xl border border-dashed border-[#E5E0D8]">
+                  Нет активных заметок
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {activeNotes.map((n) => (
+                    <div key={n.id} className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6] flex flex-col justify-between space-y-2">
+                      <div>
+                        <div className="flex items-center justify-between text-xs text-[#8B7E6D]">
+                          <span className="font-bold text-[#2D5A27]">{n.riverName || 'Река'}</span>
+                          <span>{n.createdAt?.split('T')[0] || '2026'}</span>
+                        </div>
+                        <h5 className="text-xs font-bold text-[#1A1F1A] mt-1">{n.title}</h5>
+                        <p className="text-xs text-[#6B665F] line-clamp-2 mt-1">{n.content}</p>
                       </div>
-                      <h5 className="text-xs font-bold text-[#1A1F1A] mt-1">{n.title}</h5>
-                      <p className="text-xs text-[#6B665F] line-clamp-2 mt-1">{n.content}</p>
+                      <div className="flex items-center justify-between border-t border-[#E5E0D8] pt-2 text-[11px] text-[#6B665F]">
+                        <span>Автор: {n.authorName || 'Турист'}</span>
+                        <button
+                          onClick={() => handleDeleteTravelNote(n.id)}
+                          className="text-[#E54B4B] hover:underline font-bold flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>В корзину</span>
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between border-t border-[#E5E0D8] pt-2 text-[11px] text-[#6B665F]">
-                      <span>Автор: {n.authorName || 'Турист'}</span>
-                      <button
-                        onClick={() => handleDeleteTravelNote(n.id)}
-                        className="text-[#E54B4B] hover:underline font-bold flex items-center gap-1"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        <span>В корзину</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -1514,32 +2125,38 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
             <div className="space-y-3 border-t border-[#EEEBE6] pt-4">
               <h3 className="text-sm font-black text-[#1A1F1A] uppercase tracking-wider flex items-center gap-2">
                 <Compass className="w-4 h-4 text-[#2B4C7E]" />
-                Отзывы о реках ({notesConfig.riverReviews?.length || 0})
+                Отзывы о реках ({activeRiverReviews.length})
               </h3>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {(notesConfig.riverReviews || []).map((rr) => (
-                  <div key={rr.id} className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6] flex flex-col justify-between space-y-2">
-                    <div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-bold text-[#1A1F1A]">р. {rr.riverName}</span>
-                        <span className="font-bold text-[#D97706]">★ {rr.ratingOverall} / 5</span>
+              {activeRiverReviews.length === 0 ? (
+                <div className="p-4 text-center text-xs text-[#8B7E6D] bg-[#F9F7F4] rounded-2xl border border-dashed border-[#E5E0D8]">
+                  Нет активных отзывов о реках
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {activeRiverReviews.map((rr) => (
+                    <div key={rr.id} className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6] flex flex-col justify-between space-y-2">
+                      <div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-[#1A1F1A]">р. {rr.riverName}</span>
+                          <span className="font-bold text-[#D97706]">★ {rr.ratingOverall} / 5</span>
+                        </div>
+                        <p className="text-xs text-[#6B665F] mt-1 italic">"{rr.comment}"</p>
                       </div>
-                      <p className="text-xs text-[#6B665F] mt-1 italic">"{rr.comment}"</p>
+                      <div className="flex items-center justify-between border-t border-[#E5E0D8] pt-2 text-[11px] text-[#6B665F]">
+                        <span>Автор: {rr.userName} ({rr.date})</span>
+                        <button
+                          onClick={() => handleDeleteRiverReview(rr.id)}
+                          className="text-[#E54B4B] hover:underline font-bold flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>В корзину</span>
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between border-t border-[#E5E0D8] pt-2 text-[11px] text-[#6B665F]">
-                      <span>Автор: {rr.userName} ({rr.date})</span>
-                      <button
-                        onClick={() => handleDeleteRiverReview(rr.id)}
-                        className="text-[#E54B4B] hover:underline font-bold flex items-center gap-1"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        <span>В корзину</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -1548,39 +2165,45 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
             <div className="space-y-3 border-t border-[#EEEBE6] pt-4">
               <h3 className="text-sm font-black text-[#1A1F1A] uppercase tracking-wider flex items-center gap-2">
                 <Star className="w-4 h-4 text-[#D97706]" />
-                Отзывы об участниках экипажей ({notesConfig.crewReviews?.length || 0})
+                Отзывы об участниках экипажей ({activeCrewReviews.length})
               </h3>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {(notesConfig.crewReviews || []).map((cr) => (
-                  <div key={cr.id} className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6] flex flex-col justify-between space-y-2">
-                    <div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-bold text-[#1A1F1A]">О ком: {cr.targetUserName}</span>
-                        <span className="font-bold text-[#D97706]">★ {cr.ratingOverall} / 5</span>
+              {activeCrewReviews.length === 0 ? (
+                <div className="p-4 text-center text-xs text-[#8B7E6D] bg-[#F9F7F4] rounded-2xl border border-dashed border-[#E5E0D8]">
+                  Нет активных отзывов об участниках экипажей
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {activeCrewReviews.map((cr) => (
+                    <div key={cr.id} className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6] flex flex-col justify-between space-y-2">
+                      <div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-[#1A1F1A]">О ком: {cr.targetUserName}</span>
+                          <span className="font-bold text-[#D97706]">★ {cr.ratingOverall} / 5</span>
+                        </div>
+                        <p className="text-xs text-[#6B665F] mt-1 italic">"{cr.comment}"</p>
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {cr.tags?.map((tg, idx) => (
+                            <span key={idx} className="text-[10px] px-1.5 py-0.5 rounded-md bg-[#E5E0D8] text-[#2D332D]">
+                              {tg}
+                            </span>
+                          ))}
+                        </div>
                       </div>
-                      <p className="text-xs text-[#6B665F] mt-1 italic">"{cr.comment}"</p>
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {cr.tags?.map((tg, idx) => (
-                          <span key={idx} className="text-[10px] px-1.5 py-0.5 rounded-md bg-[#E5E0D8] text-[#2D332D]">
-                            {tg}
-                          </span>
-                        ))}
+                      <div className="flex items-center justify-between border-t border-[#E5E0D8] pt-2 text-[11px] text-[#6B665F]">
+                        <span>От автора: {cr.authorUserName} ({cr.date})</span>
+                        <button
+                          onClick={() => handleDeleteCrewReview(cr.id)}
+                          className="text-[#E54B4B] hover:underline font-bold flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>В корзину</span>
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between border-t border-[#E5E0D8] pt-2 text-[11px] text-[#6B665F]">
-                      <span>От автора: {cr.authorUserName} ({cr.date})</span>
-                      <button
-                        onClick={() => handleDeleteCrewReview(cr.id)}
-                        className="text-[#E54B4B] hover:underline font-bold flex items-center gap-1"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        <span>В корзину</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -1589,26 +2212,32 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
             <div className="space-y-3 border-t border-[#EEEBE6] pt-4">
               <h3 className="text-sm font-black text-[#1A1F1A] uppercase tracking-wider flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-[#2D5A27]" />
-                Шаблоны снаряжения чек-листа ({notesConfig.checklist?.length || 0})
+                Шаблоны снаряжения чек-листа ({activeChecklist.length})
               </h3>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                {(notesConfig.checklist || []).map((item) => (
-                  <div key={item.id} className="p-2.5 rounded-xl bg-[#F9F7F4] border border-[#EEEBE6] flex items-center justify-between text-xs">
-                    <div>
-                      <div className="font-bold text-[#1A1F1A]">{item.text}</div>
-                      <div className="text-[10px] text-[#8B7E6D]">{item.category}</div>
+              {activeChecklist.length === 0 ? (
+                <div className="p-4 text-center text-xs text-[#8B7E6D] bg-[#F9F7F4] rounded-2xl border border-dashed border-[#E5E0D8]">
+                  Нет активных элементов чек-листа
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {activeChecklist.map((item) => (
+                    <div key={item.id} className="p-2.5 rounded-xl bg-[#F9F7F4] border border-[#EEEBE6] flex items-center justify-between text-xs">
+                      <div>
+                        <div className="font-bold text-[#1A1F1A]">{item.text}</div>
+                        <div className="text-[10px] text-[#8B7E6D]">{item.category}</div>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteChecklistItem(item.id)}
+                        className="text-[#E54B4B] p-1 hover:bg-red-50 rounded"
+                        title="Удалить"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                    <button
-                      onClick={() => handleDeleteChecklistItem(item.id)}
-                      className="text-[#E54B4B] p-1 hover:bg-red-50 rounded"
-                      title="Удалить"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -1761,7 +2390,7 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-black text-[#1A1F1A]">
-                Управление туристами и ролями (RBAC) ({registeredUsers.length})
+                Управление туристами и ролями (RBAC) ({activeUsers.length})
               </h2>
               <p className="text-xs text-[#6B665F]">
                 Назначение прав: Пользователь / Организатор / Редактор / Администратор / Суперадмин
@@ -1790,8 +2419,8 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#EEEBE6]">
-                {registeredUsers.map((u) => (
-                  <tr key={u.id} className="hover:bg-[#F9F7F4] transition-colors">
+                {activeUsers.map((u, uIdx) => (
+                  <tr key={u.id || `active-user-${uIdx}`} className="hover:bg-[#F9F7F4] transition-colors">
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-3">
                         <div className="relative shrink-0">
@@ -2042,13 +2671,22 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
                             Автор: {n.authorName || '—'} • р. {n.riverName || '—'}
                           </div>
                         </div>
-                        <button
-                          onClick={() => handleRestoreTravelNote(n.id)}
-                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors self-end sm:self-auto"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          <span>Восстановить</span>
-                        </button>
+                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                          <button
+                            onClick={() => handleRestoreTravelNote(n.id)}
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Восстановить</span>
+                          </button>
+                          <button
+                            onClick={() => handlePermanentDeleteNote(n.id)}
+                            className="p-1.5 rounded-xl text-[#E54B4B] hover:bg-red-50 transition-colors"
+                            title="Удалить навсегда"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     ))}
 
@@ -2060,13 +2698,22 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
                             Автор: {c.authorUserName} • Сплав: {c.tripTitle || '—'}
                           </div>
                         </div>
-                        <button
-                          onClick={() => handleRestoreCrewReview(c.id)}
-                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors self-end sm:self-auto"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          <span>Восстановить</span>
-                        </button>
+                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                          <button
+                            onClick={() => handleRestoreCrewReview(c.id)}
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Восстановить</span>
+                          </button>
+                          <button
+                            onClick={() => handlePermanentDeleteCrewReview(c.id)}
+                            className="p-1.5 rounded-xl text-[#E54B4B] hover:bg-red-50 transition-colors"
+                            title="Удалить навсегда"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     ))}
 
@@ -2078,13 +2725,22 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
                             Автор: {r.userName} • Оценка: {r.ratingOverall}★
                           </div>
                         </div>
-                        <button
-                          onClick={() => handleRestoreRiverReview(r.id)}
-                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors self-end sm:self-auto"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          <span>Восстановить</span>
-                        </button>
+                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                          <button
+                            onClick={() => handleRestoreRiverReview(r.id)}
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Восстановить</span>
+                          </button>
+                          <button
+                            onClick={() => handlePermanentDeleteRiverReview(r.id)}
+                            className="p-1.5 rounded-xl text-[#E54B4B] hover:bg-red-50 transition-colors"
+                            title="Удалить навсегда"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     ))}
 
@@ -2094,13 +2750,22 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
                           <div className="font-bold text-xs text-[#1A1F1A]">Пункт снаряжения: {ch.text}</div>
                           <div className="text-[11px] text-[#6B665F]">Категория: {ch.category}</div>
                         </div>
-                        <button
-                          onClick={() => handleRestoreChecklistItem(ch.id)}
-                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors self-end sm:self-auto"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          <span>Восстановить</span>
-                        </button>
+                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                          <button
+                            onClick={() => handleRestoreChecklistItem(ch.id)}
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Восстановить</span>
+                          </button>
+                          <button
+                            onClick={() => handlePermanentDeleteChecklistItem(ch.id)}
+                            className="p-1.5 rounded-xl text-[#E54B4B] hover:bg-red-50 transition-colors"
+                            title="Удалить навсегда"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -2117,19 +2782,28 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
                     </h3>
                   </div>
                   <div className="space-y-2">
-                    {deletedUsers.map((u) => (
-                      <div key={u.id} className="p-3.5 rounded-2xl bg-[#FDFCFB] border border-amber-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    {deletedUsers.map((u, uIdx) => (
+                      <div key={u.id ? `del-${u.id}` : `del-user-${uIdx}`} className="p-3.5 rounded-2xl bg-[#FDFCFB] border border-amber-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="space-y-0.5">
                           <div className="font-bold text-xs text-[#1A1F1A]">{u.name} ({u.email || u.id})</div>
                           <div className="text-[11px] text-[#6B665F]">Роль: {u.role}</div>
                         </div>
-                        <button
-                          onClick={() => handleRestoreUser(u.id)}
-                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors self-end sm:self-auto"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          <span>Восстановить</span>
-                        </button>
+                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                          <button
+                            onClick={() => handleRestoreUser(u.id)}
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#E8F1E7] hover:bg-[#D5E6D3] text-[#2D5A27] border border-[#CDE0CC] flex items-center gap-1.5 transition-colors"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Восстановить</span>
+                          </button>
+                          <button
+                            onClick={() => handlePermanentDeleteUser(u.id)}
+                            className="p-1.5 rounded-xl text-[#E54B4B] hover:bg-red-50 transition-colors"
+                            title="Удалить навсегда"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -2143,38 +2817,140 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
 
       {/* 8. DATABASE & BACKUP */}
       {adminTab === 'database' && (
-        <div className="bg-white p-5 sm:p-7 rounded-3xl border border-[#E5E0D8] shadow-2xs space-y-4">
-          <h2 className="text-base font-black text-[#1A1F1A]">
-            Управление базой данных и резервными копиями
-          </h2>
-          <p className="text-xs text-[#6B665F]">
-            Централизованное хранилище Firestore, репликация в Cloud SQL API и полный экспорт состояния
-          </p>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-            <div className="p-4 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
-              <div className="text-xs font-bold text-[#1A1F1A]">Маршруты (Routes)</div>
-              <div className="text-lg font-black text-[#2D5A27]">{routes.length} записей</div>
-            </div>
-            <div className="p-4 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
-              <div className="text-xs font-bold text-[#1A1F1A]">Сплавы (Trips)</div>
-              <div className="text-lg font-black text-[#2D5A27]">{trips.length} записей</div>
-            </div>
-            <div className="p-4 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
-              <div className="text-xs font-bold text-[#1A1F1A]">Заметки & Отзывы</div>
-              <div className="text-lg font-black text-[#2D5A27]">
-                {(notesConfig.notes || []).length + (notesConfig.crewReviews || []).length + (notesConfig.riverReviews || []).length} записей
+        <div className="space-y-5">
+          {/* Main Status & Header */}
+          <div className="bg-white p-5 sm:p-7 rounded-3xl border border-[#E5E0D8] shadow-2xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-black text-[#1A1F1A]">
+                  Управление базой данных, резервными копиями и импортом
+                </h2>
+                <p className="text-xs text-[#6B665F] mt-0.5">
+                  Полная выгрузка состояния сайта, редактирование JSON оффлайн/онлайн и безопасное восстановление
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleExportFullBackup}
+                  className="px-4 py-2 bg-[#8A3B14] hover:bg-[#A34718] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Скачать полную базу</span>
+                </button>
               </div>
             </div>
-            <div className="p-4 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
-              <div className="text-xs font-bold text-[#1A1F1A]">FAQ & Безопасность</div>
-              <div className="text-lg font-black text-[#2D5A27]">
-                {(faqData.faqQuestions || []).length + (faqData.safetyGuides || []).length} записей
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+              <div className="p-4 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
+                <div className="text-xs font-bold text-[#1A1F1A]">Маршруты (Routes)</div>
+                <div className="text-lg font-black text-[#2D5A27]">{routes.length} записей</div>
+              </div>
+              <div className="p-4 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
+                <div className="text-xs font-bold text-[#1A1F1A]">Сплавы (Trips)</div>
+                <div className="text-lg font-black text-[#2D5A27]">{trips.length} записей</div>
+              </div>
+              <div className="p-4 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
+                <div className="text-xs font-bold text-[#1A1F1A]">Заметки & Отзывы</div>
+                <div className="text-lg font-black text-[#2D5A27]">
+                  {(notesConfig.notes || []).length + (notesConfig.crewReviews || []).length + (notesConfig.riverReviews || []).length} записей
+                </div>
+              </div>
+              <div className="p-4 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
+                <div className="text-xs font-bold text-[#1A1F1A]">FAQ & Безопасность</div>
+                <div className="text-lg font-black text-[#2D5A27]">
+                  {(faqData.faqQuestions || []).length + (faqData.safetyGuides || []).length} записей
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="space-y-3 mt-4">
+          {/* Interactive Backup Upload & Restore Engine */}
+          <div className="bg-white p-5 sm:p-7 rounded-3xl border border-[#CDE0CC] shadow-2xs space-y-4">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-[#2D5A27]/10 flex items-center justify-center text-[#2D5A27]">
+                <FileUp className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-[#1A1F1A]">
+                  Загрузка и восстановление из бэкапа (Импорт JSON)
+                </h3>
+                <p className="text-xs text-[#6B665F]">
+                  Загрузите скачанный ранее или отредактированный файл бэкапа для применения изменений
+                </p>
+              </div>
+            </div>
+
+            {/* Drag and Drop Zone */}
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDraggingBackupFile(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                setIsDraggingBackupFile(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDraggingBackupFile(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) loadBackupFile(file);
+              }}
+              className={`border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center transition-all flex flex-col items-center justify-center gap-3 ${
+                isDraggingBackupFile
+                  ? 'border-[#2D5A27] bg-[#E8F1E7]/70 scale-[1.01]'
+                  : 'border-[#D5CFE6] bg-[#FAF8FC] hover:border-[#8A3B14]/40 hover:bg-[#F9F7F4]'
+              }`}
+            >
+              <div className="w-12 h-12 rounded-2xl bg-white border border-[#E5E0D8] shadow-xs flex items-center justify-center text-[#8A3B14]">
+                <Upload className="w-6 h-6" />
+              </div>
+              <div className="space-y-1 max-w-md">
+                <div className="text-xs sm:text-sm font-black text-[#1A1F1A]">
+                  Перетащите сюда JSON-файл бэкапа или выберите на компьютере
+                </div>
+                <div className="text-[11px] text-[#6B665F]">
+                  Поддерживаются полные бэкапы сайта, а также отдельные экспорты (маршруты, пользователи, заметки, FAQ)
+                </div>
+              </div>
+              
+              <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={handleTriggerUploadBackup}
+                  className="px-5 py-2.5 bg-[#2D5A27] hover:bg-[#3D7136] text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-2xs transition-colors cursor-pointer"
+                >
+                  <FileCode className="w-4 h-4" />
+                  <span>Выбрать JSON-файл бэкапа для восстановления</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Instructions Workflow */}
+            <div className="p-4 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6] space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-black text-[#1A1F1A]">
+                <Info className="w-4 h-4 text-[#8A3B14]" />
+                <span>Как работает резервное копирование и восстановление:</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-[11px] text-[#6B665F]">
+                <div className="p-2.5 rounded-xl bg-white border border-[#E5E0D8]">
+                  <span className="font-bold text-[#1A1F1A] block mb-0.5">1. Скачивание</span>
+                  Скачайте полный бэкап или отдельный раздел (маршруты, пользователи, заметки) в формате JSON.
+                </div>
+                <div className="p-2.5 rounded-xl bg-white border border-[#E5E0D8]">
+                  <span className="font-bold text-[#1A1F1A] block mb-0.5">2. Резервное хранение</span>
+                  Сохраняйте копии для безопасности перед внесением крупных правок или миграцией.
+                </div>
+                <div className="p-2.5 rounded-xl bg-white border border-[#E5E0D8]">
+                  <span className="font-bold text-[#1A1F1A] block mb-0.5">3. Загрузка и восстановление</span>
+                  Загрузите файл: выберите «Умное слияние» (обновит записи) или «Полная замена» (перезапишет текущую базу).
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Targeted Export Section */}
+          <div className="bg-white p-5 sm:p-7 rounded-3xl border border-[#E5E0D8] shadow-2xs space-y-4">
             <h3 className="text-xs font-black uppercase text-[#1A1F1A] tracking-wider">
               Целевой экспорт разделов базы данных
             </h3>
@@ -3013,6 +3789,312 @@ export const AdminPanelModule: React.FC<AdminPanelModuleProps> = ({
                 <span>Удалить аккаунт</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 11. MODAL: DELETE ENTITY CONFIRMATION (МАРШРУТЫ, СПЛАВЫ, СТАТЬИ, FAQ) */}
+      {itemToDelete && (
+        <div className="fixed inset-0 z-[3350] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 border border-[#E5E0D8] shadow-2xl animate-fade-in text-[#2D332D]">
+            <div className="flex items-center gap-3 text-rose-700">
+              <div className="p-3 bg-rose-100 rounded-2xl">
+                <Trash2 className="w-6 h-6 text-rose-700" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-[#1A1F1A]">
+                  {itemToDelete.isPermanent
+                    ? 'Окончательное удаление'
+                    : itemToDelete.type === 'route'
+                    ? 'Удаление паспорта маршрута'
+                    : itemToDelete.type === 'trip'
+                    ? 'Удаление сплава'
+                    : itemToDelete.type === 'article'
+                    ? 'Удаление статьи'
+                    : 'Подтверждение удаления'}
+                </h3>
+                <p className="text-xs text-[#8B7E6D]">
+                  {itemToDelete.isPermanent
+                    ? 'Действие невозможно отменить'
+                    : 'Объект будет удален из каталога'}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-900 space-y-1.5">
+              <p>
+                {itemToDelete.isPermanent
+                  ? 'Вы действительно хотите БЕЗВОЗВРАТНО удалить:'
+                  : 'Вы действительно хотите удалить:'}
+              </p>
+              <div className="font-bold text-[#1A1F1A] text-sm bg-white p-2.5 rounded-xl border border-rose-200 shadow-xs">
+                {itemToDelete.name}
+              </div>
+              {itemToDelete.subtitle && (
+                <p className="text-[11px] text-[#6B665F]">
+                  {itemToDelete.subtitle}
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#EEEBE6]">
+              <button
+                type="button"
+                onClick={() => setItemToDelete(null)}
+                className="px-4 py-2 rounded-xl border border-[#E5E0D8] text-[#6B665F] hover:bg-[#F9F7F4] font-bold text-xs cursor-pointer transition-colors"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteDeleteItem}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs cursor-pointer shadow-xs transition-colors flex items-center gap-1.5"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{itemToDelete.isPermanent ? 'Удалить навсегда' : 'Удалить'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BACKUP RESTORE MODAL */}
+      {isBackupModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[92vh] flex flex-col border border-[#E5E0D8] shadow-2xl animate-fadeIn overflow-hidden">
+            
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-[#EEEBE6] flex items-center justify-between gap-3 bg-[#FCFAF7]">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-[#8A3B14]/10 border border-[#8A3B14]/20 flex items-center justify-center text-[#8A3B14] shrink-0">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm sm:text-base font-black text-[#1A1F1A]">
+                      Восстановление базы данных из бэкапа
+                    </h3>
+                    {backupStats.isValid ? (
+                      <span className="text-[10px] uppercase font-black tracking-wider px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                        <Check className="w-3 h-3" />
+                        Файл валиден
+                      </span>
+                    ) : (
+                      <span className="text-[10px] uppercase font-black tracking-wider px-2 py-0.5 rounded-md bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />
+                        Ошибка файла
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-[#6B665F] truncate max-w-md font-mono mt-0.5">
+                    {backupFileName}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setIsBackupModalOpen(false)}
+                className="p-2 text-[#8B7E6D] hover:text-[#1A1F1A] rounded-xl hover:bg-gray-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+              
+              {/* Error banner if invalid JSON */}
+              {!backupStats.isValid && backupStats.error && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-xs font-bold text-rose-800 rounded-2xl flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{backupStats.error}</span>
+                </div>
+              )}
+
+              <div className="space-y-5">
+                
+                {/* Mode Selector */}
+                <div className="p-4 rounded-2xl bg-[#FDFCFB] border border-[#E5E0D8] space-y-3">
+                  <label className="text-xs font-black uppercase text-[#1A1F1A] tracking-wider block">
+                    Режим применения бэкапа
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    
+                    <button
+                      type="button"
+                      onClick={() => setBackupImportMode('merge')}
+                      className={`p-3.5 rounded-xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
+                        backupImportMode === 'merge'
+                          ? 'border-[#2D5A27] bg-[#E8F1E7]/60 ring-2 ring-[#2D5A27]/20'
+                          : 'border-[#E5E0D8] bg-white hover:border-[#8A3B14]/30'
+                      }`}
+                    >
+                      <div className={`w-4 h-4 rounded-full border mt-0.5 flex items-center justify-center shrink-0 ${
+                        backupImportMode === 'merge' ? 'border-[#2D5A27] bg-[#2D5A27]' : 'border-gray-400'
+                      }`}>
+                        {backupImportMode === 'merge' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-[#1A1F1A]">Умное слияние (Рекомендуется)</div>
+                        <div className="text-[11px] text-[#6B665F] mt-0.5">
+                          Обновит существующие записи и добавит новые, не удаляя текущие данные.
+                        </div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setBackupImportMode('replace')}
+                      className={`p-3.5 rounded-xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
+                        backupImportMode === 'replace'
+                          ? 'border-amber-600 bg-amber-50/60 ring-2 ring-amber-600/20'
+                          : 'border-[#E5E0D8] bg-white hover:border-[#8A3B14]/30'
+                      }`}
+                    >
+                      <div className={`w-4 h-4 rounded-full border mt-0.5 flex items-center justify-center shrink-0 ${
+                        backupImportMode === 'replace' ? 'border-amber-600 bg-amber-600' : 'border-gray-400'
+                      }`}>
+                        {backupImportMode === 'replace' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-[#1A1F1A]">Полная замена (Перезапись)</div>
+                        <div className="text-[11px] text-[#6B665F] mt-0.5">
+                          Полностью перезапишет текущие таблицы данными из загруженного файла.
+                        </div>
+                      </div>
+                    </button>
+
+                  </div>
+                </div>
+
+                {/* Recognized Content Metrics */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black uppercase text-[#1A1F1A] tracking-wider">
+                      Обнаруженные данные в файле
+                    </h4>
+                    {backupStats.counts && (
+                      <span className="text-xs font-bold text-[#2D5A27]">
+                        Всего записей: {backupStats.counts.totalRecognized}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    
+                    <div className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Compass className="w-4 h-4 text-[#8A3B14]" />
+                        <span className="text-xs font-bold text-[#1A1F1A]">Маршруты</span>
+                      </div>
+                      <div className="text-base font-black text-[#2D5A27]">
+                        {backupStats.counts?.routes || 0} записей
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Users className="w-4 h-4 text-[#2D5A27]" />
+                        <span className="text-xs font-bold text-[#1A1F1A]">Сплавы</span>
+                      </div>
+                      <div className="text-base font-black text-[#2D5A27]">
+                        {backupStats.counts?.trips || 0} записей
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
+                      <div className="flex items-center gap-2 mb-1">
+                        <ShieldCheck className="w-4 h-4 text-blue-600" />
+                        <span className="text-xs font-bold text-[#1A1F1A]">Пользователи</span>
+                      </div>
+                      <div className="text-base font-black text-[#2D5A27]">
+                        {backupStats.counts?.users || 0} записей
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
+                      <div className="flex items-center gap-2 mb-1">
+                        <BookOpen className="w-4 h-4 text-amber-700" />
+                        <span className="text-xs font-bold text-[#1A1F1A]">Статьи</span>
+                      </div>
+                      <div className="text-base font-black text-[#2D5A27]">
+                        {backupStats.counts?.articles || 0} записей
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
+                      <div className="flex items-center gap-2 mb-1">
+                        <MessageSquare className="w-4 h-4 text-purple-600" />
+                        <span className="text-xs font-bold text-[#1A1F1A]">Заметки & Отзывы</span>
+                      </div>
+                      <div className="text-base font-black text-[#2D5A27]">
+                        {(backupStats.counts?.notes || 0) + (backupStats.counts?.reviews || 0)} записей
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6]">
+                      <div className="flex items-center gap-2 mb-1">
+                        <ShieldAlert className="w-4 h-4 text-rose-600" />
+                        <span className="text-xs font-bold text-[#1A1F1A]">FAQ & Безопасность</span>
+                      </div>
+                      <div className="text-base font-black text-[#2D5A27]">
+                        {(backupStats.counts?.faqQuestions || 0) + (backupStats.counts?.safetyGuides || 0)} записей
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-[#F0F7EF] border border-[#CDE0CC] text-xs text-[#2D5A27] space-y-1">
+                  <div className="font-black flex items-center gap-1.5">
+                    <CheckCheck className="w-4 h-4" />
+                    <span>Готово к применению и синхронизации</span>
+                  </div>
+                  <p className="text-[11px] text-[#3F6B38]">
+                    При нажатии «Применить и синхронизировать» система обновит базу данных и запустит централизованную репликацию в Firestore / Cloud SQL.
+                  </p>
+                </div>
+
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 sm:p-5 border-t border-[#EEEBE6] bg-[#FCFAF7] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-xs text-[#6B665F]">
+                {backupStats.isValid && backupStats.counts ? (
+                  <span className="font-bold text-[#1A1F1A]">
+                    Режим: <span className={backupImportMode === 'merge' ? 'text-[#2D5A27]' : 'text-amber-700'}>
+                      {backupImportMode === 'merge' ? 'Умное слияние' : 'Полная замена'}
+                    </span> ({backupStats.counts.totalRecognized} записей)
+                  </span>
+                ) : (
+                  <span className="text-rose-600 font-bold">
+                    Файл содержит синтаксические ошибки
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2.5 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setIsBackupModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-[#E5E0D8] text-[#6B665F] hover:bg-white font-bold text-xs transition-colors cursor-pointer"
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApplyBackup}
+                  disabled={!backupStats.isValid || isApplyingBackup}
+                  className="px-5 py-2.5 rounded-xl bg-[#2D5A27] hover:bg-[#3D7136] text-white font-bold text-xs shadow-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
+                >
+                  <Save className={`w-4 h-4 ${isApplyingBackup ? 'animate-spin' : ''}`} />
+                  <span>{isApplyingBackup ? 'Применение...' : 'Применить и синхронизировать'}</span>
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
       )}

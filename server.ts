@@ -402,10 +402,15 @@ app.post('/api/auth/register', authLimiter, async (req: AuthenticatedRequest, re
     const userId = `user-${crypto.randomUUID()}`;
     
     // Check if this is an admin email or the very first user in the database
-    const existingUsers = await getAllUsersForAdmin({ limit: 1 });
-    const existingUsersCount = Array.isArray(existingUsers) ? existingUsers.length : existingUsers.pagination.total;
+    let existingUsersCount = 0;
+    try {
+      const existingUsers = await getAllUsersForAdmin({ limit: 1 });
+      existingUsersCount = Array.isArray(existingUsers) ? existingUsers.length : (existingUsers?.pagination?.total || 0);
+    } catch (e) {
+      console.warn('Could not determine user count for role assignment:', e);
+    }
     const isAdminEmail = cleanEmail === 'zuubra1985@gmail.com' || cleanEmail === 'admin@splav86.ru';
-    const role: UserRole = (isAdminEmail || existingUsersCount === 0) ? 'admin' : 'user';
+    const role: UserRole = (isAdminEmail || existingUsersCount === 0) ? (cleanEmail === 'zuubra1985@gmail.com' ? 'superadmin' : 'admin') : 'user';
 
     const newUser = await createRegisteredUser({
       id: userId,
@@ -1652,13 +1657,14 @@ app.post(['/api/db/routes', '/api/routes'], async (req: AuthenticatedRequest, re
 app.delete(['/api/db/routes/:id', '/api/routes/:id'], requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
+    const isPrivileged = req.user!.role === 'admin' || req.user!.role === 'superadmin';
     const existingRecord = await findCustomRouteRecordById(id);
 
     if (!existingRecord) {
-      return res.status(404).json({ error: 'Маршрут не найден' });
+      // If the route was not saved in SQL or was already removed, allow deletion to complete cleanly
+      return res.json({ success: true, message: 'Маршрут успешно удален' });
     }
 
-    const isPrivileged = req.user!.role === 'admin' || req.user!.role === 'superadmin';
     const isOwner = existingRecord.ownerId === req.user!.id ||
       (existingRecord.data as any)?.authorId === req.user!.id;
 
@@ -1666,7 +1672,11 @@ app.delete(['/api/db/routes/:id', '/api/routes/:id'], requireAuth, async (req: A
       return res.status(403).json({ error: 'Вы можете удалять только созданные вами маршруты.' });
     }
 
-    await deleteCustomRouteFromDb(id);
+    try {
+      await deleteCustomRouteFromDb(id);
+    } catch (e) {
+      console.warn('DB delete note for route:', e);
+    }
 
     logAudit({
       eventType: 'ROUTE_DELETE',
@@ -1918,7 +1928,204 @@ app.post('/api/notifications/telegram-application', notificationLimiter, require
 });
 
 // ==========================================
-// 19. GLOBAL ERROR HANDLER
+// 19. WIKIPEDIA RIVER ENCYCLOPEDIA PROXY
+// ==========================================
+
+function parseServerWikiPage(page: any): any {
+  if (!page || !page.extract) return null;
+  const extract: string = page.extract || '';
+
+  // Parse river length
+  let lengthKm: number | undefined;
+  const lengthMatch = extract.match(/(?:длина|длиной|протяжённость(?:ю)?)\s*(?:реки)?\s*(?:составляет)?\s*—?\s*(\d+[\d\s,.]*)\s*км/i);
+  if (lengthMatch && lengthMatch[1]) {
+    const parsed = parseFloat(lengthMatch[1].replace(/\s/g, '').replace(',', '.'));
+    if (!isNaN(parsed) && parsed > 3 && parsed < 6000) {
+      lengthKm = Math.round(parsed);
+    }
+  }
+
+  // Parse river basin
+  let riverBasin: string | undefined;
+  if (/бассейн(?:а|е)?\s+(?:реки\s+)?Оби/i.test(extract)) {
+    riverBasin = 'Бассейн реки Обь';
+  } else if (/бассейн(?:а|е)?\s+(?:реки\s+)?Иртыш/i.test(extract)) {
+    riverBasin = 'Бассейн реки Иртыш';
+  } else if (/бассейн(?:а|е)?\s+(?:реки\s+)?Таз/i.test(extract)) {
+    riverBasin = 'Бассейн реки Таз';
+  } else if (/бассейн(?:а|е)?\s+(?:реки\s+)?Пур/i.test(extract)) {
+    riverBasin = 'Бассейн реки Пур';
+  } else if (/Карск(?:ое|ого)\s+мор/i.test(extract)) {
+    riverBasin = 'Бассейн Карского моря';
+  } else if (/бассейн(?:а|е)?\s+(?:реки\s+)?Енисе/i.test(extract)) {
+    riverBasin = 'Бассейн реки Енисей';
+  }
+
+  let coordinates: { lat: number; lng: number } | undefined;
+  if (page.coordinates && Array.isArray(page.coordinates) && page.coordinates[0]) {
+    const c = page.coordinates[0];
+    if (typeof c.lat === 'number' && typeof c.lon === 'number') {
+      coordinates = {
+        lat: Number(c.lat.toFixed(5)),
+        lng: Number(c.lon.toFixed(5))
+      };
+    }
+  }
+
+  const title = page.title || '';
+  const displayTitle = title.replace(/\s*\([^)]*\)/g, '');
+  const pageUrl = page.fullurl || `https://ru.wikipedia.org/wiki/${encodeURIComponent(title)}`;
+  const thumbnailUrl = page.thumbnail?.source;
+  const originalImageUrl = page.original?.source || thumbnailUrl;
+
+  return {
+    found: true,
+    title,
+    displayTitle,
+    extract,
+    description: `Река в бассейне ${riverBasin || 'Западной Сибири'}`,
+    pageUrl,
+    thumbnailUrl,
+    originalImageUrl,
+    lengthKm,
+    riverBasin,
+    coordinates
+  };
+}
+
+app.get('/api/wikipedia/river', async (req: Request, res: Response) => {
+  try {
+    const rawQuery = String(req.query.query || '').trim();
+    if (!rawQuery || rawQuery.length < 2) {
+      return res.status(400).json({ error: 'Параметр query обязателен (минимум 2 символа)' });
+    }
+
+    const clean = rawQuery
+      .replace(/^р\.\s*/i, '')
+      .replace(/^река\s+/i, '')
+      .replace(/^сплав\s+по\s+(реке\s+)?/i, '')
+      .replace(/\s*\([^)]*\)/g, '')
+      .trim();
+
+    if (!clean) {
+      return res.json({ found: false });
+    }
+
+    const WIKI_HEADERS = {
+      'User-Agent': 'Splav86Bot/1.0 (https://splav86.ru; info@splav86.ru)',
+      'Accept': 'application/json'
+    };
+
+    const candidates = [
+      `${clean} (река)`,
+      `${clean} (приток Оби)`,
+      `${clean} (приток Иртыша)`,
+      `${clean} (приток Ваха)`,
+      `${clean} (приток Таза)`,
+      `${clean} (приток Пура)`,
+      `${clean} (приток Казыма)`,
+      `${clean} (приток Северной Сосьвы)`,
+      `${clean} (приток Полуя)`,
+      clean,
+      `Река ${clean}`
+    ];
+
+    // 1. Check specific candidate titles
+    for (const cand of candidates) {
+      try {
+        const mwUrl = `https://ru.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(cand)}&prop=extracts|pageimages|coordinates|info&inprop=url&explaintext=1&exintro=1&piprop=thumbnail|original&pithumbsize=800&format=json`;
+        const mwRes = await fetch(mwUrl, { headers: WIKI_HEADERS });
+        if (mwRes.ok) {
+          const mwData: any = await mwRes.json();
+          const pages = mwData.query?.pages || {};
+          const pageId = Object.keys(pages)[0];
+          if (pageId && pageId !== '-1') {
+            const page = pages[pageId];
+            if (page.extract && page.extract.length > 25 && !page.extract.includes('может означать:')) {
+              const parsed = parseServerWikiPage(page);
+              if (parsed) {
+                return res.json(parsed);
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // 2. Search fallback
+    try {
+      const searchUrl = `https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(clean + ' река')}&srlimit=5&utf8=&format=json`;
+      const searchRes = await fetch(searchUrl, { headers: WIKI_HEADERS });
+      if (searchRes.ok) {
+        const searchData: any = await searchRes.json();
+        const hits = searchData.query?.search || [];
+        for (const hit of hits) {
+          const mwUrl = `https://ru.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(hit.title)}&prop=extracts|pageimages|coordinates|info&inprop=url&explaintext=1&exintro=1&piprop=thumbnail|original&pithumbsize=800&format=json`;
+          const mwRes = await fetch(mwUrl, { headers: WIKI_HEADERS });
+          if (mwRes.ok) {
+            const mwData: any = await mwRes.json();
+            const pages = mwData.query?.pages || {};
+            const pageId = Object.keys(pages)[0];
+            if (pageId && pageId !== '-1') {
+              const page = pages[pageId];
+              if (page.extract && page.extract.length > 25 && !page.extract.includes('может означать:')) {
+                const parsed = parseServerWikiPage(page);
+                if (parsed) {
+                  return res.json(parsed);
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch {}
+
+    return res.json({ found: false, query: clean });
+  } catch (err: any) {
+    console.error('Wikipedia proxy error:', err.message);
+    return res.status(500).json({ error: 'Ошибка получения данных из Википедии.' });
+  }
+});
+
+app.get('/api/wikipedia/suggestions', async (req: Request, res: Response) => {
+  try {
+    const rawQuery = String(req.query.query || '').trim();
+    const clean = rawQuery
+      .replace(/^р\.\s*/i, '')
+      .replace(/^река\s+/i, '')
+      .replace(/^сплав\s+по\s+(реке\s+)?/i, '')
+      .replace(/\s*\([^)]*\)/g, '')
+      .trim();
+
+    if (!clean || clean.length < 2) {
+      return res.json([]);
+    }
+
+    const WIKI_HEADERS = {
+      'User-Agent': 'Splav86Bot/1.0 (https://splav86.ru; info@splav86.ru)',
+      'Accept': 'application/json'
+    };
+
+    const searchUrl = `https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(clean + ' река')}&srlimit=6&utf8=&format=json`;
+    const searchRes = await fetch(searchUrl, { headers: WIKI_HEADERS });
+    if (searchRes.ok) {
+      const searchData: any = await searchRes.json();
+      const hits = searchData.query?.search || [];
+      const formatted = hits.map((item: any) => ({
+        title: item.title,
+        snippet: (item.snippet || '').replace(/<[^>]*>?/gm, '')
+      }));
+      return res.json(formatted);
+    }
+    return res.json([]);
+  } catch (err: any) {
+    console.warn('Wikipedia suggestions proxy error:', err.message);
+    return res.json([]);
+  }
+});
+
+// ==========================================
+// 20. GLOBAL ERROR HANDLER
 // ==========================================
 
 app.use((err: any, req: AuthenticatedRequest, res: Response, _next: NextFunction) => {

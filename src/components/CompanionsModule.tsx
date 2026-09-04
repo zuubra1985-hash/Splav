@@ -2148,9 +2148,9 @@ export const CompanionsModule: React.FC<CompanionsModuleProps> = ({
 
                       {/* Active User Avatars & Badges */}
                       <div className="flex items-center -space-x-1.5 overflow-hidden">
-                        {chatPresenceList.filter(p => p.isOnline).map((userPresence) => (
+                        {chatPresenceList.filter(p => p.isOnline).map((userPresence, uIdx) => (
                           <div
-                            key={userPresence.userId}
+                            key={userPresence.userId ? `${userPresence.userId}-${uIdx}` : `presence-${uIdx}`}
                             className="relative group cursor-pointer"
                             title={`${userPresence.name} (${userPresence.role === 'organizer' ? 'Организатор' : 'Участник'}) — в сети`}
                           >

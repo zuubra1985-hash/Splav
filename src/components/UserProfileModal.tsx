@@ -115,19 +115,29 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   // Effective reviews combining passed prop and local storage fallback
   const allCrewReviews = useMemo(() => {
     const map = new Map<string, CrewReview>();
-    (crewReviews || []).forEach((r) => map.set(r.id, r));
+    (crewReviews || []).forEach((r) => {
+      if (!r.isDeleted) {
+        map.set(r.id, r);
+      }
+    });
     try {
       const stored = localStorage.getItem('splav86_crew_reviews_v2');
       if (stored) {
         const list: CrewReview[] = JSON.parse(stored);
         if (Array.isArray(list)) {
-          list.forEach((r) => map.set(r.id, r));
+          list.forEach((r) => {
+            if (r.isDeleted) {
+              map.delete(r.id);
+            } else {
+              map.set(r.id, r);
+            }
+          });
         }
       }
     } catch (e) {
       console.warn(e);
     }
-    return Array.from(map.values());
+    return Array.from(map.values()).filter(r => !r.isDeleted);
   }, [crewReviews]);
 
   // Reviews targeting this user (robust matching by ID, Email, Name, Callsign)

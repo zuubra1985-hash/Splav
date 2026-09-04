@@ -98,6 +98,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
   // UI state
   const [copiedRouteId, setCopiedRouteId] = useState<string | null>(null);
   const [routesFilter, setRoutesFilter] = useState<'all' | 'public' | 'private'>('all');
+  const [routeToDelete, setRouteToDelete] = useState<RiverRoute | null>(null);
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const gpxInputRef = useRef<HTMLInputElement>(null);
@@ -958,11 +959,7 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
                             {onDeleteRoute && (
                               <button
                                 type="button"
-                                onClick={() => {
-                                  if (confirm(`Вы уверены, что хотите удалить маршрут "${route.name}"?`)) {
-                                    onDeleteRoute(route.id);
-                                  }
-                                }}
+                                onClick={() => setRouteToDelete(route)}
                                 className="p-2 bg-red-50 hover:bg-red-100 text-[#E54B4B] rounded-xl transition-colors cursor-pointer"
                                 title="Удалить маршрут"
                               >
@@ -1219,6 +1216,62 @@ export const UserCabinetModule: React.FC<UserCabinetModuleProps> = ({
           <div className="p-4 rounded-2xl bg-[#F9F7F4] border border-[#EEEBE6] text-xs text-[#4A443E] space-y-1">
             <strong>Совет по навигации:</strong>
             <p>Все загруженные треки сохраняются в защищенном профиле и доступны для экспорта на любые навигаторы без подключения к интернету.</p>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM DELETE ROUTE MODAL */}
+      {routeToDelete && (
+        <div className="fixed inset-0 z-[3300] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 border border-[#E5E0D8] shadow-2xl animate-fade-in text-[#2D332D]">
+            <div className="flex items-center gap-3 text-rose-700">
+              <div className="p-3 bg-rose-100 rounded-2xl">
+                <Trash2 className="w-6 h-6 text-rose-700" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-[#1A1F1A]">
+                  Удаление маршрута
+                </h3>
+                <p className="text-xs text-[#8B7E6D]">
+                  Подтверждение удаления маршрута
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-900 space-y-1.5">
+              <p>
+                Вы действительно хотите удалить маршрут:
+              </p>
+              <div className="font-bold text-[#1A1F1A] text-sm bg-white p-2.5 rounded-xl border border-rose-200 shadow-xs">
+                {routeToDelete.name}
+              </div>
+              <p className="text-[11px] text-[#6B665F]">
+                р. {routeToDelete.riverName} • {routeToDelete.lengthKm} км • {routeToDelete.fstrCategory}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[#EEEBE6]">
+              <button
+                type="button"
+                onClick={() => setRouteToDelete(null)}
+                className="px-4 py-2 rounded-xl border border-[#E5E0D8] text-[#6B665F] hover:bg-[#F9F7F4] font-bold text-xs cursor-pointer transition-colors"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (routeToDelete && onDeleteRoute) {
+                    onDeleteRoute(routeToDelete.id);
+                  }
+                  setRouteToDelete(null);
+                }}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs cursor-pointer shadow-xs transition-colors flex items-center gap-1.5"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Удалить</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

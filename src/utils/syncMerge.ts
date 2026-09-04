@@ -243,53 +243,169 @@ export function mergeArticles(local: ArticleReport[] = [], incoming: ArticleRepo
 }
 
 /**
+ * Deduplicates and consolidates users by ID, Email, and Telegram ID with timestamp checking.
+ * Guarantees that every user in the returned array has a strictly unique ID.
+ */
+export function deduplicateUsers(users: AppUser[] = []): AppUser[] {
+  const result: AppUser[] = [];
+  const idMap = new Map<string, AppUser>();
+  const emailMap = new Map<string, AppUser>();
+  const tgMap = new Map<string, AppUser>();
+
+  for (const user of users) {
+    if (!user) continue;
+    const rawId = (user.id || '').trim();
+    const idKey = rawId.toLowerCase();
+    const emailKey = (user.email || '').trim().toLowerCase();
+    const tgKey = (user.telegram || '').trim().toLowerCase().replace('@', '');
+    const tgIdKey = user.telegramId ? String(user.telegramId).trim() : '';
+
+    if (!idKey && !emailKey) continue;
+
+    // Find any existing record matched by ID, Email, or Telegram
+    const existing =
+      (idKey ? idMap.get(idKey) : undefined) ||
+      (emailKey ? emailMap.get(emailKey) : undefined) ||
+      (tgKey ? tgMap.get(tgKey) : undefined) ||
+      (tgIdKey ? tgMap.get(tgIdKey) : undefined);
+
+    if (!existing) {
+      const canonicalUser: AppUser = {
+        ...user,
+        id: user.id || (emailKey ? `user-${emailKey.replace(/[^a-z0-9]/g, '-')}` : `user-${Date.now()}`)
+      };
+      const cIdKey = canonicalUser.id.trim().toLowerCase();
+      idMap.set(cIdKey, canonicalUser);
+      if (emailKey) emailMap.set(emailKey, canonicalUser);
+      if (tgKey) tgMap.set(tgKey, canonicalUser);
+      if (tgIdKey) tgMap.set(tgIdKey, canonicalUser);
+      result.push(canonicalUser);
+    } else {
+      const existingTime = getItemTimestamp(existing);
+      const newTime = getItemTimestamp(user);
+
+      const targetId = existing.id || user.id;
+      const isDeleted =
+        user.isDeleted === true
+          ? true
+          : existing.isDeleted && user.isDeleted === undefined
+          ? existing.isDeleted
+          : (user.isDeleted ?? existing.isDeleted ?? false);
+
+      const merged: AppUser =
+        newTime >= existingTime
+          ? {
+              ...existing,
+              ...user,
+              id: targetId,
+              email: user.email || existing.email,
+              avatar: user.avatar || existing.avatar,
+              name: user.name || existing.name,
+              role: user.role || existing.role,
+              isDeleted
+            }
+          : {
+              ...user,
+              ...existing,
+              id: targetId,
+              email: existing.email || user.email,
+              avatar: existing.avatar || user.avatar,
+              name: existing.name || user.name,
+              role: existing.role || user.role,
+              isDeleted
+            };
+
+      const idx = result.indexOf(existing);
+      if (idx !== -1) {
+        result[idx] = merged;
+      }
+
+      const mIdKey = (merged.id || '').trim().toLowerCase();
+      if (mIdKey) idMap.set(mIdKey, merged);
+      if (idKey) idMap.set(idKey, merged);
+      if (emailKey) emailMap.set(emailKey, merged);
+      if (existing.email) emailMap.set(existing.email.trim().toLowerCase(), merged);
+      if (tgKey) tgMap.set(tgKey, merged);
+      if (tgIdKey) tgMap.set(tgIdKey, merged);
+    }
+  }
+
+  // Strict final guarantee: enforce unique IDs across the output list
+  const finalUsers: AppUser[] = [];
+  const seenIds = new Set<string>();
+
+  for (const u of result) {
+    if (!u) continue;
+    const finalId = (u.id || '').trim().toLowerCase();
+    if (!finalId || seenIds.has(finalId)) {
+      continue;
+    }
+    seenIds.add(finalId);
+    finalUsers.push(u);
+  }
+
+  return finalUsers;
+}
+
+/**
  * Merges Users by ID and normalized Email with timestamp checking.
  */
 export function mergeUsers(local: AppUser[] = [], incoming: AppUser[] = []): AppUser[] {
-  const map = new Map<string, AppUser>();
-
-  const getKey = (u: AppUser) => (u.email || '').trim().toLowerCase() || (u.id || '').trim().toLowerCase();
-
-  for (const u of local) {
-    if (!u) continue;
-    const k = getKey(u);
-    if (k) map.set(k, { ...u });
-  }
-
-  for (const inc of incoming) {
-    if (!inc) continue;
-    const k = getKey(inc);
-    if (!k) continue;
-
-    const existing = map.get(k);
-    if (!existing) {
-      map.set(k, { ...inc });
-      continue;
-    }
-
-    const localTime = getItemTimestamp(existing);
-    const incTime = getItemTimestamp(inc);
-
-    if (incTime > localTime) {
-      map.set(k, {
-        ...existing,
-        ...inc,
-        isDeleted: inc.isDeleted === true ? true : (existing.isDeleted && inc.isDeleted === undefined ? existing.isDeleted : inc.isDeleted)
-      });
-    } else if (localTime > incTime) {
-      map.set(k, {
-        ...inc,
-        ...existing,
-        isDeleted: existing.isDeleted === true ? true : (inc.isDeleted && existing.isDeleted === undefined ? inc.isDeleted : existing.isDeleted)
-      });
-    } else {
-      map.set(k, {
-        ...existing,
-        ...inc,
-        isDeleted: existing.isDeleted === true || inc.isDeleted === true
-      });
-    }
-  }
-
-  return Array.from(map.values());
+  return deduplicateUsers([...local, ...incoming]);
 }
+
+/**
+ * Merges FaqDataConfig item-by-item with timestamp comparison.
+ */
+export function mergeFaqConfigs(
+  local?: FaqDataConfig | null,
+  incoming?: FaqDataConfig | null
+): FaqDataConfig {
+  if (!local && !incoming) {
+    return {
+      id: 'splav86_faq_safety_main',
+      title: 'Безопасность и регламенты',
+      subtitle: '',
+      warningTitle: '',
+      warningText: '',
+      sosTemplateText: '',
+      cheatSheetContent: '',
+      emergencyContacts: [],
+      radioFrequencies: [],
+      visualSignals: [],
+      safetyGuides: [],
+      faqQuestions: []
+    };
+  }
+  if (!local) return incoming!;
+  if (!incoming) return local;
+
+  const mergedContacts = mergeEntityList(local.emergencyContacts || [], incoming.emergencyContacts || []);
+  const mergedFrequencies = mergeEntityList(local.radioFrequencies || [], incoming.radioFrequencies || []);
+  const mergedSignals = mergeEntityList(local.visualSignals || [], incoming.visualSignals || []);
+  const mergedGuides = mergeEntityList(local.safetyGuides || [], incoming.safetyGuides || []);
+  const mergedQuestions = mergeEntityList(local.faqQuestions || [], incoming.faqQuestions || []);
+
+  const localTime = parseTimestamp(local.updatedAt);
+  const incTime = parseTimestamp(incoming.updatedAt);
+  const freshestUpdated = incTime >= localTime ? (incoming.updatedAt || local.updatedAt) : (local.updatedAt || incoming.updatedAt);
+
+  return {
+    id: incoming.id || local.id || 'splav86_faq_safety_main',
+    title: incoming.title || local.title,
+    subtitle: incoming.subtitle || local.subtitle,
+    warningTitle: incoming.warningTitle || local.warningTitle,
+    warningText: incoming.warningText || local.warningText,
+    sosTemplateText: incoming.sosTemplateText || local.sosTemplateText,
+    cheatSheetContent: incoming.cheatSheetContent || local.cheatSheetContent,
+    emergencyContacts: mergedContacts,
+    radioFrequencies: mergedFrequencies,
+    visualSignals: mergedSignals,
+    safetyGuides: mergedGuides,
+    faqQuestions: mergedQuestions,
+    updatedAt: freshestUpdated || new Date().toISOString(),
+    updatedBy: incoming.updatedBy || local.updatedBy,
+    isDeleted: incoming.isDeleted ?? local.isDeleted
+  };
+}
+

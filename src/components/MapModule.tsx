@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { parseGpxFile, generateGpxString, ParsedGpxResult } from '../utils/gpxParser';
+import { cleanRiverTrackCoordinates } from '../utils/geoUtils';
 
 type MapLayerType = 'satellite' | 'osm';
 
@@ -45,14 +46,9 @@ interface MapModuleProps {
   onToggleFavorite?: (routeId: string) => void;
 }
 
-// Helper to safely extract [lat, lng] array from any coordinate representation
+// Helper to safely extract and sanitize [lat, lng] array from any coordinate representation
 const normalizeRouteCoordinates = (coords: any): [number, number][] => {
-  if (!Array.isArray(coords)) return [];
-  return coords.map((c) => {
-    if (Array.isArray(c) && c.length >= 2) return [Number(c[0]), Number(c[1])] as [number, number];
-    if (c && typeof c === 'object' && 'lat' in c && 'lng' in c) return [Number(c.lat), Number(c.lng)] as [number, number];
-    return null;
-  }).filter((c): c is [number, number] => c !== null && !isNaN(c[0]) && !isNaN(c[1]));
+  return cleanRiverTrackCoordinates(coords);
 };
 
 export const MapModule: React.FC<MapModuleProps> = ({

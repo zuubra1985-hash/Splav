@@ -1,6 +1,6 @@
 /**
  * Wikipedia API integration utility for automatic river data extraction.
- * Uses official Russian Wikipedia REST & MediaWiki APIs with CORS support.
+ * Uses local proxy /api/wikipedia/river with official Russian Wikipedia MediaWiki APIs fallback.
  */
 
 export interface WikipediaRiverInfo {
@@ -34,13 +34,26 @@ export function cleanRiverName(input: string): string {
 }
 
 /**
- * Search Wikipedia for river articles and return the most relevant one.
+ * Search Wikipedia for river articles and return structured river information.
  */
 export async function fetchWikipediaRiverData(rawRiverName: string): Promise<WikipediaRiverInfo | null> {
   const cleanName = cleanRiverName(rawRiverName);
   if (!cleanName || cleanName.length < 2) return null;
 
-  // Candidates list in order of specificity
+  // 1. Primary Strategy: Try our server-side Wikipedia proxy
+  try {
+    const serverRes = await fetch(`/api/wikipedia/river?query=${encodeURIComponent(cleanName)}`);
+    if (serverRes.ok) {
+      const data = await serverRes.json();
+      if (data && data.found && data.extract) {
+        return data;
+      }
+    }
+  } catch (serverErr) {
+    console.warn('Server wikipedia proxy unreachable, falling back to direct MediaWiki API:', serverErr);
+  }
+
+  // 2. Client-side Fallback Strategy: Direct MediaWiki Action API with origin=* (No CORS preflight problems)
   const candidates = [
     `${cleanName} (река)`,
     `${cleanName} (приток Оби)`,
@@ -48,52 +61,57 @@ export async function fetchWikipediaRiverData(rawRiverName: string): Promise<Wik
     `${cleanName} (приток Ваха)`,
     `${cleanName} (приток Таза)`,
     `${cleanName} (приток Пура)`,
+    `${cleanName} (приток Казыма)`,
+    `${cleanName} (приток Северной Сосьвы)`,
     cleanName,
     `Река ${cleanName}`
   ];
 
-  // 1. Try direct summary fetch for candidates
   for (const candidate of candidates) {
     try {
-      const summaryUrl = `https://ru.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(candidate)}`;
-      const res = await fetch(summaryUrl, {
-        headers: {
-          'Accept': 'application/json'
-        }
-      });
-
+      const mwUrl = `https://ru.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(candidate)}&prop=extracts|pageimages|coordinates|info&inprop=url&explaintext=1&exintro=1&piprop=thumbnail|original&pithumbsize=800&format=json&origin=*`;
+      const res = await fetch(mwUrl);
       if (res.ok) {
-        const data = await res.json();
-        // Ensure it's not a disambiguation page and has extract
-        if (data.type === 'standard' && data.extract) {
-          return parseWikipediaSummary(data);
+        const mwData = await res.json();
+        const pages = mwData.query?.pages || {};
+        const pageId = Object.keys(pages)[0];
+        if (pageId && pageId !== '-1') {
+          const page = pages[pageId];
+          if (page.extract && page.extract.length > 25 && !page.extract.includes('может означать:')) {
+            return parseMediaWikiPage(page);
+          }
         }
       }
     } catch {
-      // Continue to next candidate
+      // Continue next candidate
     }
   }
 
-  // 2. Fallback: Search Wikipedia API with keywords
+  // 3. Fallback: Search Wikipedia API for closest hit
   try {
-    const searchUrl = `https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanName + ' река')}&utf8=&format=json&origin=*`;
+    const searchUrl = `https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanName + ' река')}&srlimit=4&utf8=&format=json&origin=*`;
     const searchRes = await fetch(searchUrl);
     if (searchRes.ok) {
       const searchData = await searchRes.json();
-      const firstHit = searchData.query?.search?.[0];
-      if (firstHit && firstHit.title) {
-        const summaryUrl = `https://ru.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(firstHit.title)}`;
-        const res = await fetch(summaryUrl);
+      const hits = searchData.query?.search || [];
+      for (const hit of hits) {
+        const mwUrl = `https://ru.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(hit.title)}&prop=extracts|pageimages|coordinates|info&inprop=url&explaintext=1&exintro=1&piprop=thumbnail|original&pithumbsize=800&format=json&origin=*`;
+        const res = await fetch(mwUrl);
         if (res.ok) {
-          const data = await res.json();
-          if (data.extract) {
-            return parseWikipediaSummary(data);
+          const mwData = await res.json();
+          const pages = mwData.query?.pages || {};
+          const pageId = Object.keys(pages)[0];
+          if (pageId && pageId !== '-1') {
+            const page = pages[pageId];
+            if (page.extract && page.extract.length > 25 && !page.extract.includes('может означать:')) {
+              return parseMediaWikiPage(page);
+            }
           }
         }
       }
     }
   } catch (err) {
-    console.warn('Wikipedia search error:', err);
+    console.warn('MediaWiki search error:', err);
   }
 
   return null;
@@ -106,6 +124,16 @@ export async function searchWikipediaSuggestions(query: string): Promise<Array<{
   const clean = cleanRiverName(query);
   if (!clean || clean.length < 2) return [];
 
+  // Try server proxy first
+  try {
+    const res = await fetch(`/api/wikipedia/suggestions?query=${encodeURIComponent(clean)}`);
+    if (res.ok) {
+      const list = await res.json();
+      if (Array.isArray(list) && list.length > 0) return list;
+    }
+  } catch {}
+
+  // Direct MediaWiki fallback
   try {
     const searchUrl = `https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(clean + ' река')}&srlimit=5&utf8=&format=json&origin=*`;
     const res = await fetch(searchUrl);
@@ -117,25 +145,25 @@ export async function searchWikipediaSuggestions(query: string): Promise<Array<{
       }));
     }
   } catch (e) {
-    console.warn(e);
+    console.warn('Direct Wikipedia suggestions error:', e);
   }
   return [];
 }
 
-function parseWikipediaSummary(data: any): WikipediaRiverInfo {
-  const extract: string = data.extract || '';
-  
-  // Try to parse length from text (e.g. "длина — 185 км", "длина реки — 340 км", "протяжённость 210 км")
+function parseMediaWikiPage(page: any): WikipediaRiverInfo {
+  const extract: string = page.extract || '';
+
+  // Extract river length
   let lengthKm: number | undefined;
   const lengthMatch = extract.match(/(?:длина|длиной|протяжённость(?:ю)?)\s*(?:реки)?\s*(?:составляет)?\s*—?\s*(\d+[\d\s,.]*)\s*км/i);
   if (lengthMatch && lengthMatch[1]) {
     const parsed = parseFloat(lengthMatch[1].replace(/\s/g, '').replace(',', '.'));
-    if (!isNaN(parsed) && parsed > 5 && parsed < 6000) {
+    if (!isNaN(parsed) && parsed > 3 && parsed < 6000) {
       lengthKm = Math.round(parsed);
     }
   }
 
-  // Try to parse basin
+  // Extract basin
   let riverBasin: string | undefined;
   if (/бассейн(?:а|е)?\s+(?:реки\s+)?Оби/i.test(extract)) {
     riverBasin = 'Бассейн реки Обь';
@@ -147,27 +175,39 @@ function parseWikipediaSummary(data: any): WikipediaRiverInfo {
     riverBasin = 'Бассейн реки Пур';
   } else if (/Карск(?:ое|ого)\s+мор/i.test(extract)) {
     riverBasin = 'Бассейн Карского моря';
+  } else if (/бассейн(?:а|е)?\s+(?:реки\s+)?Енисе/i.test(extract)) {
+    riverBasin = 'Бассейн реки Енисей';
   }
 
   let coordinates: { lat: number; lng: number } | undefined;
-  if (data.coordinates && typeof data.coordinates.lat === 'number' && typeof data.coordinates.lon === 'number') {
-    coordinates = {
-      lat: Number(data.coordinates.lat.toFixed(5)),
-      lng: Number(data.coordinates.lon.toFixed(5))
-    };
+  if (page.coordinates && Array.isArray(page.coordinates) && page.coordinates[0]) {
+    const c = page.coordinates[0];
+    if (typeof c.lat === 'number' && typeof c.lon === 'number') {
+      coordinates = {
+        lat: Number(c.lat.toFixed(5)),
+        lng: Number(c.lon.toFixed(5))
+      };
+    }
   }
+
+  const title = page.title || '';
+  const displayTitle = title.replace(/\s*\([^)]*\)/g, '');
+  const pageUrl = page.fullurl || `https://ru.wikipedia.org/wiki/${encodeURIComponent(title)}`;
+  const thumbnailUrl = page.thumbnail?.source;
+  const originalImageUrl = page.original?.source || thumbnailUrl;
 
   return {
     found: true,
-    title: data.title,
-    displayTitle: data.displaytitle ? data.displaytitle.replace(/<[^>]*>?/gm, '') : data.title,
-    extract: extract,
-    description: data.description || '',
-    pageUrl: data.content_urls?.desktop?.page || `https://ru.wikipedia.org/wiki/${encodeURIComponent(data.title)}`,
-    thumbnailUrl: data.thumbnail?.source,
-    originalImageUrl: data.originalimage?.source,
+    title,
+    displayTitle,
+    extract,
+    description: `Река в бассейне ${riverBasin || 'Западной Сибири'}`,
+    pageUrl,
+    thumbnailUrl,
+    originalImageUrl,
     lengthKm,
     riverBasin,
     coordinates
   };
 }
+

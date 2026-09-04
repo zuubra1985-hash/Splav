@@ -111,6 +111,94 @@ export function generateSmoothSpline(points: [number, number][], numSegments: nu
 }
 
 /**
+ * Calculates geodesic distance between two points in kilometers
+ */
+export function getDistanceBetweenPointsKm(p1: [number, number], p2: [number, number]): number {
+  const lat1 = p1[0] * (Math.PI / 180);
+  const lon1 = p1[1] * (Math.PI / 180);
+  const lat2 = p2[0] * (Math.PI / 180);
+  const lon2 = p2[1] * (Math.PI / 180);
+  const dLat = lat2 - lat1;
+  const dLon = lon2 - lon1;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1) * Math.cos(lat2) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return 6371 * c;
+}
+
+/**
+ * Sanitizes river track coordinates:
+ * 1. Normalizes varied formats ([lat, lng] or {lat, lng})
+ * 2. Removes consecutive identical duplicates
+ * 3. Strips artificial loop-closure straight lines (when the last point jumps back to the start point)
+ * 4. Ensures only genuine loaded river points and track are preserved as-is.
+ */
+export function cleanRiverTrackCoordinates(rawCoords: any): [number, number][] {
+  if (!Array.isArray(rawCoords) || rawCoords.length === 0) return [];
+
+  // 1. Normalize points
+  const normalized: [number, number][] = [];
+  for (const c of rawCoords) {
+    if (Array.isArray(c) && c.length >= 2) {
+      const lat = Number(c[0]);
+      const lng = Number(c[1]);
+      if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+        normalized.push([lat, lng]);
+      }
+    } else if (c && typeof c === 'object' && 'lat' in c && 'lng' in c) {
+      const lat = Number(c.lat);
+      const lng = Number(c.lng);
+      if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+        normalized.push([lat, lng]);
+      }
+    }
+  }
+
+  if (normalized.length < 2) return normalized;
+
+  // 2. Remove consecutive micro-duplicate points (< 1 meter)
+  const deduped: [number, number][] = [normalized[0]];
+  for (let i = 1; i < normalized.length; i++) {
+    const prev = deduped[deduped.length - 1];
+    const curr = normalized[i];
+    if (Math.abs(prev[0] - curr[0]) > 0.000005 || Math.abs(prev[1] - curr[1]) > 0.000005) {
+      deduped.push(curr);
+    }
+  }
+
+  if (deduped.length < 4) return deduped;
+
+  // 3. Detect and remove artificial straight line loop closures back to the start
+  // In many GPX/KML files, software appends the first point to the end to close a polygon or route,
+  // creating a long straight line across land from the finish point back to the start point.
+  let coords = [...deduped];
+
+  while (coords.length >= 4) {
+    const n = coords.length;
+    const startPt = coords[0];
+    const lastPt = coords[n - 1];
+    const prevPt = coords[n - 2];
+
+    const distLastToStart = getDistanceBetweenPointsKm(lastPt, startPt);
+    const stepFromPrev = getDistanceBetweenPointsKm(prevPt, lastPt);
+    const prevDistToStart = getDistanceBetweenPointsKm(prevPt, startPt);
+
+    // If the step from second-to-last to last point is a huge leap (> 2.5 km)
+    // AND the last point is right back at start (< 1.5 km from start),
+    // while the previous point was far downriver (> 4 km from start),
+    // this last point is an artificial straight return line!
+    if (distLastToStart < 1.5 && stepFromPrev > 2.5 && prevDistToStart > 4.0) {
+      coords.pop();
+    } else {
+      break;
+    }
+  }
+
+  return coords;
+}
+
+/**
  * Calculates accurate geodesic path distance along all river bends
  */
 export function calculateRiverTrackDistanceKm(coords: [number, number][]): number {

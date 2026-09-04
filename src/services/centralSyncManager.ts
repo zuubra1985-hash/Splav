@@ -342,6 +342,40 @@ class CentralSyncManagerClass {
     await FaqSyncService.saveFaq(prepared);
     this.enqueueSqlTask('faq', 'save', prepared.id || 'splav86_faq_config_main', prepared);
   }
+
+  // --- BATCH HELPERS FOR BULK SYNC & BACKUP RESTORATION ---
+
+  public async saveRoutes(routes: RiverRoute[]): Promise<void> {
+    for (const r of routes) {
+      await this.saveRoute(r).catch(console.warn);
+    }
+  }
+
+  public async saveTrips(trips: CompanionTrip[]): Promise<void> {
+    for (const t of trips) {
+      await this.saveTrip(t).catch(console.warn);
+    }
+  }
+
+  public async saveArticles(articles: ArticleReport[]): Promise<void> {
+    for (const a of articles) {
+      await this.saveArticle(a).catch(console.warn);
+    }
+  }
+
+  public async saveUsers(users: AppUser[]): Promise<void> {
+    for (const u of users) {
+      await this.saveUser(u).catch(console.warn);
+    }
+  }
+
+  public async saveNotesConfig(config: TravelNotesConfig): Promise<void> {
+    await this.saveTravelNotes(config);
+  }
+
+  public async saveFaqData(config: FaqDataConfig): Promise<void> {
+    await this.saveFaq(config);
+  }
 }
 
 export const CentralSyncManager = new CentralSyncManagerClass();

@@ -1,5 +1,5 @@
 import { RiverRoute, RoutePOI, RouteCoordinate } from '../types';
-import { calculateRiverTrackDistanceKm } from './geoUtils';
+import { calculateRiverTrackDistanceKm, cleanRiverTrackCoordinates } from './geoUtils';
 
 export interface ParsedGpxResult {
   name: string;
@@ -16,7 +16,8 @@ export interface ParsedGpxResult {
 }
 
 /**
- * Parses GPX 1.0/1.1 or KML string into structured river track data
+ * Parses GPX 1.0/1.1 or KML string into structured river track data.
+ * Guarantees that track is rendered as-is and never loops or connects start/finish with a straight line.
  */
 export function parseGpxFile(xmlText: string, fallbackFileName?: string): ParsedGpxResult {
   const parser = new DOMParser();
@@ -45,64 +46,56 @@ export function parseGpxFile(xmlText: string, fallbackFileName?: string): Parsed
     description = descNode.textContent.trim();
   }
 
-  // 2. Extract Trackpoints & Routepoints
-  const coordinates: [number, number][] = [];
-  const elevationPoints: { lat: number; lng: number; elev: number; distKm: number }[] = [];
+  // 2. Extract Trackpoints & Routepoints without mixing them!
+  // Priority: 1) <trkpt> (actual GPS track points), 2) <rtept> (route plan points), 3) KML <coordinates>
+  const rawCoords: [number, number][] = [];
+  const rawElevs: number[] = [];
 
-  const trkptNodes = xmlDoc.querySelectorAll('trkpt, rtept');
-  
-  let currentDistKm = 0;
+  let ptNodes = xmlDoc.querySelectorAll('trkpt');
+  if (ptNodes.length === 0) {
+    ptNodes = xmlDoc.querySelectorAll('rtept');
+  }
+
   let minElev = 99999;
   let maxElev = -99999;
   let elevGain = 0;
   let prevElev: number | null = null;
 
-  trkptNodes.forEach((node, idx) => {
-    const latStr = node.getAttribute('lat');
-    const lonStr = node.getAttribute('lon');
+  if (ptNodes.length > 0) {
+    ptNodes.forEach((node) => {
+      const latStr = node.getAttribute('lat');
+      const lonStr = node.getAttribute('lon');
 
-    if (latStr && lonStr) {
-      const lat = parseFloat(latStr);
-      const lng = parseFloat(lonStr);
+      if (latStr && lonStr) {
+        const lat = parseFloat(latStr);
+        const lng = parseFloat(lonStr);
 
-      if (!isNaN(lat) && !isNaN(lng)) {
-        coordinates.push([lat, lng]);
+        if (!isNaN(lat) && !isNaN(lng)) {
+          rawCoords.push([lat, lng]);
 
-        // Elevation
-        const eleNode = node.querySelector('ele');
-        let elev = 0;
-        if (eleNode && eleNode.textContent) {
-          elev = parseFloat(eleNode.textContent);
-          if (!isNaN(elev)) {
-            if (elev < minElev) minElev = elev;
-            if (elev > maxElev) maxElev = elev;
+          // Elevation
+          const eleNode = node.querySelector('ele');
+          let elev = 0;
+          if (eleNode && eleNode.textContent) {
+            elev = parseFloat(eleNode.textContent);
+            if (!isNaN(elev)) {
+              if (elev < minElev) minElev = elev;
+              if (elev > maxElev) maxElev = elev;
 
-            if (prevElev !== null && elev > prevElev) {
-              elevGain += (elev - prevElev);
+              if (prevElev !== null && elev > prevElev) {
+                elevGain += (elev - prevElev);
+              }
+              prevElev = elev;
             }
-            prevElev = elev;
           }
+          rawElevs.push(isNaN(elev) ? 0 : Math.round(elev));
         }
-
-        // Distance from start
-        if (coordinates.length > 1) {
-          const prevCoord = coordinates[coordinates.length - 2];
-          const legKm = calculateRiverTrackDistanceKm([prevCoord, [lat, lng]]);
-          currentDistKm += legKm;
-        }
-
-        elevationPoints.push({
-          lat,
-          lng,
-          elev: Math.round(elev),
-          distKm: Math.round(currentDistKm * 10) / 10
-        });
       }
-    }
-  });
+    });
+  }
 
-  // Fallback if no trkpt found: try KML <coordinates> tag
-  if (coordinates.length === 0) {
+  // Fallback if no trkpt/rtept found: try KML <coordinates> tags
+  if (rawCoords.length === 0) {
     const kmlCoords = xmlDoc.querySelectorAll('coordinates');
     kmlCoords.forEach((node) => {
       if (node.textContent) {
@@ -114,13 +107,8 @@ export function parseGpxFile(xmlText: string, fallbackFileName?: string): Parsed
             const lat = parseFloat(parts[1]);
             const elev = parts.length > 2 ? parseFloat(parts[2]) : 0;
             if (!isNaN(lat) && !isNaN(lng)) {
-              coordinates.push([lat, lng]);
-              elevationPoints.push({
-                lat,
-                lng,
-                elev: isNaN(elev) ? 0 : elev,
-                distKm: 0
-              });
+              rawCoords.push([lat, lng]);
+              rawElevs.push(isNaN(elev) ? 0 : Math.round(elev));
             }
           }
         });
@@ -128,8 +116,32 @@ export function parseGpxFile(xmlText: string, fallbackFileName?: string): Parsed
     });
   }
 
+  // Clean coordinates: remove duplicate points and strip artificial loop closures back to start
+  const coordinates = cleanRiverTrackCoordinates(rawCoords);
+
   if (coordinates.length < 2) {
     throw new Error('В GPX файле не обнаружено точек трека (<trkpt> или <rtept>).');
+  }
+
+  // Build elevation points and cumulative distance on cleaned track
+  const elevationPoints: { lat: number; lng: number; elev: number; distKm: number }[] = [];
+  let currentDistKm = 0;
+
+  for (let i = 0; i < coordinates.length; i++) {
+    const pt = coordinates[i];
+    if (i > 0) {
+      const prevCoord = coordinates[i - 1];
+      const legKm = calculateRiverTrackDistanceKm([prevCoord, pt]);
+      currentDistKm += legKm;
+    }
+
+    const elev = rawElevs[i] || 0;
+    elevationPoints.push({
+      lat: pt[0],
+      lng: pt[1],
+      elev,
+      distKm: Math.round(currentDistKm * 10) / 10
+    });
   }
 
   const totalDistanceKm = calculateRiverTrackDistanceKm(coordinates);

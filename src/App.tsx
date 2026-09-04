@@ -35,6 +35,7 @@ import {
   mergeTravelNotesConfigs,
   mergeArticles,
   mergeUsers,
+  deduplicateUsers,
   filterActiveEntities,
   parseTimestamp
 } from './utils/syncMerge';
@@ -187,31 +188,25 @@ export default function App() {
       const deletedKeys = getDeletedUserKeys();
       const stored = localStorage.getItem('splav86_users');
       const list: AppUser[] = stored ? JSON.parse(stored) : INITIAL_USERS;
-      const map = new Map<string, AppUser>();
+      const deduplicated = deduplicateUsers(list);
 
-      list.forEach((u) => {
+      return deduplicated.filter((u) => {
         const emailKey = (u.email || '').trim().toLowerCase();
         const idKey = (u.id || '').trim().toLowerCase();
         const tgClean = (u.telegram || '').trim().toLowerCase().replace('@', '');
         const tgIdKey = u.telegramId ? String(u.telegramId).trim().toLowerCase() : '';
 
-        if (!emailKey && !idKey) return;
+        if (!emailKey && !idKey) return false;
         if (
           deletedKeys.has(emailKey) ||
           deletedKeys.has(idKey) ||
           (tgClean && deletedKeys.has(tgClean)) ||
           (tgIdKey && deletedKeys.has(tgIdKey))
         ) {
-          return;
+          return false;
         }
-
-        if (emailKey) {
-          map.set(emailKey, u);
-        } else {
-          map.set(idKey, u);
-        }
+        return true;
       });
-      return Array.from(map.values());
     } catch {
       return INITIAL_USERS;
     }
@@ -747,20 +742,12 @@ export default function App() {
     };
     const normEmail = (userWithMeta.email || '').trim().toLowerCase();
     setRegisteredUsers((prev) => {
-      const existsIndex = prev.findIndex(
-        (u) => u.id === userWithMeta.id || (normEmail && (u.email || '').trim().toLowerCase() === normEmail)
-      );
-      let updated: AppUser[];
-      if (existsIndex >= 0) {
-        updated = [...prev];
-        updated[existsIndex] = { ...updated[existsIndex], ...userWithMeta };
-      } else {
-        updated = [userWithMeta, ...prev];
-      }
+      const updated = deduplicateUsers([userWithMeta, ...prev]);
+      const active = filterActiveEntities(updated);
       try {
-        localStorage.setItem('splav86_users', JSON.stringify(filterActiveEntities(updated)));
+        localStorage.setItem('splav86_users', JSON.stringify(active));
       } catch (e) {}
-      return filterActiveEntities(updated);
+      return active;
     });
 
     CentralSyncManager.saveUser(userWithMeta).catch((err) => {
@@ -788,12 +775,13 @@ export default function App() {
         }
         return u;
       });
+      const active = filterActiveEntities(deduplicateUsers(updated));
       try {
-        localStorage.setItem('splav86_users', JSON.stringify(filterActiveEntities(updated)));
+        localStorage.setItem('splav86_users', JSON.stringify(active));
       } catch (e) {
         console.warn(e);
       }
-      return filterActiveEntities(updated);
+      return active;
     });
 
     if (currentUser && (currentUser.id === userId || (currentUser.email && registeredUsers.find(u => u.id === userId)?.email?.toLowerCase() === currentUser.email.toLowerCase()))) {
@@ -832,10 +820,10 @@ export default function App() {
     const updated = registeredUsers.filter(
       (u) => u.id !== userId && (!targetEmail || (u.email || '').trim().toLowerCase() !== targetEmail)
     );
-    setRegisteredUsers(updated);
+    setRegisteredUsers(deduplicateUsers(updated));
 
     try {
-      localStorage.setItem('splav86_users', JSON.stringify(updated));
+      localStorage.setItem('splav86_users', JSON.stringify(deduplicateUsers(updated)));
     } catch (e) {
       console.warn('Failed to save updated users to localStorage:', e);
     }
@@ -877,13 +865,15 @@ export default function App() {
     // 1. Update in registeredUsers list (by ID and normalized Email)
     const normEmail = (userWithMeta.email || '').trim().toLowerCase();
     setRegisteredUsers((prev) =>
-      prev.map((u) => {
-        const uEmail = (u.email || '').trim().toLowerCase();
-        if (u.id === userWithMeta.id || (normEmail && uEmail === normEmail)) {
-          return { ...u, ...userWithMeta };
-        }
-        return u;
-      })
+      deduplicateUsers(
+        prev.map((u) => {
+          const uEmail = (u.email || '').trim().toLowerCase();
+          if (u.id === userWithMeta.id || (normEmail && uEmail === normEmail)) {
+            return { ...u, ...userWithMeta };
+          }
+          return u;
+        })
+      )
     );
 
     // 2. Cascade avatar and name changes to trips (organizer & applications)
@@ -1011,6 +1001,17 @@ export default function App() {
       localStorage.setItem('splav86_users', JSON.stringify(filterActiveEntities(allUsers)));
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleUpdateAllUsers = (newUsers: AppUser[]) => {
+    const deduplicated = deduplicateUsers(newUsers);
+    const active = filterActiveEntities(deduplicated);
+    setRegisteredUsers(active);
+    try {
+      localStorage.setItem('splav86_users', JSON.stringify(active));
+    } catch (e) {
+      console.warn('Failed to save users to localStorage:', e);
     }
   };
 
@@ -1609,14 +1610,25 @@ export default function App() {
               });
             }}
             onDeleteCrewReview={(reviewId) => {
-              const updated = (notesConfig.crewReviews || []).filter(r => r.id !== reviewId);
+              const nowIso = new Date().toISOString();
+              const updated = (notesConfig.crewReviews || []).map(r =>
+                r.id === reviewId ? { ...r, isDeleted: true, updatedAt: nowIso } : r
+              );
               const newConfig = { ...notesConfig, crewReviews: updated };
               setNotesConfig(newConfig);
               try {
                 localStorage.setItem('splav86_travel_notes_config_v1', JSON.stringify(newConfig));
+                const stored = localStorage.getItem('splav86_crew_reviews_v2');
+                if (stored) {
+                  const list = JSON.parse(stored);
+                  if (Array.isArray(list)) {
+                    localStorage.setItem('splav86_crew_reviews_v2', JSON.stringify(list.filter((x: any) => x.id !== reviewId)));
+                  }
+                }
               } catch (e) {
                 console.error(e);
               }
+              CentralSyncManager.saveTravelNotes(newConfig).catch(console.warn);
               TravelNotesSyncService.saveNotesConfig(newConfig).catch((err) => {
                 console.warn('Failed to sync deleted review to Firestore:', err);
               });
@@ -1731,6 +1743,7 @@ export default function App() {
               onUpdateArticles={setArticles as any}
               onUpdateNotesConfig={setNotesConfig}
               onUpdateFaqData={setFaqData}
+              onUpdateUsers={handleUpdateAllUsers}
               onUpdateUserRole={handleUpdateUserRole}
               onUpdateUser={handleUpdateCurrentUser}
               onDeleteUser={handleDeleteUser}
